@@ -27,6 +27,8 @@ const ICONS = {
   right: '<path d="M10 6 8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/>',
   vibration: '<path d="M0 15h2V9H0v6zm3 2h2V7H3v10zm19-8v6h2V9h-2zm-3 8h2V7h-2v10zM16.5 3h-9C6.67 3 6 3.67 6 4.5v15c0 .83.67 1.5 1.5 1.5h9c.83 0 1.5-.67 1.5-1.5v-15c0-.83-.67-1.5-1.5-1.5zM16 19H8V5h8v14z"/>',
   help: '<path d="M11 18h2v-2h-2v2zm1-16C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm0-14c-2.21 0-4 1.79-4 4h2c0-1.1.9-2 2-2s2 .9 2 2c0 2-3 1.75-3 5h2c0-2.25 3-2.5 3-5 0-2.21-1.79-4-4-4z"/>',
+  home: '<path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/>',
+  ruler: '<path d="M21 6H3c-1.1 0-2 .9-2 2v8c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zm0 10H3V8h2v4h2V8h2v4h2V8h2v4h2V8h2v4h2V8h2v8z"/>',
   star: '<path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/>',
   cloudDone: '<path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM10 17l-3.5-3.5 1.41-1.41L10 14.17 15.18 9l1.41 1.41L10 17z"/>',
 };
@@ -1360,6 +1362,7 @@ function finishRun() {
 }
 
 // ---------- меню, пауза ----------
+let pzSnake = null; // холст своей змейки в открытой паузе — рисуется в кадре
 // громкость на паузе: кнопка — выключить/включить, ползунок — громкость (0 — то же, что выключить)
 const volHtml = () => `<div class="vol"><button class="btn text sound" id="volMute" aria-label="Звук"></button>` +
   `<input type="range" id="volRange" min="0" max="100" step="5" aria-label="Громкость"></div>`;
@@ -1394,22 +1397,35 @@ function bindHap() {
   sw.addEventListener('change', () => { save.haptic = sw.checked; persist(); if (save.haptic) haptic('kill'); });
 }
 // на сенсорном экране — ещё настройка кнопки ускорения
-const fabBtnHtml = () => (isTouch ? `<button class="btn tonal wide fab-set" id="btnFabSet">${icon('bolt')}Кнопка ускорения</button>` : '');
+const fabBtnHtml = () => (isTouch ? `<button class="fab-set" id="btnFabSet">${icon('bolt')}<span>Кнопка ускорения</span>${icon('right')}</button>` : '');
 function bindFabBtn() { const b = $('btnFabSet'); if (b) b.addEventListener('click', startFabEdit); }
 function openMenu() {
   if (ui !== 'play' || fabEdit) return;
   if (mode === 'solo') ui = 'paused';
   menuDialog();
 }
-function menuDialog() {
-  if (mode === 'solo' && ui === 'paused') {
-    dialog('Пауза', volHtml() + hapHtml() + fabBtnHtml(), [{ label: 'В меню', kind: 'text', onClick: toHome }, { label: 'Продолжить', kind: 'filled', onClick: resume }]);
-  } else if (mode === 'net' && ui === 'play') {
-    dialog(`Комната ${net.code}`, `<p>${net.roomMode === 'team' ? 'Команда против ботов' : 'Все против всех'} · боты: ${DIFF[net.diff].label.toLowerCase()}</p>` +
-      '<p>Игра продолжается, пока открыто меню.</p>' + volHtml() + hapHtml() + fabBtnHtml(),
-    [{ label: 'Выйти', kind: 'text', onClick: leaveNet }, { label: 'Играть', kind: 'filled', onClick: closeDialog }]);
-  } else return;
+// пауза (и меню комнаты): сверху своя змейка шевелится (drawWave в кадре), длина и место; «Продолжить» — большая жёлтая,
+// настройки — карточкой, «Выйти в меню» — полноценная кнопка. Решение владельца по макетам (вариант «со змейкой»).
+function pauseHtml(note, goLabel) {
+  const rk = myRank();
+  return `<div class="pz-chips"><span class="pz-chip">${icon('ruler')}<b id="pzLen">${curLen()}</b></span>` +
+    `<span class="pz-chip gold"${rk ? '' : ' hidden'}>${icon('trophy')}<b id="pzRank">${rk ? rk.rank : ''}</b> место</span></div>` + note +
+    `<button class="btn filled pz-go" id="pzGo">${icon('play')}${goLabel}</button>` +
+    `<div class="pz-list">${volHtml()}${hapHtml()}${fabBtnHtml()}</div>` +
+    `<button class="btn pz-out" id="pzOut">${icon('home')}Выйти в меню</button>`;
+}
+function pauseDialog(title, note, goLabel, go, out) {
+  dialog(title, pauseHtml(note, goLabel), [], { cls: 'pz', top: '<canvas id="pzSnake"></canvas>' });
+  pzSnake = $('pzSnake');
+  $('pzGo').addEventListener('click', go); $('pzOut').addEventListener('click', out);
   bindVol(); bindHap(); bindFabBtn();
+}
+function menuDialog() {
+  if (mode === 'solo' && ui === 'paused') pauseDialog('Пауза', '', 'Продолжить', resume, toHome);
+  else if (mode === 'net' && ui === 'play') {
+    pauseDialog(`Комната ${net.code}`, `<p class="pz-note">${net.roomMode === 'team' ? 'Команда против ботов' : 'Все против всех'} · боты: ${DIFF[net.diff].label.toLowerCase()}. ` +
+      'Игра идёт, пока открыто меню.</p>', 'Играть', closeDialog, leaveNet);
+  }
 }
 function resume() { if (ui === 'paused') { ui = 'play'; closeDialog(); last = performance.now(); } }
 $('btnMenu').addEventListener('click', openMenu);
@@ -1441,8 +1457,11 @@ function showHome(v) {
 }
 
 // ---------- диалоги и снекбар ----------
-function dialog(title, body, actions) {
+function dialog(title, body, actions, { cls = '', top = '' } = {}) {
   endFabEdit(); // игра кончилась или выход, пока настраивал кнопку
+  pzSnake = null; // новое окно поверх паузы — её змейка и плашки ушли
+  $('dlgBox').className = `dialog ${cls}`;
+  $('dlgTop').innerHTML = top;
   $('dlgTitle').textContent = title;
   $('dlgBody').innerHTML = body;
   const box = $('dlgActions');
@@ -1604,7 +1623,7 @@ $('skinPrev').addEventListener('click', () => stepSkin(-1));
 $('skinNext').addEventListener('click', () => stepSkin(1));
 // свайп по змейке тоже листает
 let swipeX = null;
-const pv = $('preview'), pctx = pv.getContext('2d');
+const pv = $('preview');
 pv.addEventListener('pointerdown', (e) => { swipeX = e.clientX; });
 pv.addEventListener('pointerup', (e) => { if (swipeX !== null && Math.abs(e.clientX - swipeX) > 40) stepSkin(e.clientX < swipeX ? 1 : -1); swipeX = null; });
 
@@ -1627,14 +1646,15 @@ function renderHome() {
   $('best').innerHTML = v ? `${icon('trophy')}рекорд ${v}` : '';
 }
 
-// превью: змейка выбранной раскраски ползёт волной на месте
-function drawPreview() {
-  const cw = pv.clientWidth, ch = pv.clientHeight;
+// превью: змейка раскраски k ползёт волной на месте (главная — выбранная, пауза — своя)
+const drawPreview = () => drawWave(pv, viewSkin);
+function drawWave(cv, k) {
+  const cw = cv.clientWidth, ch = cv.clientHeight;
   if (!cw || !ch) return;
-  if (pv.width !== Math.round(cw * DPR) || pv.height !== Math.round(ch * DPR)) { pv.width = Math.round(cw * DPR); pv.height = Math.round(ch * DPR); }
-  const g = pctx, sk = SKINS[viewSkin], open = unlocked(sk);
+  if (cv.width !== Math.round(cw * DPR) || cv.height !== Math.round(ch * DPR)) { cv.width = Math.round(cw * DPR); cv.height = Math.round(ch * DPR); }
+  const g = cv.getContext('2d'), sk = SKINS[k], open = unlocked(sk);
   g.setTransform(1, 0, 0, 1, 0, 0);
-  g.clearRect(0, 0, pv.width, pv.height);
+  g.clearRect(0, 0, cv.width, cv.height);
   const r = Math.min(ch * 0.14, cw / 26), n = 34, sp = r * 0.62, len = n * sp;
   const x0 = cw / 2 + len / 2, cy = ch / 2;
   const pts = [];
@@ -1650,12 +1670,12 @@ function drawPreview() {
     const sc = DPR * rr / BEAD_U / (Math.hypot(dx, dy) || 1);
     dx *= sc; dy *= sc;
     g.setTransform(dx, dy, -dy, dx, DPR * q.x, DPR * q.y);
-    const sp = beadSprite(viewSkin, segColor(viewSkin, i), beadVar(viewSkin, i));
+    const sp = beadSprite(k, segColor(k, i), beadVar(k, i));
     g.drawImage(sp, -sp.e, -sp.e);
   }
   g.setTransform(DPR, 0, 0, DPR, 0, 0);
   const h = pts[0], a = Math.atan2(h.y - pts[1].y, h.x - pts[1].x);
-  drawHead(g, viewSkin, h.x, h.y, a, a, r);
+  drawHead(g, k, h.x, h.y, a, a, r);
   g.globalAlpha = 1;
 }
 
@@ -2052,16 +2072,19 @@ function draw() {
 }
 
 let hudT = 0, hudBottom = 100, hudBoxes = [];
+function curLen() {
+  if (mode === 'solo' && me) return Math.floor(me.alive ? me.mass : me.maxMass);
+  if (mode === 'net') return Math.floor(me ? me.mass : (net.deadInfo ? net.deadInfo.mass : 0));
+  return 0;
+}
 function updateHud(dt) {
   hudT -= dt;
   if (hudT > 0) return;
   hudT = 0.25;
   runTick();
-  let len = 0;
-  if (mode === 'solo' && me) len = Math.floor(me.alive ? me.mass : me.maxMass);
-  else if (mode === 'net') len = Math.floor(me ? me.mass : (net.deadInfo ? net.deadInfo.mass : 0));
   const rk = myRank();
-  $('score').innerHTML = `<b>${len}</b>${rk ? `<small>#${rk.rank}</small>` : ''}`;
+  $('score').innerHTML = `<b>${curLen()}</b>${rk ? `<small>#${rk.rank}</small>` : ''}`;
+  if (pzSnake) { $('pzLen').textContent = curLen(); $('pzRank').textContent = rk ? rk.rank : ''; $('pzRank').parentNode.hidden = !rk; } // меню комнаты: игра идёт
 
   // топ-3 и своя строка: в одиночной — весь мир, в комнате — с сервера
   let rows;
@@ -2077,7 +2100,6 @@ function updateHud(dt) {
   let html = rows.slice(0, 3).map(row).join('');
   if (rk && rk.rank > 3 && me) html += `${rk.rank > 4 ? '<div class="gap">···</div>' : ''}${row({ id: myId, name: me.name, mass: me.mass }, rk.rank - 1)}`;
   $('board').innerHTML = html;
-  // стрелка лидера сверху не заходит под счёт и таблицу (в установленной игре они ниже из-за статус-бара)
   // что сверху занято (счёт, таблица, комната) — стрелка лидера обходит только эти места, между ними стоит у края
   hudBoxes = [$('board'), document.querySelector('.hud-tl'), $('roomBox')].map((e) => e.getBoundingClientRect()).filter((b) => b.width && b.top < H / 2);
   hudBottom = Math.max(...hudBoxes.map((b) => b.bottom), 0);
@@ -2136,6 +2158,7 @@ function frame(now) {
     if (mode) updateHud(dt);
     else if (!$('home').hidden && $('dlg').hidden) drawPreview();
   } else if (redraw && mode) draw(); // на паузе картинка стоит — после смены размера холста нарисовать заново
+  if (pzSnake && pzSnake.isConnected && !$('dlg').hidden) drawWave(pzSnake, save.skin); else pzSnake = null; // своя змейка в паузе
   redraw = false;
   checkSize(now);
   requestAnimationFrame(frame);
