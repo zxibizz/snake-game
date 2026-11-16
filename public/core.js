@@ -365,7 +365,7 @@ export class World {
     f.gT = rand(1, 2);
     if (f.n < FLY_MAX) {
       const c0 = this.cellOf(f.x, f.y), cx0 = c0 % GRID_N, cy0 = (c0 / GRID_N) | 0, cr = 4;
-      let best = 0;
+      let best = 0, bc = -1;
       for (let cy = Math.max(0, cy0 - cr); cy <= Math.min(GRID_N - 1, cy0 + cr); cy++) {
         for (let cx = Math.max(0, cx0 - cr); cx <= Math.min(GRID_N - 1, cx0 + cr); cx++) {
           let v = 0, sx = 0, sy = 0;
@@ -376,10 +376,20 @@ export class World {
           }
           if (!v) continue;
           const x = sx / v, y = sy / v, sc = v / (Math.hypot(x - f.x, y - f.y) + 80);
-          if (sc > best) { best = sc; f.gx = x; f.gy = y; }
+          if (sc > best) { best = sc; bc = cy * GRID_N + cx; }
         }
       }
-      if (best > 0) return;
+      // в лучшей клетке — к ближайшей крошке: к середине кучки нельзя, там бабочка зависает между крошками
+      if (best > 0) {
+        let bd = Infinity;
+        for (let i = this.foodHead[bc]; i >= 0; i = this.foodNext[i]) {
+          const q = this.foods[i];
+          if (!q || q.dead) continue;
+          const d2 = (q.x - f.x) ** 2 + (q.y - f.y) ** 2;
+          if (d2 < bd) { bd = d2; f.gx = q.x; f.gy = q.y; }
+        }
+        return;
+      }
     }
     const a = rand(0, TAU), d = rand(200, 700);
     f.gx = f.x + Math.cos(a) * d; f.gy = f.y + Math.sin(a) * d;
