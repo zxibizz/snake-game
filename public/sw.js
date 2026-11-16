@@ -1,11 +1,12 @@
 // Офлайн: все файлы игры кладутся в кэш при установке и дальше отдаются из него.
 // При изменении любого файла увеличить VERSION — иначе устройства останутся на старой версии.
-const VERSION = '1';
+const VERSION = '2';
 const CACHE = `zmeigrad-v${VERSION}`;
 const ASSETS = [
   './',
   'index.html',
-  'game.js',
+  'client.js',
+  'core.js',
   'manifest.webmanifest',
   'icons/icon-192.png',
   'icons/icon-512.png',
@@ -26,7 +27,8 @@ self.addEventListener('activate', (e) => {
 
 self.addEventListener('fetch', (e) => {
   const req = e.request;
-  if (req.method !== 'GET' || new URL(req.url).origin !== location.origin) return;
+  const url = new URL(req.url);
+  if (req.method !== 'GET' || url.origin !== location.origin || url.pathname.endsWith('/ws') || url.pathname.endsWith('/healthz')) return;
   e.respondWith(
     caches.open(CACHE).then(async (c) => {
       const hit = await c.match(req, { ignoreSearch: true });
