@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Змейград</title>
+<meta name="theme-color" content="#0d1020">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Змейград">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<style>
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%;overflow:hidden;background:#0d1020;color:#fff;
+  font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  -webkit-user-select:none;user-select:none;-webkit-touch-callout:none;overscroll-behavior:none}
+body{position:fixed;inset:0}
+#c{position:fixed;inset:0;width:100%;height:100%;display:block;touch-action:none}
+.hidden{display:none!important}
+button{font:inherit;cursor:pointer}
+
+#hud{position:fixed;inset:0;pointer-events:none}
+.tl{position:absolute;top:calc(10px + env(safe-area-inset-top));left:calc(10px + env(safe-area-inset-left));
+  display:flex;gap:8px;align-items:center}
+.hbtn{pointer-events:auto;width:48px;height:48px;border-radius:14px;border:0;background:rgba(255,255,255,.15);
+  color:#fff;font-size:22px;display:flex;align-items:center;justify-content:center}
+#score{font-weight:800;font-size:18px;text-shadow:0 1px 4px #000;margin-left:6px;line-height:1.25}
+#score small{display:block;font-weight:600;font-size:13px;opacity:.85}
+#board{position:absolute;top:calc(10px + env(safe-area-inset-top));right:calc(10px + env(safe-area-inset-right));
+  background:rgba(0,0,0,.35);border-radius:12px;padding:8px 10px;font-size:13px;min-width:160px}
+#board .row{display:flex;justify-content:space-between;gap:12px;white-space:nowrap}
+#board .me{color:#fde047;font-weight:800}
+#board .sep{border-top:1px solid rgba(255,255,255,.2);margin:3px 0}
+#mini{position:absolute;left:calc(12px + env(safe-area-inset-left));bottom:calc(12px + env(safe-area-inset-bottom));
+  width:110px;height:110px;opacity:.9}
+#btnBoost{pointer-events:auto;position:absolute;right:calc(26px + env(safe-area-inset-right));
+  bottom:calc(26px + env(safe-area-inset-bottom));width:100px;height:100px;border-radius:50%;font-size:42px;
+  background:rgba(250,204,21,.25);border:3px solid rgba(250,204,21,.75);color:#fff;touch-action:none}
+#btnBoost.on{background:rgba(250,204,21,.65);transform:scale(.95)}
+#toast{position:absolute;top:calc(72px + env(safe-area-inset-top));left:50%;transform:translateX(-50%);
+  background:rgba(0,0,0,.55);padding:8px 16px;border-radius:999px;font-weight:700;font-size:16px;
+  opacity:0;transition:opacity .3s;white-space:nowrap}
+#toast.show{opacity:1}
+
+.screen{position:fixed;inset:0;display:flex;padding:16px;background:rgba(5,8,20,.5);overflow:auto;
+  touch-action:pan-y;-webkit-overflow-scrolling:touch}
+.panel{margin:auto;background:rgba(20,26,52,.93);border:1px solid rgba(255,255,255,.12);border-radius:24px;
+  padding:20px 22px;max-width:520px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.5)}
+h1{margin:0;font-size:42px;text-align:center;letter-spacing:.5px}
+h2{margin:0 0 10px;font-size:32px;text-align:center}
+.sub{margin:4px 0 14px;text-align:center;opacity:.85}
+.field{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:8px 0}
+.field label{opacity:.85;min-width:56px}
+#name{flex:1;min-width:120px;font:inherit;font-size:18px;padding:8px 12px;border-radius:12px;
+  border:1px solid rgba(255,255,255,.2);background:rgba(255,255,255,.08);color:#fff;-webkit-user-select:text;user-select:text}
+#skins{display:flex;gap:8px;flex-wrap:wrap}
+.skin{width:34px;height:34px;border-radius:50%;border:3px solid transparent;padding:0}
+.skin.sel{border-color:#fff;box-shadow:0 0 0 2px rgba(255,255,255,.35)}
+.mode{display:flex;flex-direction:column;align-items:flex-start;width:100%;padding:13px 16px;border-radius:16px;
+  border:0;color:#fff;font-size:21px;margin-top:10px;text-align:left;box-shadow:0 4px 0 rgba(0,0,0,.25)}
+.mode:active{transform:translateY(2px);box-shadow:0 2px 0 rgba(0,0,0,.25)}
+.mode b{font-weight:800}
+.mode span{font-size:14px;opacity:.92;margin-top:2px}
+.mode i{font-style:normal;font-size:13px;opacity:.85;margin-top:3px}
+.mode.easy{background:linear-gradient(135deg,#22c55e,#15803d)}
+.mode.medium{background:linear-gradient(135deg,#3b82f6,#1d4ed8)}
+.mode.hard{background:linear-gradient(135deg,#ef4444,#b91c1c)}
+.help{margin-top:14px;font-size:14px;opacity:.8;line-height:1.45}
+.status{margin-top:10px;font-size:13px;line-height:1.4;padding:8px 10px;border-radius:10px;background:rgba(255,255,255,.06)}
+.status.ok{background:rgba(34,197,94,.18)}
+.btns{display:flex;gap:10px;margin-top:16px;flex-wrap:wrap}
+.btn{flex:1;min-width:140px;padding:14px;border-radius:14px;border:0;font-size:19px;font-weight:800;color:#fff;
+  background:rgba(255,255,255,.14)}
+.btn.main{background:linear-gradient(135deg,#22c55e,#15803d)}
+.stats{text-align:center;font-size:18px;line-height:1.7}
+.stats b{font-size:22px}
+.record{color:#fde047;font-weight:800;text-align:center;font-size:20px;margin-top:6px}
+.ver{text-align:center;font-size:11px;opacity:.4;margin-top:8px}
+@media (max-width:600px){
+  .tl{flex-wrap:wrap;max-width:120px}
+  #score{margin-left:2px;font-size:15px}
+  #score small{font-size:12px}
+  #board{font-size:11px;min-width:0;padding:5px 8px}
+  #board .row{gap:8px}
+  #mini{width:90px;height:90px}
+  #btnBoost{width:86px;height:86px;font-size:36px}
+}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<div id="hud" class="hidden">
+  <div class="tl">
+    <button class="hbtn" id="btnPause" aria-label="Пауза">⏸</button>
+    <button class="hbtn" id="btnSound" aria-label="Звук">🔊</button>
+    <div id="score"></div>
+  </div>
+  <div id="board"></div>
+  <canvas id="mini" width="220" height="220"></canvas>
+  <button id="btnBoost" class="hidden" aria-label="Ускорение">⚡</button>
+  <div id="toast"></div>
+</div>
+
+<div id="menu" class="screen">
+  <div class="panel">
+    <h1>🐍 Змейград</h1>
+    <p class="sub">Ешь огоньки, расти и не врезайся в других змей!</p>
+    <div class="field"><label for="name">Имя</label><input id="name" maxlength="12" autocomplete="off"></div>
+    <div class="field"><label>Цвет</label><div id="skins"></div></div>
+    <button class="mode easy" data-d="easy"><b>😊 Лёгкий</b><span>Добрые боты · можно продолжать после проигрыша</span><i id="best-easy"></i></button>
+    <button class="mode medium" data-d="medium"><b>🙂 Средний</b><span>Боты посерьёзнее · одна жизнь</span><i id="best-medium"></i></button>
+    <button class="mode hard" data-d="hard"><b>😈 Сложный</b><span>Боты охотятся и окружают · одна жизнь</span><i id="best-hard"></i></button>
+    <div class="help" id="help"></div>
+    <div class="status" id="offline">Проверяю офлайн-режим…</div>
+    <div class="ver" id="ver"></div>
+  </div>
+</div>
+
+<div id="pause" class="screen hidden">
+  <div class="panel">
+    <h2>⏸ Пауза</h2>
+    <div class="btns">
+      <button class="btn main" id="btnResume">▶ Продолжить</button>
+      <button class="btn" id="btnPauseMenu">В меню</button>
+    </div>
+  </div>
+</div>
+
+<div id="dead" class="screen hidden">
+  <div class="panel">
+    <h2>Ой! 😮</h2>
+    <div class="stats" id="deadText"></div>
+    <div class="btns">
+      <button class="btn main" id="btnContinue">▶ Продолжить</button>
+      <button class="btn" id="btnDeadMenu">В меню</button>
+    </div>
+  </div>
+</div>
+
+<div id="over" class="screen hidden">
+  <div class="panel">
+    <h2>Игра окончена</h2>
+    <div class="stats" id="overText"></div>
+    <div class="record" id="overRecord"></div>
+    <div class="btns">
+      <button class="btn main" id="btnAgain">↻ Ещё раз</button>
+      <button class="btn" id="btnOverMenu">В меню</button>
+    </div>
+  </div>
+</div>
+
+<script src="game.js"></script>
+</body>
+</html>
