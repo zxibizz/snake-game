@@ -141,4 +141,7 @@ server.on('upgrade', (req, socket, head) => {
   });
 });
 
-server.listen(PORT, () => log(`snake-game listening on :${PORT}`));
+server.listen(PORT, () => log(`snake-game on :${PORT}`));
+for (const sig of ['SIGTERM', 'SIGINT']) {
+  process.on(sig, () => { log(`${sig}, exit`); server.close(); process.exit(0); });
+}

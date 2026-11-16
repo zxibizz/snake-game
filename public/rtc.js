@@ -107,6 +107,7 @@ function openSignal(onMsg, onClose) {
 // Связь с сайтом рвётся (телефон уснул, сменилась сеть) — переподключаемся с тем же кодом; игра идёт и без неё.
 export function host({ v, token, onCode, onPeer, onError }) {
   const h = { code: '', sig: null, pcs: new Map(), closed: false, tries: 0 };
+  const MAX_PENDING = 8; // одновременно знакомящихся гостей: больше — не берём (кто-то угадал код и шлёт входы)
   const connect = () => {
     if (h.closed) return;
     const sig = openSignal((m) => {
@@ -123,11 +124,13 @@ export function host({ v, token, onCode, onPeer, onError }) {
     sig.opened.then(() => sig.send({ t: 'host', v, token, code: h.code || undefined })).catch(() => {});
   };
   const offer = async (id) => {
+    if (h.closed || h.pcs.size >= MAX_PENDING) return;
     const pc = new RTCPeerConnection({ iceServers: ICE });
     const r = pc.createDataChannel('r', { ordered: true });
     const u = pc.createDataChannel('u', { ordered: false, maxRetransmits: 0 });
     const s = signaler(pc, (data) => h.sig.send({ t: 'sig', to: id, data }));
     const entry = {
+      pc,
       async recv(d) {
         try { if (d.sdp) await s.remote(d.sdp); else if (d.c) s.cand(d.c); } catch { pc.close(); }
       },
@@ -139,6 +142,7 @@ export function host({ v, token, onCode, onPeer, onError }) {
       if (++open < 2) return;
       clearTimeout(timer);
       h.pcs.delete(id);
+      if (h.closed) { pc.close(); return; } // хозяин уже ушёл из этой комнаты
       onPeer(makeLink(pc, r, u));
     };
     r.onopen = ready; u.onopen = ready;
@@ -147,7 +151,12 @@ export function host({ v, token, onCode, onPeer, onError }) {
       h.sig.send({ t: 'sig', to: id, data: { sdp: pc.localDescription.toJSON() } });
     } catch { pc.close(); h.pcs.delete(id); }
   };
-  h.close = () => { h.closed = true; if (h.sig) h.sig.close(); for (const p of h.pcs.values()) p.recv = () => {}; };
+  h.close = () => {
+    h.closed = true;
+    if (h.sig) h.sig.close();
+    for (const p of h.pcs.values()) p.pc.close();
+    h.pcs.clear();
+  };
   connect();
   return h;
 }

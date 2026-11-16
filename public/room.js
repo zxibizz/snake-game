@@ -6,14 +6,17 @@
 //   conn.buffered() — сколько ещё не ушло по надёжному каналу; conn.close().
 import { World, R, SKINS, SNAKES_N, TAU, VERSION, FOOD_CELL, FOOD_CELLS, FLY_MAX, keepMass } from './core.js';
 
-export const TICK = 1 / 40;      // шагов мира в секунду: 40
-export const SEND_EVERY = 1;     // снимок — каждый шаг: напрямую по своей сети это дёшево, а рисовать можно ближе к «сейчас»
+export const TICK = 1 / 40;      // шагов мира в секунду: 40; снимок — каждый шаг: напрямую это дёшево, а рисовать можно ближе к «сейчас»
 const LB_EVERY = 40;             // таблица лидеров: раз в секунду
+const SLEEP_MS = 3000;           // от игрока нет вестей столько — его змейка «уснула» (игру свернули), убираем её
 export const MAX_HUMANS = 8;
 const TEAM = 1;
 
 const AOI = 2300, HYST = 500, FOOD_AOI = 2600;
-const FR = 13, FLR = 16;
+export const FR = 13, FLR = 16;
+// запись еды → [id, x, y, ценность, цвет, жизнь, клетка]
+export const readFood = (dv, o) => [dv.getUint32(o + 1, true), dv.getInt16(o + 5, true) / 4, dv.getInt16(o + 7, true) / 4,
+  dv.getUint16(o + 9, true) / 100, dv.getUint8(o + 11), dv.getUint8(o + 12), dv.getUint8(o)];
 
 const flatSegs = (s) => {
   const out = new Array(s.segs.length * 2);
@@ -108,7 +111,8 @@ export class Room {
     this.diff = diff;
     this.world = new World({ diff });
     this.world.track = true;
-    this.clients = new Set();
+    this.clients = new Set();   // поздоровались
+    this.conns = new Set();     // все соединения, и ещё не поздоровавшиеся
     this.tick = 0;
     this.kills = []; this.feast = null; this.flies = [];
   }
@@ -163,7 +167,7 @@ export class Room {
     const s = this.world.addHuman({ name: c.name, skin: c.skin, team: this.mode === 'team' ? TEAM : 0,
       mass: keepMass(this.diff, c.lastMass), inv, keep: this.seen() });
     s.remote = true;
-    c.snake = s; c.seq = -1;
+    c.snake = s; c.seq = -1; c.heard = performance.now();
     return { id: s.id, segs: flatSegs(s), mass: s.mass, inv, team: s.team };
   }
 
@@ -171,7 +175,8 @@ export class Room {
   // новое соединение: ждём от него hello
   attach(conn) {
     const c = { conn, room: this, hello: false, snake: null, name: 'Игрок', skin: 0, kills: 0, lastMass: 0, token: '', seq: -1,
-      known: new Set(), cells: new Set(), cx: 0, cy: 0, rvId: 0, kq: [], lagging: false };
+      known: new Set(), cells: new Set(), cx: 0, cy: 0, rvId: 0, kq: [], lagging: false, heard: 0 };
+    this.conns.add(conn);
     return c;
   }
   message(c, m) {
@@ -193,6 +198,10 @@ export class Room {
       case 'fly': if (s && Number.isInteger(m.id)) w.claimFly(m.id, s); break;
       case 'die':
         if (s) {
+          // где разбилась — в самом сообщении: последнее положение по быстрому каналу могло отстать или потеряться
+          if (Array.isArray(m.at) && m.at.length === 3 && m.at.every(Number.isFinite) && m.at[2] > 0) {
+            w.setRemote(s, m.at[0], m.at[1], s.a, s.ta, Math.min(m.at[2], 1e6), false, false);
+          }
           const k = Number.isInteger(m.by) && m.by ? w.byId.get(m.by) : null;
           c.lastMass = s.mass;
           w.kill(s, k && k.alive && k !== s ? k : null);
@@ -218,6 +227,7 @@ export class Room {
     const seq = dv.getUint16(5, true);
     if (c.seq >= 0 && ((seq - c.seq) & 0xffff) > 0x8000) return; // пришло позже нового
     c.seq = seq;
+    c.heard = performance.now();
     const x = dv.getInt16(7, true) / 4, y = dv.getInt16(9, true) / 4;
     const a = dv.getUint16(11, true) / 65535 * TAU, ta = dv.getUint16(13, true) / 65535 * TAU;
     const mass = dv.getFloat32(15, true), fl = dv.getUint8(19);
@@ -238,7 +248,7 @@ export class Room {
     if (old) {
       this.clients.delete(old);
       c.kills = old.kills; c.lastMass = old.lastMass;
-      if (old.snake && old.snake.alive) { c.snake = old.snake; c.snake.name = c.name; c.seq = -1; }
+      if (old.snake && old.snake.alive) { c.snake = old.snake; c.snake.name = c.name; c.seq = -1; c.heard = performance.now(); }
       old.snake = null; old.hello = false;
       old.conn.close();
       if (c.snake) you = { id: c.snake.id, segs: flatSegs(c.snake), mass: c.snake.mass, inv: 0, team: c.snake.team };
@@ -255,12 +265,15 @@ export class Room {
     c.send(this.leaderboard());
   }
   detach(c) {
+    this.conns.delete(c.conn);
     if (!this.clients.has(c)) return;
     if (c.snake && c.snake.alive) this.world.kill(c.snake, null);
     c.snake = null;
     this.clients.delete(c);
     this.updateBots();
   }
+  // хозяин закрыл комнату: всем, и тем, кто ещё не поздоровался
+  closeAll() { for (const conn of this.conns) conn.close(); this.conns.clear(); this.clients.clear(); }
   clientOf(snake) { for (const c of this.clients) if (c.snake === snake) return c; return null; }
 
   // ---------- шаг ----------
@@ -278,7 +291,20 @@ export class Room {
       if (k && k.human) { const kc = this.clientOf(k); if (kc) { kc.kills++; if (kc.rvId === v.id) kc.rvId = 0; } }
       if (v.human) { const c = this.clientOf(v); if (c) { c.snake = null; c.lastMass = v.mass; } } // ушёл не сам (из комнаты)
     }
-    if (this.tick % SEND_EVERY) return;
+    // игрок свернул игру: соединение живо, а вестей нет — змейка не должна висеть в мире неподвижной стеной
+    const now = performance.now();
+    // сам хозяин стоял (вкладку свернули) — вести от игроков не шли не по их вине
+    if (this.stepAt && now - this.stepAt > 1000) for (const c of this.clients) c.heard = now;
+    this.stepAt = now;
+    if (this.tick % LB_EVERY === 0) {
+      for (const c of this.clients) {
+        if (!c.snake || !c.snake.alive || now - c.heard < SLEEP_MS) continue;
+        c.lastMass = c.snake.mass;
+        w.kill(c.snake, null);
+        c.snake = null; c.rvId = 0;
+        c.send({ t: 'slept' });
+      }
+    }
     const kills = this.kills, feast = this.feast, flyCaught = this.flies;
     this.kills = []; this.feast = null; this.flies = [];
     const food = this.foodChanges();

@@ -135,3 +135,41 @@ test('ушёл — змейка пропадает, ботов снова бол
   assert.ok(!room.world.byId.get(a.w.me.id) || !room.world.byId.get(a.w.me.id).alive);
   assert.equal(room.world.targetBots, SNAKES_N);
 });
+
+test('от игрока нет вестей 3 с (игру свернули) — змейка уходит из мира, игроку — slept', async () => {
+  const room = new Room({ code: '1', mode: 'ffa', diff: 'easy' });
+  const a = player(room, 'A');
+  const s = room.world.byId.get(a.w.me.id);
+  a.c.heard = performance.now() - 4000;
+  room.stepAt = performance.now();
+  for (let i = 0; i < 40; i++) room.step();
+  assert.ok(!s.alive);
+  assert.ok(a.k.last('slept'));
+});
+
+test('разбилась: останки — там, где сказала в die', () => {
+  const room = new Room({ code: '1', mode: 'ffa', diff: 'easy' });
+  const a = player(room, 'A');
+  const w = room.world, n0 = w.foods.length;
+  room.message(a.c, { t: 'die', by: 0, at: [3000, -2000, 200] });
+  const rem = w.foods.slice(n0);
+  assert.ok(rem.length && rem.every((f) => Math.hypot(f.x - 3000, f.y + 2000) < 600));
+});
+
+test('бабочку ловят по 16-битному id из снимка', () => {
+  const room = new Room({ code: '1', mode: 'ffa', diff: 'easy' });
+  const a = player(room, 'A');
+  const w = room.world, f = w.flies[0];
+  f.id += 70000;
+  room.message(a.c, { t: 'fly', id: f.id & 0xffff });
+  assert.ok(!w.flies.includes(f));
+});
+
+test('хозяин закрыл комнату — закрыты и ещё не поздоровавшиеся', () => {
+  const room = new Room({ code: '1', mode: 'ffa', diff: 'easy' });
+  const a = player(room, 'A');
+  const k = conn();
+  room.attach(k);
+  room.closeAll();
+  assert.ok(a.k.closed && k.closed);
+});

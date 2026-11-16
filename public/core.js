@@ -750,7 +750,7 @@ export class World {
   }
   // удалённый игрок поймал бабочку: высыпаем её еду, событие 'fly' — как при поимке в мире
   claimFly(id, s) {
-    const i = this.flies.findIndex((f) => f.id === id);
+    const i = this.flies.findIndex((f) => (f.id & 0xffff) === id); // по сети id бабочки — 16 бит
     if (i < 0 || !s || !s.alive) return false;
     this.catchFly(this.flies[i], s);
     this.flies.splice(i, 1);

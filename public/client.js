@@ -5,7 +5,7 @@ import {
   radiusOf, spacingOf, countOf, bodyLenOf, foodRadiusOf, followChain, fitLength, clamp, angDiff, keepMass,
   FLY_MAX, flyK, flyScale, flyRadius, flyEase, MIN_BOOST_MASS, Snake,
 } from './core.js';
-import { Room, runRoom, encodeSelf } from './room.js';
+import { Room, runRoom, encodeSelf, FR, FLR, readFood } from './room.js';
 import { host, join, loopback } from './rtc.js';
 
 const TICK_MS = 25;        // комната: 40 шагов и снимков в секунду
@@ -62,6 +62,8 @@ const soloName = () => 'Ты'; // одному имя не нужно
 // токен сессии: при переподключении комната отдаёт ту же змейку, а не создаёт вторую
 const TOKEN = (crypto.randomUUID ? crypto.randomUUID() : String(Math.random()).slice(2) + Date.now()).slice(0, 40);
 const hello = (o) => ({ ...o, name: myName(), skin: save.skin, token: TOKEN, v: VERSION });
+// токен хозяина для сайта — свой: TOKEN уходит чужим хозяевам комнат, и им нельзя дать забрать код нашей комнаты
+const HOST_TOKEN = (crypto.randomUUID ? crypto.randomUUID() : String(Math.random()).slice(2) + Date.now()).slice(0, 40);
 
 // ---------- звук (синтез, без файлов) ----------
 // iPhone: звук включается только из «настоящего» жеста (касание отпущено, клик, клавиша), а не из pointerdown;
@@ -834,7 +836,16 @@ function onNetMsg(m) {
   else if (m.t === 'st') onStats(m);
   else if (m.t === 'you') { setMe(m); ui = 'play'; closeDialog(); onRespawn(); }
   else if (m.t === 'sync') onSync(m);
+  else if (m.t === 'slept') onSlept();
   else if (m.t === 'err') onNetError(m.code);
+}
+// игру сворачивали — комната убрала нашу змейку, чтобы она не висела у всех неподвижной
+function onSlept() {
+  const dead = me;
+  if (!dead) return;
+  me = null;
+  onNetDeath({ by: null, byId: 0, mass: Math.floor(dead.mass), max: Math.floor(dead.maxMass), eaten: dead.eaten,
+    who: 'Пока игра была свёрнута, змейка уснула' }, dead);
 }
 // хозяин: код комнаты у сайта, комната — здесь же, гости — напрямую
 function hostRoom(opts) {
@@ -846,7 +857,7 @@ function hostRoom(opts) {
     link.onclose = () => room.detach(c);
   };
   net.sig = host({
-    v: VERSION, token: TOKEN,
+    v: VERSION, token: HOST_TOKEN,
     onCode: (code) => {
       if (mode !== 'net' || net.leaving) return;
       if (net.room) { // связь с сайтом восстановилась; если код за это время отдали, — у комнаты новый
@@ -867,7 +878,7 @@ function hostRoom(opts) {
 function stopHosting() {
   if (net.sig) { net.sig.close(); net.sig = null; }
   if (net.stopRoom) { net.stopRoom(); net.stopRoom = null; }
-  if (net.room) { for (const c of net.room.clients) c.conn.close(); net.room = null; }
+  if (net.room) { net.room.closeAll(); net.room = null; }
   net.isHost = false;
 }
 // гость: знакомство через сайт и прямой канал к хозяину
@@ -983,10 +994,15 @@ function onNetError(code) {
   }[code] || 'Что-то пошло не так.';
   dialog('Не получилось войти', `<p>${text}</p>`, [{ label: 'Понятно', kind: 'filled', onClick: toHome }]);
 }
-function makeNetSnake(m) {
+// тело по сети — плоский массив [x0, y0, x1, y1, …]
+function unflat(flat) {
   const segs = [];
-  for (let i = 0; i < m.segs.length; i += 2) segs.push({ x: m.segs[i], y: m.segs[i + 1] });
+  for (let i = 0; i < flat.length; i += 2) segs.push({ x: flat[i], y: flat[i + 1] });
   if (!segs.length) segs.push({ x: 0, y: 0 });
+  return segs;
+}
+function makeNetSnake(m) {
+  const segs = unflat(m.segs);
   return { id: m.id, name: m.name, skin: m.skin, team: m.team, human: m.human, segs, a: 0, ta: 0, mass: START_MASS,
     r: radiusOf(START_MASS), isBoosting: false, inv: 0, visible: false, seen: false };
 }
@@ -998,9 +1014,7 @@ function showRoomCode() {
 }
 // своя змейка — от комнаты (где появиться и какой длины), дальше считаем её сами
 function setMe(y) {
-  const segs = [];
-  for (let i = 0; i < y.segs.length; i += 2) segs.push({ x: y.segs[i], y: y.segs[i + 1] });
-  if (!segs.length) segs.push({ x: 0, y: 0 });
+  const segs = unflat(y.segs);
   const s = new Snake(y.id, segs[0].x, segs[0].y, y.mass, save.skin, myName(), true, y.team, undefined, segs);
   s.inv = y.inv || 0;
   me = s;
@@ -1027,10 +1041,7 @@ function addNetFood(id, x, y, v, c, life, cell) {
   if (net.ate.has(id)) return; // уже съели сами, хозяин ещё не успел убрать
   net.foods.set(id, { id, x, y, v, c, r: foodRadiusOf(v), ph: Math.random() * TAU, life, age: 0, cell });
 }
-const FR = 13; // запись еды: u8 клетка, u32 id, i16 x·4, i16 y·4, u16 ценность·100, u8 цвет, u8 жизнь
-const FLR = 16; // бабочка: u16 id, i16 x·4, i16 y·4, u16 курс, u16 собрано·100, u8 флаги, 5 × u8 цвет крошек
-const readFood = (dv, o) => [dv.getUint32(o + 1, true), dv.getInt16(o + 5, true) / 4, dv.getInt16(o + 7, true) / 4,
-  dv.getUint16(o + 9, true) / 100, dv.getUint8(o + 11), dv.getUint8(o + 12), dv.getUint8(o)];
+// записи еды и бабочек (FR, FLR, readFood) — в room.js, рядом с тем, кто их пишет
 function onSync(m) { // догнали после пропущенных снимков: змеи рядом — заново, еда придёт следом целиком
   for (const s of m.snakes) if (s.id !== net.youId) net.snakes.set(s.id, makeNetSnake(s));
   setFeast(m.feast);
@@ -1232,8 +1243,9 @@ function selfSend(now) {
 }
 function selfDie(killer) {
   const dead = me;
-  selfSend(performance.now()); // последнее положение — чтобы останки легли там, где разбились
-  netSend({ t: 'die', by: killer ? killer.id : 0 });
+  selfSend(performance.now());
+  // где разбились — прямо в сообщении (надёжно): останки лягут там, где это видно на экране
+  netSend({ t: 'die', by: killer ? killer.id : 0, at: [Math.round(dead.x), Math.round(dead.y), dead.mass] });
   me = null;
   onNetDeath({ by: killer ? killer.name : null, byId: killer ? killer.id : 0, mass: Math.floor(dead.mass), max: Math.floor(dead.maxMass), eaten: dead.eaten }, dead);
 }
@@ -1246,7 +1258,7 @@ function onNetDeath(m, dead) {
   net.eaten = 0;
   run.revenge = m.byId ? { id: m.byId, name: m.by } : null; // о край — мстить некому
   net.rv = null;
-  const who = m.by ? `На пути была змейка «${esc(m.by)}»` : 'Это край арены';
+  const who = m.who || (m.by ? `На пути была змейка «${esc(m.by)}»` : 'Это край арены');
   setTimeout(() => {
     if (ui !== 'dead' || mode !== 'net') return;
     dialog('Ой!', oopsHtml(who, m.mass, net.diff),
