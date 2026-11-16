@@ -2,7 +2,7 @@
 // Здесь нет DOM и сети — только мир, змейки, еда, боты и столкновения.
 
 // Версия протокола и файлов: при изменении любого файла в public/ поднять и здесь, и в sw.js (тест сверяет).
-export const VERSION = '32';
+export const VERSION = '33';
 export const TAU = Math.PI * 2;
 export const R = 7000;                  // радиус арены (координаты по сети — Int16 / 4, предел 8191)
 export const BASE_SPEED = 210;          // пикс/с — у «Малыша»; с каждым званием змейка быстрее, см. speedOf
@@ -537,7 +537,7 @@ export class World {
       // голова поймала (кто в этом шаге проиграл, тот уже не ловит)
       let by = null;
       for (const s of snakes) {
-        if (!s.alive || s.inv > 0 || dying.has(s)) continue;
+        if (!s.alive || s.inv > 0 || s.remote || dying.has(s)) continue;
         const rr = s.r * 0.8 + fr * (0.5 + 0.4 * flyEase(s));
         if ((s.x - f.x) ** 2 + (s.y - f.y) ** 2 < rr * rr) { by = s; break; }
       }
@@ -723,6 +723,38 @@ export class World {
     const s = new Snake(this.nextSnakeId++, p.x, p.y, mass, skin, name, true, team, undefined, coilBody(p.x, p.y, mass));
     s.inv = inv;
     return this.addSnake(s);
+  }
+
+  // ---------- удалённые игроки (совместная игра без сервера) ----------
+  // Змейку игрока в комнате считает его собственное устройство: мир хозяина комнаты её не двигает, не кормит
+  // и не убивает, а только ставит туда, куда она сама приползла, — боты видят её тело и врезаются в него.
+  setRemote(s, x, y, a, ta, mass, boost, inv) {
+    s.remote = true;
+    s.segs[0].x = x; s.segs[0].y = y;
+    s.a = a; s.ta = ta; s.mass = mass; s.r = radiusOf(mass);
+    s.isBoosting = boost; s.inv = inv ? 1 : 0;
+    followChain(s.segs, spacingOf(mass));
+    fitLength(s.segs, countOf(mass));
+    if (mass > s.maxMass) s.maxMass = mass;
+  }
+  // удалённый игрок съел крошки: убираем их из мира (масса у него уже своя)
+  eatIds(ids, s) {
+    if (!ids.length) return;
+    const want = new Set(ids);
+    for (const f of this.foods) {
+      if (f.dead || !want.has(f.id)) continue;
+      f.dead = true;
+      if (f.life === 0) this.naturalCount--;
+      if (s) s.eaten += f.v;
+    }
+  }
+  // удалённый игрок поймал бабочку: высыпаем её еду, событие 'fly' — как при поимке в мире
+  claimFly(id, s) {
+    const i = this.flies.findIndex((f) => f.id === id);
+    if (i < 0 || !s || !s.alive) return false;
+    this.catchFly(this.flies[i], s);
+    this.flies.splice(i, 1);
+    return true;
   }
 
   // ---------- смерть ----------
@@ -1154,7 +1186,7 @@ export class World {
   step(dt) {
     this.time += dt;
     const snakes = this.snakes;
-    for (const s of snakes) if (s.alive) this.moveSnake(s, dt);
+    for (const s of snakes) if (s.alive && !s.remote) this.moveSnake(s, dt);
     this.buildGrids();
     const { segHead, segNext, segS, segK } = this;
 
@@ -1188,7 +1220,7 @@ export class World {
     const maxR = this.maxR;
     for (let si = 0; si < snakes.length; si++) {
       const s = snakes[si];
-      if (!s.alive || s.inv > 0) continue;
+      if (!s.alive || s.inv > 0 || s.remote) continue; // удалённый игрок решает о своём проигрыше сам
       const h = s.segs[0];
       const c0 = this.cellOf(h.x, h.y), cx0 = c0 % GRID_N, cy0 = (c0 / GRID_N) | 0;
       const cr = Math.ceil((s.r * 0.55 + maxR * 0.85) / CELL);
@@ -1210,9 +1242,9 @@ export class World {
       if (hit) this.pending.push([s, hit]);
     }
 
-    // еда
+    // еда (удалённый игрок ест у себя и присылает, что съел, — eatIds)
     for (const s of snakes) {
-      if (!s.alive) continue;
+      if (!s.alive || s.remote) continue;
       const h = s.segs[0];
       const c0 = this.cellOf(h.x, h.y), cx0 = c0 % GRID_N, cy0 = (c0 / GRID_N) | 0;
       const reach = s.r + 40, reach2 = reach * reach, cr = reach > CELL ? 2 : 1;

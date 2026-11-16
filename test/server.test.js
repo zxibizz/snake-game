@@ -1,7 +1,6 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { VERSION, SNAKES_N } from '../public/core.js';
 
 const PORT = 18000 + Math.floor(Math.random() * 1000);
 let proc;
@@ -17,13 +16,7 @@ function client() {
   const inbox = [];
   const waiters = [];
   ws.onmessage = (e) => {
-    let m;
-    if (typeof e.data === 'string') m = JSON.parse(e.data);
-    else {
-      const type = new Uint8Array(e.data)[0];
-      m = { t: { 1: 'snap', 2: 'food', 3: 'cells' }[type], bytes: e.data.byteLength };
-      if (type === 1) m.n = new DataView(e.data).getUint16(5, true);
-    }
+    const m = JSON.parse(e.data);
     const i = waiters.findIndex((w) => w.t === m.t);
     if (i >= 0) waiters.splice(i, 1)[0].res(m); else inbox.push(m);
   };
@@ -33,7 +26,8 @@ function client() {
     return new Promise((res, rej) => { waiters.push({ t, res }); setTimeout(() => rej(new Error(`нет ${t}`)), 3000); });
   };
   const opened = new Promise((res) => { ws.onopen = res; });
-  return { ws, next, opened, send: (o) => ws.send(JSON.stringify(o)) };
+  const count = (t) => inbox.filter((m) => m.t === t).length;
+  return { ws, next, opened, count, send: (o) => ws.send(JSON.stringify(o)) };
 }
 
 test('статика и healthz', async () => {
@@ -45,95 +39,80 @@ test('статика и healthz', async () => {
   assert.equal((await fetch(`http://127.0.0.1:${PORT}/%2e%2e/package.json`)).status, 404);
 });
 
-test('создать комнату, войти вторым игроком, получать снимки', async () => {
-  const a = client();
-  await a.opened;
-  a.send({ t: 'create', name: '<b>Папа</b>', skin: 3, mode: 'team', diff: 'easy', v: VERSION });
-  const wa = await a.next('welcome');
-  assert.match(wa.code, /^\d{4}$/);
-  assert.equal(wa.mode, 'team');
-  const meA = wa.snakes.find((s) => s.id === wa.you);
-  assert.equal(meA.name, 'bПапа/b');
+async function hostRoom(token = 'tok-h', v = '7', code) {
+  const h = client();
+  await h.opened;
+  h.send({ t: 'host', v, token, code });
+  return [h, (await h.next('code')).code];
+}
 
-  const b = client();
-  await b.opened;
-  b.send({ t: 'join', code: wa.code, name: 'Мама', skin: 99, v: VERSION });
-  const wb = await b.next('welcome');
-  assert.equal(wb.code, wa.code);
-  assert.ok(wb.snakes.some((s) => s.id === wa.you), 'второй видит первого');
-  assert.equal(wb.snakes.find((s) => s.id === wb.you).skin, 0, 'неверный цвет заменён');
-  const snap = await b.next('snap');
-  assert.ok(snap.bytes > 7);
-  b.send({ t: 'in', a: 1.2, b: 1 });
+test('знакомство: хозяин получает код, гость входит, сообщения идут в обе стороны', async () => {
+  const [h, code] = await hostRoom();
+  assert.match(code, /^\d{4}$/);
+  const g = client();
+  await g.opened;
+  g.send({ t: 'join', code, v: '7' });
+  const j = await g.next('joined');
+  const p = await h.next('peer');
+  assert.equal(p.id, j.id);
+  h.send({ t: 'sig', to: p.id, data: { sdp: { type: 'offer', sdp: 'x' } } });
+  const s1 = await g.next('sig');
+  assert.equal(s1.from, 0);
+  assert.equal(s1.data.sdp.type, 'offer');
+  g.send({ t: 'sig', to: 0, data: { c: { candidate: 'y' } } });
+  const s2 = await h.next('sig');
+  assert.equal(s2.from, j.id);
+  assert.equal(s2.data.c.candidate, 'y');
 
-  const c = client();
-  await c.opened;
-  c.send({ t: 'join', code: '99999', name: 'x', v: VERSION });
-  assert.equal((await c.next('err')).code, 'no_room');
-  for (const x of [a, b, c]) x.ws.close();
+  const g2 = client();
+  await g2.opened;
+  g2.send({ t: 'join', code: '99999', v: '7' });
+  assert.equal((await g2.next('err')).code, 'no_room');
+  for (const x of [h, g, g2]) x.ws.close();
 });
 
-test('старый клиент получает err version', async () => {
-  const a = client();
-  await a.opened;
-  a.send({ t: 'create', name: 'x', v: '0' });
-  assert.equal((await a.next('err')).code, 'version');
-  a.ws.close();
+test('разные версии: старому гостю — обновиться, старому хозяину — тоже', async () => {
+  const [h, code] = await hostRoom('tok-v', '10');
+  const g = client();
+  await g.opened;
+  g.send({ t: 'join', code, v: '9' });
+  assert.equal((await g.next('err')).code, 'version');
+  const g2 = client();
+  await g2.opened;
+  g2.send({ t: 'join', code, v: '11' });
+  assert.equal((await g2.next('err')).code, 'old_host');
+  for (const x of [h, g, g2]) x.ws.close();
 });
 
-test('сложность constructor не принимается', async () => {
-  const a = client();
-  await a.opened;
-  a.send({ t: 'create', name: 'x', diff: 'constructor', v: VERSION });
-  assert.equal((await a.next('welcome')).diff, 'easy');
-  a.ws.close();
-});
-
-test('переподключение с тем же токеном забирает ту же змейку', async () => {
-  const a = client();
-  await a.opened;
-  a.send({ t: 'create', name: 'A', v: VERSION, token: 'tok-a' });
-  const wa = await a.next('welcome');
-  const b = client(); // второй игрок держит комнату открытой
-  await b.opened;
-  b.send({ t: 'join', code: wa.code, name: 'B', v: VERSION, token: 'tok-b' });
-  await b.next('welcome');
-  const a2 = client(); // старое соединение a ещё живо — как при смене Wi-Fi на LTE
-  await a2.opened;
-  a2.send({ t: 'join', code: wa.code, name: 'A', v: VERSION, token: 'tok-a' });
-  const wa2 = await a2.next('welcome');
-  assert.equal(wa2.you, wa.you, 'та же змейка');
-  // в welcome — только змеи в зоне видимости, второй игрок может быть далеко; всех людей комнаты перечисляет таблица
-  const lb = await a2.next('lb');
-  assert.equal(lb.hum.length, 2, 'без дубля');
-  for (const x of [a, b, a2]) x.ws.close();
+test('хозяин после обрыва возвращает свой код, чужой токен его не заберёт', async () => {
+  const [h, code] = await hostRoom('tok-r');
+  h.ws.close();
+  await new Promise((r) => setTimeout(r, 100));
+  const g = client(); // хозяина нет на связи — войти нельзя
+  await g.opened;
+  g.send({ t: 'join', code, v: '7' });
+  assert.equal((await g.next('err')).code, 'no_room');
+  const [x, other] = await hostRoom('tok-x', '7', code);
+  assert.notEqual(other, code, 'чужой код не отдают');
+  const [h2, same] = await hostRoom('tok-r', '7', code);
+  assert.equal(same, code);
+  const g2 = client();
+  await g2.opened;
+  g2.send({ t: 'join', code, v: '7' });
+  await g2.next('joined');
+  await h2.next('peer');
+  for (const c of [g, x, h2, g2]) c.ws.close();
 });
 
 test('поток сообщений режется по времени', async () => {
-  const a = client();
-  await a.opened;
-  for (let i = 0; i < 300; i++) a.send({ t: 'ping', at: i });
-  let pongs = 0;
-  try { for (;;) { await Promise.race([a.next('pong'), new Promise((_, rej) => setTimeout(rej, 300))]); pongs++; } } catch { /* тишина */ }
-  assert.ok(pongs >= 50 && pongs < 120, `ответов ${pongs}`);
-  a.ws.close();
-});
-
-test('игрок видит только змей рядом, таблица — по всей арене', async () => {
-  const a = client();
-  await a.opened;
-  a.send({ t: 'create', name: 'A', mode: 'ffa', diff: 'easy', v: VERSION });
-  const wa = await a.next('welcome');
-  assert.ok(wa.snakes.length < SNAKES_N, `в поле зрения ${wa.snakes.length} из ${SNAKES_N}`);
-  assert.ok(wa.snakes.some((s) => s.id === wa.you), 'себя видно');
-  const food = await a.next('food');
-  assert.ok(food.bytes > 5 + 13 * 150, `еда вокруг пришла одним бинарным сообщением: ${food.bytes} байт`);
-  const lb = await a.next('lb');
-  assert.equal(lb.n, SNAKES_N);
-  assert.equal(lb.top.length, 10);
-  assert.equal(lb.mm.length, SNAKES_N * 3);
-  assert.ok(lb.top[0][2] >= lb.top[9][2]);
-  const snap = await a.next('snap');
-  assert.ok(snap.n <= wa.snakes.length + 5, `в снимке ${snap.n} змей`);
-  a.ws.close();
+  const [h, code] = await hostRoom('tok-f');
+  const g = client();
+  await g.opened;
+  g.send({ t: 'join', code, v: '7' });
+  const { id } = await g.next('joined');
+  for (let i = 0; i < 600; i++) h.send({ t: 'sig', to: id, data: { i } });
+  await new Promise((r) => setTimeout(r, 400));
+  const n = g.count('sig');
+  assert.ok(n >= 150 && n < 400, `дошло ${n} из 600`);
+  for (const x of [h, g]) x.ws.close();
 });

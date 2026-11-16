@@ -1,12 +1,16 @@
-// Клиент: отрисовка, управление, меню; одиночная игра считает мир сама, совместная — получает его с сервера.
+// Клиент: отрисовка, управление, меню; одиночная игра считает мир сама. В совместной мир считает браузер
+// хозяина комнаты (room.js), а свою змейку каждый игрок — у себя; связь между игроками прямая (rtc.js).
 import {
   World, SKINS, TYPES, SKINS_OF, PAL, foodLookOf, GOLD, DIFF, R, TAU, START_MASS, SNAKES_N, FOOD_N, VERSION, TITLES, titleOf, segColor,
   radiusOf, spacingOf, countOf, bodyLenOf, foodRadiusOf, followChain, fitLength, clamp, angDiff, keepMass,
-  FLY_MAX, flyK, flyScale, MIN_BOOST_MASS,
+  FLY_MAX, flyK, flyScale, flyRadius, flyEase, MIN_BOOST_MASS, Snake,
 } from './core.js';
+import { Room, runRoom, encodeSelf } from './room.js';
+import { host, join, loopback } from './rtc.js';
 
-const TICK_MS = 25;        // сервер: 40 шагов в секунду
-const INTERP_MS = 110;     // рисуем мир с задержкой на два снимка — так движение плавное
+const TICK_MS = 25;        // комната: 40 шагов и снимков в секунду
+const INTERP_MS = 70;      // чужих змей рисуем с задержкой на пару-тройку снимков — так движение плавное и потеря снимка незаметна
+const SELF_MS = 25;        // как часто шлём хозяину, где своя змейка
 const JOY_R = 44;          // радиус джойстика: чем он меньше, тем короче движение пальца для разворота
 
 // ---------- иконки (Material Icons, Apache 2.0) ----------
@@ -55,7 +59,7 @@ if (!save.fab || typeof save.fab !== 'object') save.fab = {};
 const persist = () => { try { localStorage.setItem('zmeigrad', JSON.stringify(save)); } catch { /* ничего */ } };
 const myName = () => save.name || 'Игрок';
 const soloName = () => 'Ты'; // одному имя не нужно
-// токен сессии: при переподключении сервер отдаёт ту же змейку, а не создаёт вторую
+// токен сессии: при переподключении комната отдаёт ту же змейку, а не создаёт вторую
 const TOKEN = (crypto.randomUUID ? crypto.randomUUID() : String(Math.random()).slice(2) + Date.now()).slice(0, 40);
 const hello = (o) => ({ ...o, name: myName(), skin: save.skin, token: TOKEN, v: VERSION });
 
@@ -605,7 +609,7 @@ const glowSprite = lazy(SPR, (g, m, col) => {
 let mode = null;         // null — демо за меню, 'solo', 'net'
 let ui = 'home';         // home | play | paused | dead | conn
 let world = null;        // мир одиночной игры и демо
-let me = null;           // своя змейка (в solo — из world, в net — из net.snakes)
+let me = null;           // своя змейка (в solo — из world, в net — своя, считается здесь же: selfStep)
 let diffKey = 'easy';
 let time = 0, playTime = 0, sessionBest = 0;
 let demoFocus = null;
@@ -793,52 +797,101 @@ function steer() {
 }
 
 // ---------- сетевая игра ----------
+// Игрового сервера нет. Мир — ботов, еду, бабочек — считает браузер хозяина комнаты (room.js, часы runRoom),
+// а свою змейку каждый игрок считает у себя (selfStep): поворот виден сразу, о своём проигрыше решает сам и
+// присылает хозяину, где он, что съел и кого поймал. Чужих змей рисуем по снимкам хозяина с задержкой INTERP_MS.
+// Хозяин играет так же, как гости, — через петлю внутри страницы.
 const net = {
-  ws: null, code: '', roomMode: 'team', diff: 'easy', youId: 0, myTeam: 0,
-  snakes: new Map(), foods: new Map(), buf: [], offset: null, lastTick: -1,
-  lastSent: 0, lastA: null, lastB: false, leaving: false, retry: 0, retryTimer: 0, pendingMsg: null,
-  kills: 0, myMass: 0, grewAt: 0, deadInfo: null, lb: null, eaten: 0, flies: [],
+  link: null, room: null, stopRoom: null, sig: null, isHost: false,
+  code: '', roomMode: 'team', diff: 'easy', youId: 0, myTeam: 0,
+  snakes: new Map(), foods: new Map(), buf: [], foodQ: [], offset: null, lastTick: -1, lastSnap: 0, waitSnack: false,
+  lastSent: 0, seq: 0, lastB: false, leaving: false, retry: 0, retryTimer: 0, sim: null,
+  kills: 0, deadInfo: null, lb: null, eaten: 0, flies: [], eatQ: [], dropQ: [], ate: new Map(), claimed: new Map(),
 };
-const wsUrl = () => `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`;
-function netSend(o) { if (net.ws && net.ws.readyState === 1) net.ws.send(JSON.stringify(o)); }
+function netSend(o) { if (net.link && !net.link.closed) net.link.send(o); }
 
 function netReset() {
-  net.snakes.clear(); net.foods.clear(); net.buf = []; net.offset = null; net.lastTick = -1; net.flies = [];
-  net.youId = 0; net.lastA = null; net.lastB = false; net.myMass = 0; net.lb = null;
+  net.snakes.clear(); net.foods.clear(); net.buf = []; net.foodQ = []; net.offset = null; net.lastTick = -1; net.flies = [];
+  net.youId = 0; net.lastB = false; net.lb = null; net.eatQ = []; net.dropQ = []; net.ate.clear(); net.claimed.clear();
+  net.lastSnap = 0; me = null;
 }
-function netOpen(firstMsg, isRetry) {
-  net.pendingMsg = firstMsg;
-  net.leaving = false;
-  let ws;
-  try { ws = new WebSocket(wsUrl()); } catch { netFailed(); return; }
-  ws.binaryType = 'arraybuffer';
-  net.ws = ws;
-  let welcomed = false;
-  ws.onopen = () => { ws.send(JSON.stringify(firstMsg)); };
-  ws.onmessage = (e) => {
-    if (typeof e.data !== 'string') { onBinary(e.data); return; }
-    let m;
-    try { m = JSON.parse(e.data); } catch { return; }
-    if (m.t === 'welcome') { welcomed = true; onWelcome(m); }
-    else if (m.t === 'ev') onEvents(m);
-    else if (m.t === 'lb') net.lb = m;
-    else if (m.t === 'st') onStats(m);
-    else if (m.t === 'dead') onNetDeath(m);
-    else if (m.t === 'you') { net.youId = m.id; net.eaten = 0; me = null; ui = 'play'; closeDialog(); onRespawn(); }
-    else if (m.t === 'sync') onSync(m);
-    else if (m.t === 'err') onNetError(m.code);
+// канал до комнаты готов (прямой или петля у хозяина): здороваемся, дальше комната шлёт мир
+function useLink(link) {
+  net.link = link;
+  link.onjson = onNetMsg;
+  link.onbin = onBinary;
+  link.onclose = () => {
+    if (net.link !== link) return;
+    net.link = null;
+    if (!net.leaving && mode === 'net') netReconnect();
   };
-  ws.onclose = () => {
-    if (net.ws !== ws) return;
-    net.ws = null;
-    if (net.leaving || mode !== 'net') return;
-    if (!welcomed && !isRetry) { netFailed(); return; }
-    netReconnect();
+  link.send(hello({ t: 'hello' }));
+}
+function onNetMsg(m) {
+  if (m.t === 'welcome') onWelcome(m);
+  else if (m.t === 'ev') onEvents(m);
+  else if (m.t === 'lb') net.lb = m;
+  else if (m.t === 'st') onStats(m);
+  else if (m.t === 'you') { setMe(m); ui = 'play'; closeDialog(); onRespawn(); }
+  else if (m.t === 'sync') onSync(m);
+  else if (m.t === 'err') onNetError(m.code);
+}
+// хозяин: код комнаты у сайта, комната — здесь же, гости — напрямую
+function hostRoom(opts) {
+  net.isHost = true;
+  const attach = (room, link) => {
+    const c = room.attach(link);
+    link.onjson = (m) => room.message(c, m);
+    link.onbin = (buf) => room.self(c, new DataView(buf));
+    link.onclose = () => room.detach(c);
   };
+  net.sig = host({
+    v: VERSION, token: TOKEN,
+    onCode: (code) => {
+      if (mode !== 'net' || net.leaving) return;
+      if (net.room) { // связь с сайтом восстановилась; если код за это время отдали, — у комнаты новый
+        if (code !== net.code) { net.code = code; net.room.code = code; showRoomCode(); }
+        return;
+      }
+      const room = new Room({ code, mode: opts.mode, diff: opts.diff });
+      net.room = room;
+      net.stopRoom = runRoom(room);
+      const [mine, theirs] = loopback();
+      attach(room, theirs);
+      useLink(mine);
+    },
+    onPeer: (link) => { if (net.room && !net.leaving) attach(net.room, link); else link.close(); },
+    onError: (code) => { if (!net.room) onNetError(code); }, // комната уже идёт — без сайта просто никто новый не зайдёт
+  });
+}
+function stopHosting() {
+  if (net.sig) { net.sig.close(); net.sig = null; }
+  if (net.stopRoom) { net.stopRoom(); net.stopRoom = null; }
+  if (net.room) { for (const c of net.room.clients) c.conn.close(); net.room = null; }
+  net.isHost = false;
+}
+// гость: знакомство через сайт и прямой канал к хозяину
+function joinRoom(code, isRetry) {
+  net.code = code;
+  join({ code, v: VERSION }).then((link) => {
+    if (mode !== 'net' || net.leaving) { link.close(); return; }
+    useLink(link);
+  }).catch((why) => {
+    if (mode !== 'net' || net.leaving) return;
+    if (isRetry && why === 'no_room') { hostGone(); return; }
+    if (isRetry && (why === 'p2p' || why === 'net')) { netReconnect(); return; }
+    onNetError(why);
+  });
+}
+function hostGone() {
+  net.leaving = true;
+  mode = null; me = null;
+  dialog('Комната закрылась', '<p>Хозяин комнаты вышел из игры. Создай свою комнату или зайди в другую.</p>',
+    [{ label: 'В меню', kind: 'filled', onClick: toHome }]);
 }
 function netFailed() {
-  mode = null; net.ws = null;
-  dialog('Нет связи с сервером', '<p>Совместная игра работает только через интернет на сайте игры. Одиночная игра доступна и без сети.</p>',
+  mode = null; net.link = null;
+  dialog('Нет связи с сайтом игры', '<p>Чтобы найти друг друга, нужен интернет. Одиночная игра доступна и без сети.</p>',
     [{ label: 'Понятно', kind: 'filled', onClick: toHome }]);
 }
 function netReconnect() {
@@ -851,9 +904,9 @@ function netReconnect() {
   net.retry++;
   clearTimeout(net.retryTimer);
   net.retryTimer = setTimeout(() => {
-    if (mode !== 'net') return;
+    if (mode !== 'net' || net.link) return;
     netReset();
-    netOpen(hello({ t: 'join', code: net.code }), true);
+    joinRoom(net.code, true);
   }, net.retry === 1 ? 300 : 2000);
 }
 // Обновление — только по кнопке: новая версия уже скачана и ждёт (см. sw.js), говорим ей взять управление и перезагружаемся.
@@ -910,22 +963,24 @@ function watchUpdates(reg) {
 }
 $('btnUpdate').addEventListener('click', () => { $('btnUpdate').disabled = true; updateApp(); });
 function onNetError(code) {
+  if (code === 'net') { netFailed(); return; }
+  net.leaving = true;
+  if (net.link) net.link.close();
+  stopHosting();
+  mode = null; me = null;
   if (code === 'version') {
-    net.leaving = true;
-    if (net.ws) net.ws.close();
-    mode = null;
-    dialog('Вышло обновление', '<p>На сервере новая версия игры. Обнови её на устройстве, чтобы играть вместе.</p>',
+    dialog('Вышло обновление', '<p>У хозяина комнаты новая версия игры. Обнови её на устройстве, чтобы играть вместе.</p>',
       [{ label: 'Позже', kind: 'text', onClick: toHome }, { label: 'Обновить', kind: 'filled', onClick: updateApp }]);
     return;
   }
   const text = {
     no_room: 'Комнаты с таким кодом нет. Проверь код или создай новую комнату.',
     full: 'В комнате уже 8 игроков.',
-    limit: 'Сервер сейчас занят: слишком много комнат. Попробуй позже.',
+    limit: 'Сейчас слишком много комнат. Попробуй позже.',
+    old_host: 'У хозяина комнаты старая версия игры. Пусть нажмёт «Обновить» на главной и создаст комнату заново.',
+    p2p: 'Не получилось соединиться напрямую с хозяином комнаты. В одной Wi-Fi-сети всё работает; ' +
+      'через мобильный интернет некоторые сети прямое соединение не пропускают — попробуйте подключиться к одному Wi-Fi.',
   }[code] || 'Что-то пошло не так.';
-  net.leaving = true;
-  if (net.ws) net.ws.close();
-  mode = null;
   dialog('Не получилось войти', `<p>${text}</p>`, [{ label: 'Понятно', kind: 'filled', onClick: toHome }]);
 }
 function makeNetSnake(m) {
@@ -936,18 +991,32 @@ function makeNetSnake(m) {
     r: radiusOf(START_MASS), isBoosting: false, inv: 0, visible: false, seen: false };
 }
 function setFeast(f) { feast = f ? { x: f.x, y: f.y, until: time + f.life } : null; }
+function showRoomCode() {
+  try { history.replaceState(null, '', `?room=${net.code}`); } catch { /* */ }
+  $('roomChip').innerHTML = `${icon('group')}Комната ${net.code}${icon('share')}`;
+  $('roomBox').hidden = false;
+}
+// своя змейка — от комнаты (где появиться и какой длины), дальше считаем её сами
+function setMe(y) {
+  const segs = [];
+  for (let i = 0; i < y.segs.length; i += 2) segs.push({ x: y.segs[i], y: y.segs[i + 1] });
+  if (!segs.length) segs.push({ x: 0, y: 0 });
+  const s = new Snake(y.id, segs[0].x, segs[0].y, y.mass, save.skin, myName(), true, y.team, undefined, segs);
+  s.inv = y.inv || 0;
+  me = s;
+  net.youId = y.id; net.myTeam = y.team; net.eaten = 0; net.seq = 0; net.lastSent = 0;
+  // moveSnake из core.js — с этим «миром»: правила уровня, край арены, сброс еды при рывке уходит хозяину
+  net.sim = { D: DIFF[net.diff], pending: [], addFood: (x, yy, v, c) => { net.dropQ.push([Math.round(x), Math.round(yy), Math.round(v * 100) / 100, c]); } };
+  cam.x = segs[0].x; cam.y = segs[0].y;
+}
 function onWelcome(m) {
-  net.code = m.code; net.roomMode = m.mode; net.diff = m.diff; net.youId = m.you; net.retry = 0;
-  net.snakes.clear(); net.foods.clear(); net.buf = []; net.lastTick = m.tick;
+  net.code = m.code; net.roomMode = m.mode; net.diff = m.diff; net.retry = 0;
+  net.snakes.clear(); net.foods.clear(); net.buf = []; net.foodQ = []; net.lastTick = m.tick;
   for (const s of m.snakes) net.snakes.set(s.id, makeNetSnake(s));
   net.offset = performance.now() - m.tick * TICK_MS;
-  const mine = net.snakes.get(m.you);
-  if (mine) { cam.x = mine.segs[0].x; cam.y = mine.segs[0].y; net.myTeam = mine.team; }
+  setMe(m.me);
   setFeast(m.feast);
-  me = null;
-  try { history.replaceState(null, '', `?room=${m.code}`); } catch { /* */ }
-  $('roomChip').innerHTML = `${icon('group')}Комната ${m.code}${icon('share')}`;
-  $('roomBox').hidden = false;
+  showRoomCode();
   closeDialog();
   showHome(false);
   if (!run) { run = newRun(m.diff); playTime = 0; showHint(); }
@@ -955,6 +1024,7 @@ function onWelcome(m) {
   hudT = 0;
 }
 function addNetFood(id, x, y, v, c, life, cell) {
+  if (net.ate.has(id)) return; // уже съели сами, хозяин ещё не успел убрать
   net.foods.set(id, { id, x, y, v, c, r: foodRadiusOf(v), ph: Math.random() * TAU, life, age: 0, cell });
 }
 const FR = 13; // запись еды: u8 клетка, u32 id, i16 x·4, i16 y·4, u16 ценность·100, u8 цвет, u8 жизнь
@@ -962,12 +1032,12 @@ const FLR = 16; // бабочка: u16 id, i16 x·4, i16 y·4, u16 курс, u16
 const readFood = (dv, o) => [dv.getUint32(o + 1, true), dv.getInt16(o + 5, true) / 4, dv.getInt16(o + 7, true) / 4,
   dv.getUint16(o + 9, true) / 100, dv.getUint8(o + 11), dv.getUint8(o + 12), dv.getUint8(o)];
 function onSync(m) { // догнали после пропущенных снимков: змеи рядом — заново, еда придёт следом целиком
-  for (const s of m.snakes) net.snakes.set(s.id, makeNetSnake(s));
+  for (const s of m.snakes) if (s.id !== net.youId) net.snakes.set(s.id, makeNetSnake(s));
   setFeast(m.feast);
   if (m.kill && m.kill.length) onEvents({ kill: m.kill });
 }
 function onEvents(m) {
-  for (const s of m.spawn || []) net.snakes.set(s.id, makeNetSnake(s)); // вошла в поле зрения — тело целиком
+  for (const s of m.spawn || []) if (s.id !== net.youId) net.snakes.set(s.id, makeNetSnake(s)); // вошла в поле зрения — тело целиком
   if (m.feast) onFeast(m.feast.x, m.feast.y, m.feast.life);
   // мир рисуем с задержкой INTERP_MS — вспышку и звук поимки тоже, иначе они опередят голову
   for (const [x, y, c, by, v] of m.fly || []) setTimeout(() => onFlyCaught(x, y, c, by === net.youId, v), INTERP_MS);
@@ -981,17 +1051,18 @@ function onEvents(m) {
   }
 }
 function onStats(m) {
-  if (m.eaten > net.eaten) net.eaten = m.eaten;
   if ('rv' in m) net.rv = m.rv;
 }
+function readFoods(dv, o, n, out) { for (let i = 0; i < n; i++, o += FR) out.push(readFood(dv, o)); return o; }
 function onBinary(buf) {
   const dv = new DataView(buf);
   const type = dv.getUint8(0);
-  if (type === 2) { // вся еда вокруг разом
+  if (type === 2) { // вся еда вокруг разом — изменения до неё уже не нужны
     net.foods.clear();
-    const n = dv.getUint32(1, true);
-    for (let i = 0, o = 5; i < n; i++, o += FR) addNetFood(...readFood(dv, o));
-    for (const s of net.buf) s.applied = true;
+    net.foodQ = [];
+    const all = [];
+    readFoods(dv, 5, dv.getUint32(1, true), all);
+    for (const f of all) addNetFood(...f);
     return;
   }
   if (type === 3) { // сменились клетки вокруг: из ушедших еду убираем, пришедшие — заново целиком
@@ -1002,17 +1073,28 @@ function onBinary(buf) {
     const ne = dv.getUint8(o++);
     for (let i = 0; i < ne; i++) drop.add(dv.getUint8(o++));
     for (const [id, f] of net.foods) if (drop.has(f.cell)) net.foods.delete(id);
-    // снимки в буфере ещё не применены — их еду из этих клеток не возвращаем
-    for (const sn of net.buf) if (!sn.applied) sn.added = sn.added.filter((f) => !drop.has(f[6]));
-    const n = dv.getUint32(o, true); o += 4;
-    for (let i = 0; i < n; i++, o += FR) addNetFood(...readFood(dv, o));
+    // изменения в очереди ещё не применены — их еду из этих клеток не возвращаем
+    for (const q of net.foodQ) q.added = q.added.filter((f) => !drop.has(f[6]));
+    const all = [];
+    readFoods(dv, o + 4, dv.getUint32(o, true), all);
+    for (const f of all) addNetFood(...f);
+    return;
+  }
+  if (type === 4) { // что с едой случилось за шаг — применим, когда до этого шага дойдёт картинка
+    const tick = dv.getUint32(1, true), added = [], removed = [];
+    let o = readFoods(dv, 7, dv.getUint16(5, true), added);
+    const nr = dv.getUint16(o, true); o += 2;
+    for (let i = 0; i < nr; i++, o += 4) removed.push(dv.getUint32(o, true));
+    net.foodQ.push({ tick, added, removed });
+    while (net.foodQ.length > 120) applyFood(net.foodQ.shift()); // вкладка свёрнута — не копим
     return;
   }
   if (type !== 1) return;
   let o = 1;
   const tick = dv.getUint32(o, true); o += 4;
-  if (tick <= net.lastTick) return;
+  if (tick <= net.lastTick) return; // снимки идут без повторов и могут прийти не по порядку: старый — мимо
   net.lastTick = tick;
+  net.lastSnap = performance.now();
   const n = dv.getUint16(o, true); o += 2;
   const snakes = new Map();
   for (let i = 0; i < n; i++) {
@@ -1021,16 +1103,11 @@ function onBinary(buf) {
     const a = dv.getUint16(o + 8, true) / 65535 * TAU, ta = dv.getUint16(o + 10, true) / 65535 * TAU;
     const mass = dv.getFloat32(o + 12, true), fl = dv.getUint8(o + 16);
     o += 17;
+    if (id === net.youId) continue;
     snakes.set(id, { x, y, a, ta, mass, boost: !!(fl & 1), inv: !!(fl & 2) });
     const sn = net.snakes.get(id);
     if (sn) sn.seen = true;
   }
-  const added = [];
-  const na = dv.getUint16(o, true); o += 2;
-  for (let i = 0; i < na; i++, o += FR) added.push(readFood(dv, o));
-  const removed = [];
-  const nr = dv.getUint16(o, true); o += 2;
-  for (let i = 0; i < nr; i++) { removed.push(dv.getUint32(o, true)); o += 4; }
   const flies = new Map();
   const nf = o < dv.byteLength ? dv.getUint8(o++) : 0;
   for (let i = 0; i < nf; i++, o += FLR) {
@@ -1039,38 +1116,22 @@ function onBinary(buf) {
     flies.set(dv.getUint16(o, true), { x: dv.getInt16(o + 2, true) / 4, y: dv.getInt16(o + 4, true) / 4,
       dir: dv.getUint16(o + 6, true) / 65535 * TAU, n: dv.getUint16(o + 8, true) / 100, dart: dv.getUint8(o + 10) & 1, top });
   }
-
   const sample = performance.now() - tick * TICK_MS;
   net.offset = net.offset === null ? sample : Math.min(sample, net.offset + 2);
-  net.buf.push({ tick, snakes, added, removed, flies, applied: false });
-  // вкладка свёрнута — кадры не рисуются и буфер не разбирается; старое не копим
-  while (net.buf.length > 40) { applyFood(net.buf[0]); net.buf.shift(); }
-
-  const mine = snakes.get(net.youId);
-  if (mine) {
-    if (mine.mass > net.myMass + 0.5 && net.myMass > 0) { net.grewAt = performance.now(); if (!mine.boost) sfx.eat(); }
-    net.myMass = mine.mass;
-  }
+  net.buf.push({ tick, snakes, flies });
+  while (net.buf.length > 40) net.buf.shift(); // вкладка свёрнута — кадры не рисуются и буфер не разбирается; старое не копим
 }
-function applyFood(s) {
-  if (s.applied) return;
-  s.applied = true;
-  for (const f of s.added) addNetFood(...f);
-  // крошку съела своя змейка, если она рядом с головой и змейка в этом снимке подросла (иначе её съел сосед или она растаяла)
-  const h = me && me.segs.length && performance.now() - net.grewAt < INTERP_MS + 250 ? me.segs[0] : null;
-  for (const id of s.removed) {
-    const f = h && net.foods.get(id);
-    if (f) { const d = (me.r + f.r) * 1.6 + 10; if ((f.x - h.x) ** 2 + (f.y - h.y) ** 2 < d * d) onGulp(f); }
-    net.foods.delete(id);
-  }
+function applyFood(q) {
+  for (const f of q.added) addNetFood(...f);
+  for (const id of q.removed) net.foods.delete(id);
 }
 function netUpdate(now, dt) {
-  const buf = net.buf;
-  if (!buf.length) return;
   const rt = now - net.offset - INTERP_MS;
-  while (buf.length >= 2 && buf[1].tick * TICK_MS <= rt) { applyFood(buf[0]); buf.shift(); }
+  while (net.foodQ.length && net.foodQ[0].tick * TICK_MS <= rt) applyFood(net.foodQ.shift());
+  const buf = net.buf;
+  if (!buf.length) { net.flies = []; return; }
+  while (buf.length >= 2 && buf[1].tick * TICK_MS <= rt) buf.shift();
   const s0 = buf[0];
-  if (s0.tick * TICK_MS <= rt) applyFood(s0);
   const s1 = buf[1] || s0;
   const t = s1 === s0 ? 1 : clamp((rt - s0.tick * TICK_MS) / ((s1.tick - s0.tick) * TICK_MS), 0, 1);
   for (const sn of net.snakes.values()) sn.visible = false;
@@ -1092,13 +1153,14 @@ function netUpdate(now, dt) {
   }
   net.flies = [];
   for (const [id, b] of s1.flies) {
+    if (net.claimed.has(id)) continue; // свою поимку не ждём — бабочка исчезает сразу
     const a0 = s0.flies.get(id) || b;
     net.flies.push({ id, x: a0.x + (b.x - a0.x) * t, y: a0.y + (b.y - a0.y) * t, dir: a0.dir + angDiff(b.dir, a0.dir) * t,
       n: b.n, dart: b.dart, top: b.top, ph: (id * 2.39996) % TAU });
   }
   const last = buf[buf.length - 1];
   for (const [id, sn] of net.snakes) if (sn.seen && !sn.visible && !last.snakes.has(id)) net.snakes.delete(id);
-  // еда притягивается к головам, как на сервере, — иначе исчезает раньше, чем до неё доползли.
+  // еда притягивается к головам, как в мире хозяина, — иначе исчезает раньше, чем до неё доползли.
   // Только в видимой области: за экраном это никто не увидит.
   const hw = W / 2 / cam.z + 80, hh = H / 2 / cam.z + 80, k = Math.min(1, dt * 7);
   const heads = [];
@@ -1107,6 +1169,7 @@ function netUpdate(now, dt) {
     const h = sn.segs[0];
     if (Math.abs(h.x - cam.x) < hw && Math.abs(h.y - cam.y) < hh) heads.push(sn);
   }
+  if (me) heads.push(me);
   for (const f of net.foods.values()) {
     if (f.life > 0) f.age += dt;
     if (!heads.length || Math.abs(f.x - cam.x) > hw || Math.abs(f.y - cam.y) > hh) continue;
@@ -1116,25 +1179,67 @@ function netUpdate(now, dt) {
       if (dx * dx + dy * dy < reach * reach) { f.x += dx * k; f.y += dy * k; }
     }
   }
-  const mine = net.snakes.get(net.youId);
-  me = mine && mine.visible ? mine : null;
 }
 function netInput() {
   if (!me || ui === 'dead') return;
   const { a, b } = steer();
-  const now = performance.now();
-  const changed = (a !== null && (net.lastA === null || Math.abs(angDiff(a, net.lastA)) > 0.02)) || b !== net.lastB;
-  if ((changed && now - net.lastSent > 40) || now - net.lastSent > 1000) {
-    const m = { t: 'in', b: b ? 1 : 0 };
-    if (a !== null) { m.a = Math.round(a * 1000) / 1000; net.lastA = a; }
-    net.lastB = b; net.lastSent = now;
-    netSend(m);
-  }
+  if (a !== null) me.ta = a;
+  me.boost = b; net.lastB = b;
 }
-function onNetDeath(m) {
+// своя змейка: движение по правилам core.js, столкновения — с тем, что видно на экране, еда и бабочки — тоже
+function selfStep(dt, now) {
+  if (!me || !net.link || ui === 'conn') return;
+  const sim = net.sim, m0 = me.mass;
+  World.prototype.moveSnake.call(sim, me, dt);
+  if (sim.pending.length) { sim.pending = []; selfDie(null); return; } // край арены (на среднем и сложном)
+  const h = me.segs[0];
+  if (me.inv <= 0) {
+    for (const o of net.snakes.values()) {
+      if (!o.visible || o.inv || (me.team && o.team === me.team)) continue;
+      const rr = me.r * 0.55 + o.r * 0.85, rr2 = rr * rr, reach = bodyLenOf(o.mass) + o.r + me.r + 40;
+      if (Math.abs(o.segs[0].x - h.x) > reach || Math.abs(o.segs[0].y - h.y) > reach) continue;
+      for (const q of o.segs) {
+        const dx = q.x - h.x, dy = q.y - h.y;
+        if (dx * dx + dy * dy < rr2) { selfDie(o); return; }
+      }
+    }
+  }
+  for (const [id, f] of net.foods) {
+    const dx = h.x - f.x, dy = h.y - f.y, er = me.r * 0.8 + f.r;
+    if (dx * dx + dy * dy >= er * er) continue;
+    me.mass += f.v; me.eaten += f.v; net.eaten += f.v;
+    onGulp(f);
+    net.foods.delete(id);
+    net.ate.set(id, now);
+    net.eatQ.push(id);
+  }
+  if (me.mass > m0 + 0.5 && !me.isBoosting) sfx.eat();
+  for (const f of net.flies) {
+    const rr = me.r * 0.8 + flyRadius(f.n) * (0.5 + 0.4 * flyEase(me));
+    if ((h.x - f.x) ** 2 + (h.y - f.y) ** 2 < rr * rr) { net.claimed.set(f.id, now); netSend({ t: 'fly', id: f.id }); }
+  }
+  if (now - net.lastSent >= SELF_MS) selfSend(now);
+}
+function selfSend(now) {
+  net.lastSent = now;
+  if (!net.link) return;
+  if (me) net.link.fast(encodeSelf(me, net.seq++));
+  if (net.eatQ.length) { netSend({ t: 'eat', ids: net.eatQ }); net.eatQ = []; }
+  if (net.dropQ.length) { netSend({ t: 'drop', f: net.dropQ }); net.dropQ = []; }
+  // что сами съели и поймали — помним пару секунд, пока хозяин не уберёт это у себя
+  for (const [id, t] of net.ate) if (now - t > 2000) net.ate.delete(id);
+  for (const [id, t] of net.claimed) if (now - t > 2000) net.claimed.delete(id);
+}
+function selfDie(killer) {
+  const dead = me;
+  selfSend(performance.now()); // последнее положение — чтобы останки легли там, где разбились
+  netSend({ t: 'die', by: killer ? killer.id : 0 });
+  me = null;
+  onNetDeath({ by: killer ? killer.name : null, byId: killer ? killer.id : 0, mass: Math.floor(dead.mass), max: Math.floor(dead.maxMass), eaten: dead.eaten }, dead);
+}
+function onNetDeath(m, dead) {
   sfx.die();
-  const mine = me;
-  if (mine) setTimeout(() => { burst(mine, false); camKick(0, 9); }, INTERP_MS);
+  burst(dead, false); camKick(0, 9);
   net.deadInfo = m;
   ui = 'dead';
   onLifeEnd(Math.max(m.eaten || 0, net.eaten), m.max);
@@ -1152,15 +1257,25 @@ function startNet(firstMsg) {
   mode = 'net'; ui = 'conn'; me = null; world = null; net.kills = 0; net.retry = 0; net.eaten = 0;
   run = null; feast = null; clearFx();
   netReset();
-  dialog('Подключаюсь…', '<p>Соединяюсь с сервером игры.</p>', [{ label: 'Отмена', kind: 'text', onClick: leaveNet }]);
-  netOpen(firstMsg, false);
+  net.leaving = false;
+  stopHosting();
+  if (firstMsg.t === 'create') {
+    dialog('Создаю комнату…', '<p>Получаю код комнаты.</p>', [{ label: 'Отмена', kind: 'text', onClick: leaveNet }]);
+    hostRoom(firstMsg);
+  } else {
+    dialog('Подключаюсь…', '<p>Соединяюсь с хозяином комнаты.</p>', [{ label: 'Отмена', kind: 'text', onClick: leaveNet }]);
+    joinRoom(firstMsg.code, false);
+  }
 }
 function leaveNet() {
   net.leaving = true;
   clearTimeout(net.retryTimer);
   netSend({ t: 'leave' });
-  if (net.ws) net.ws.close();
-  net.ws = null;
+  const link = net.link;
+  net.link = null;
+  // гостю — дать «leave» уйти, хозяину — закрыть комнату всем
+  if (link) setTimeout(() => link.close(), 100);
+  stopHosting();
   try { history.replaceState(null, '', location.pathname); } catch { /* */ }
   toHome();
 }
@@ -1424,7 +1539,8 @@ function menuDialog() {
   if (mode === 'solo' && ui === 'paused') pauseDialog('Пауза', '', 'Продолжить', resume, toHome);
   else if (mode === 'net' && ui === 'play') {
     pauseDialog(`Комната ${net.code}`, `<p class="pz-note">${net.roomMode === 'team' ? 'Команда против ботов' : 'Все против всех'} · боты: ${DIFF[net.diff].label.toLowerCase()}. ` +
-      'Игра идёт, пока открыто меню.</p>', 'Играть', closeDialog, leaveNet);
+      'Игра идёт, пока открыто меню.' + (net.isHost ? ' Ты хозяин комнаты: не сворачивай игру, иначе комната встанет у всех.' : '') +
+      '</p>', 'Играть', closeDialog, leaveNet);
   }
 }
 function resume() { if (ui === 'paused') { ui = 'play'; closeDialog(); last = performance.now(); } }
@@ -1432,7 +1548,7 @@ $('btnMenu').addEventListener('click', openMenu);
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) persist();
   if (document.hidden && mode === 'solo') openMenu();
-  if (!document.hidden && mode === 'net' && !net.ws && !net.leaving) netReconnect();
+  if (!document.hidden && mode === 'net' && !net.link && !net.leaving && ui !== 'conn') netReconnect();
 });
 window.addEventListener('pagehide', persist);
 
@@ -2141,8 +2257,13 @@ function frame(now) {
   if (feast && time > feast.until) feast = null;
   if (mode === 'net') {
     netInput();
+    selfStep(dt, now);
     netUpdate(now, dt);
     if (ui === 'play') playTime += dt;
+    // хозяин свернул игру — его комната стоит; гостю говорим, что ждём
+    if (!net.isHost && ui === 'play' && net.lastSnap && now - net.lastSnap > 2500) {
+      if (!net.waitSnack) { net.waitSnack = true; snack('Хозяин комнаты не отвечает — ждём…'); }
+    } else net.waitSnack = false;
   } else if (ui !== 'paused') {
     if (mode === 'solo' && me && me.alive) {
       const { a, b } = steer();
