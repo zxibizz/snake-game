@@ -101,8 +101,9 @@ svg.i{width:24px;height:24px;fill:currentColor;flex:none}
 
 /* --- игровой интерфейс: пауза, длина и место, топ-3 --- */
 :root{--hud-top:env(safe-area-inset-top)}
-/* установленная игра на iPhone: статус-бар поверх страницы и чуть затеняет край — отступаем дальше от него */
-@media (display-mode: standalone){:root{--hud-top:calc(env(safe-area-inset-top) + 12px)}}
+/* установленная игра (класс pwa ставит скрипт: navigator.standalone или display-mode standalone/fullscreen —
+   в манифесте fullscreen, и одного standalone в медиазапросе мало): статус-бар поверх страницы и затеняет край */
+:root.pwa{--hud-top:calc(env(safe-area-inset-top) + 16px)}
 #hud{position:fixed;inset:0;pointer-events:none}
 .hud-tl{position:absolute;top:calc(12px + var(--hud-top));left:calc(12px + env(safe-area-inset-left));
   display:flex;gap:12px;align-items:center}

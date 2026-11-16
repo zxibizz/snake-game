@@ -178,8 +178,10 @@ const canvas = $('c'), ctx = canvas.getContext('2d');
 let W = 0, H = 0, DPR = 1;
 // Установленная игра на iPhone (статус-бар поверх страницы): окно короче экрана примерно на высоту статус-бара,
 // и снизу остаётся пустая полоса. Там холст тянем на всю высоту экрана (screen у iOS — всегда в портретной ориентации).
-const IOS_PWA = /iPhone|iPod/.test(navigator.userAgent || '') &&
-  (navigator.standalone === true || (window.matchMedia && matchMedia('(display-mode: standalone)').matches));
+const IS_PWA = navigator.standalone === true ||
+  (window.matchMedia && matchMedia('(display-mode: standalone), (display-mode: fullscreen)').matches);
+const IOS_PWA = IS_PWA && /iPhone|iPod/.test(navigator.userAgent || '');
+if (IS_PWA) document.documentElement.classList.add('pwa');
 function fullHeight() {
   const iw = window.innerWidth, ih = window.innerHeight;
   if (!IOS_PWA || !screen.width || !screen.height) return ih;
