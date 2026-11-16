@@ -1,6 +1,6 @@
 // Клиент: отрисовка, управление, меню; одиночная игра считает мир сама, совместная — получает его с сервера.
 import {
-  World, SKINS, TYPES, SKINS_OF, PAL, GOLD, DIFF, R, TAU, START_MASS, SNAKES_N, FOOD_N, VERSION, TITLES, titleOf, segColor,
+  World, SKINS, TYPES, PAL, foodLookOf, GOLD, DIFF, R, TAU, START_MASS, SNAKES_N, FOOD_N, VERSION, TITLES, titleOf, segColor,
   radiusOf, spacingOf, countOf, bodyLenOf, foodRadiusOf, followChain, fitLength, clamp, angDiff, keepMass,
   FLY_MAX, flyK, flyScale, MIN_BOOST_MASS,
 } from './core.js';
@@ -26,6 +26,7 @@ const ICONS = {
   left: '<path d="M15.41 7.41 14 6l-6 6 6 6 1.41-1.41L10.83 12z"/>',
   right: '<path d="M10 6 8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/>',
   vibration: '<path d="M0 15h2V9H0v6zm3 2h2V7H3v10zm19-8v6h2V9h-2zm-3 8h2V7h-2v10zM16.5 3h-9C6.67 3 6 3.67 6 4.5v15c0 .83.67 1.5 1.5 1.5h9c.83 0 1.5-.67 1.5-1.5v-15c0-.83-.67-1.5-1.5-1.5zM16 19H8V5h8v14z"/>',
+  help: '<path d="M11 18h2v-2h-2v2zm1-16C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm0-14c-2.21 0-4 1.79-4 4h2c0-1.1.9-2 2-2s2 .9 2 2c0 2-3 1.75-3 5h2c0-2.25 3-2.5 3-5 0-2.21-1.79-4-4-4z"/>',
   star: '<path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/>',
   cloudDone: '<path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM10 17l-3.5-3.5 1.41-1.41L10 14.17 15.18 9l1.41 1.41L10 17z"/>',
 };
@@ -307,8 +308,18 @@ function unscroll() {
   if (typing && (!vv || vv.height < window.innerHeight - 80)) return;
   window.scrollTo(0, 0);
 }
+// вырезы экрана (чёлка, полоса «домой»): стрелка лидера стоит у самого края, но не под ними
+let safe = { t: 0, r: 0, b: 0, l: 0 };
+function readSafe() {
+  const d = document.createElement('div');
+  d.style.cssText = 'position:fixed;visibility:hidden;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)';
+  document.body.appendChild(d); const cs = getComputedStyle(d);
+  safe = { t: parseFloat(cs.paddingTop) || 0, r: parseFloat(cs.paddingRight) || 0, b: parseFloat(cs.paddingBottom) || 0, l: parseFloat(cs.paddingLeft) || 0 };
+  d.remove();
+}
 function resize() {
   DPR = Math.min(window.devicePixelRatio || 1, 2);
+  readSafe();
   W = window.innerWidth; H = fullHeight();
   // холст, интерфейс, затемнение диалогов и экраны меню — одной высоты (CSS: var(--app-h)). В установленной игре на iPhone
   // раскладка по высоте экрана, даже если окно сейчас и само с экран: iOS то укорачивает окно на статус-бар, то растягивает
@@ -343,7 +354,7 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden) setT
 const FIELD = '#161A16', GRID = '#202620', OUTSIDE = '#2B1715', EDGE = '#FFB4AB';
 // обводка своей змейки: белая 60 % поверх поля; силуэты бусин накладываются друг на друга, поэтому цвет — уже смешанный с полем, плотный
 const MINE_RGB = 162;
-const ON = '#E1E3DE', PRIMARY = '#88D982', TERTIARY = '#A0CFD4', GOLD_C = '#FFD447', REVENGE = '#FF6B5E';
+const ON = '#E3E8F5', PRIMARY = '#8EB8FF', TERTIARY = '#DDBCE0', GOLD_C = '#FFD447', REVENGE = '#FF6B5E';
 function makeGrid() {
   const s = 2, t = 80;
   const c = document.createElement('canvas');
@@ -1479,7 +1490,7 @@ function glowOf(n) {
 function clearFx() { effects = []; gulps = []; lumps = []; sparks = []; kick.t = -9; slowUntil = 0; gulpT = -9; }
 const inView = (x, y, m = 0) => Math.abs(x - cam.x) < W / 2 / cam.z + m && Math.abs(y - cam.y) < H / 2 / cam.z + m;
 function onGulp(f) { // крошка f ({ x, y, r, c }) съедена своей змейкой
-  if (gulps.length < 40) gulps.push({ x: f.x, y: f.y, r: f.r, c: f.c, t: time });
+  if (gulps.length < 40) gulps.push({ x: f.x, y: f.y, r: f.lr ?? foodLookOf(f.v), c: f.c, t: time });
   gulpT = time;
   if (!lumps.length || time - lumps[lumps.length - 1] > 0.12) { lumps.push(time); if (lumps.length > 5) lumps.shift(); }
 }
@@ -1578,33 +1589,17 @@ function hideHint() { clearTimeout(hintTimer); $('hint').hidden = true; }
 
 // ---------- главный экран ----------
 
-// раскраска: стрелками листаются все, играть можно только открытыми
-// Сначала вид (ряд голов), стрелки и свайп листают раскраски этого вида.
+// раскраска: стрелки и свайп по змейке листают открытые раскраски (по цене) и одну следующую закрытую — цель.
+// Все 40 подряд — почти сплошь замки; играть можно только открытыми.
 let viewSkin = save.skin;
 const viewAt = (k) => { viewSkin = k; if (unlocked(SKINS[k])) { save.skin = k; persist(); } renderHome(); };
-const stepSkin = (d) => { const l = SKINS_OF[SKINS[viewSkin].type], j = l.indexOf(viewSkin); viewAt(l[(j + d + l.length) % l.length]); };
-// значки видов: голова первой раскраски вида
-const typeBtns = TYPES.map((t, ti) => {
-  const b = document.createElement('button'), c = document.createElement('canvas'), k = SKINS_OF[ti][0];
-  b.setAttribute('role', 'tab'); b.setAttribute('aria-label', t.name); b.title = t.name;
-  c.width = c.height = Math.round(44 * DPR); b.appendChild(c);
-  const g = c.getContext('2d'); g.scale(c.width / 44, c.width / 44);
-  // значок: кусочек змейки — две бусины и голова, чтобы видно было и узор, и голову
-  for (const [x, i] of [[8, 4], [15, 2]]) {
-    g.save(); g.translate(x, 22); const sc = 7 / BEAD_U; g.scale(sc, sc);
-    const sp = beadSprite(k, segColor(k, i), beadVar(k, i)); g.drawImage(sp, -sp.e, -sp.e); g.restore();
-  }
-  drawHead(g, k, 27, 22, 0, 0, 7.5);
-  const lk = document.createElement('span'); lk.className = 'lk'; lk.innerHTML = icon('lock'); b.appendChild(lk);
-  // свой вид — к своей раскраске; иначе к последней открытой раскраске вида, а если закрыты все — к первой
-  b.addEventListener('click', () => {
-    if (SKINS[save.skin].type === ti) return viewAt(save.skin);
-    const open = SKINS_OF[ti].filter((i) => unlocked(SKINS[i]));
-    viewAt(open.length ? open[open.length - 1] : SKINS_OF[ti][0]);
-  });
-  $('types').appendChild(b);
-  return b;
-});
+const BY_PRICE = SKINS.map((_, i) => i).sort((a, b) => SKINS[a].stars - SKINS[b].stars || a - b);
+const skinList = () => { const open = BY_PRICE.filter((i) => unlocked(SKINS[i])), next = BY_PRICE.find((i) => !unlocked(SKINS[i])); return next === undefined ? open : open.concat(next); };
+const stepSkin = (d) => {
+  const l = skinList(); let j = l.indexOf(viewSkin);
+  if (j < 0) { const p = BY_PRICE.indexOf(viewSkin); j = l.findIndex((i) => BY_PRICE.indexOf(i) > p); if (j < 0) j = l.length; if (d > 0) j--; } // не из списка — соседи по цене
+  viewAt(l[(j + d + l.length) % l.length]);
+};
 $('skinPrev').addEventListener('click', () => stepSkin(-1));
 $('skinNext').addEventListener('click', () => stepSkin(1));
 // свайп по змейке тоже листает
@@ -1626,11 +1621,6 @@ function renderHome() {
   $('stars').innerHTML = `${icon('star')}${stars()}`;
   const sk = SKINS[viewSkin], open = unlocked(sk);
   $('skinName').textContent = sk.name;
-  typeBtns.forEach((b, ti) => {
-    const on = ti === sk.type, locked = !SKINS_OF[ti].some((i) => unlocked(SKINS[i]));
-    b.classList.toggle('on', on); b.classList.toggle('locked', locked); b.setAttribute('aria-selected', on);
-    b.lastChild.hidden = !locked;
-  });
   $('skinLock').innerHTML = open ? '' : `${icon('lock')}откроется за ${sk.stars - stars()} ★`;
   document.querySelectorAll('#diff button').forEach((b) => b.classList.toggle('on', b.dataset.d === save.diff));
   const v = save.best[save.diff] || 0;
@@ -1743,11 +1733,6 @@ function installHint() {
   return '';
 }
 let offline = { cls: '', ic: 'cloudOff', text: 'Проверяю, сохранена ли игра для офлайна…' };
-function renderFoot() {
-  const f = $('btnInfo');
-  f.className = `foot ${offline.cls}`;
-  f.innerHTML = `${icon(offline.ic)}Как играть · версия ${VERSION}`;
-}
 $('btnInfo').addEventListener('click', () => {
   const ctl = isTouch
     ? 'Коснись экрана в любом месте и веди пальцем — это джойстик. Держи молнию, чтобы ускориться: каждая секунда сжигает 5 % длины, но не меньше 10. Размер и место молнии — на паузе.'
@@ -1755,12 +1740,12 @@ $('btnInfo').addEventListener('click', () => {
   const ih = installHint();
   dialog('Как играть', `<p>${ctl}</p><p>Подрежь соперника — пусть врежется в тебя головой. Золотая стрелка с короной у края экрана показывает, где лидер.</p>` +
     `<p>Звёзды за еду, победы и места открывают новых змеек и их раскраски.</p>` +
-    `<div class="note ${offline.cls}">${icon(offline.ic)}<span>${offline.text}${ih ? ` ${ih}` : ''}</span></div>` + (IOS_PWA ? `<p class="muted">${screenInfo()}</p>` : ''),
+    `<div class="note ${offline.cls}">${icon(offline.ic)}<span>${offline.text}${ih ? ` ${ih}` : ''}</span></div>` + `<p class="muted">Версия ${VERSION}</p>` + (IOS_PWA ? `<p class="muted">${screenInfo()}</p>` : ''),
   [{ label: 'Понятно', kind: 'filled', onClick: closeDialog }]);
 });
 let updatesWatched = false;
 async function checkOffline() {
-  const set = (cls, ic, text) => { offline = { cls, ic, text }; renderFoot(); };
+  const set = (cls, ic, text) => { offline = { cls, ic, text }; }; // показывается в «Как играть»
   if (!('serviceWorker' in navigator) || !window.caches) { set('warn', 'cloudOff', 'Этот браузер не умеет сохранять игру для офлайна.'); return; }
   try {
     const reg = await navigator.serviceWorker.register('sw.js');
@@ -1778,7 +1763,6 @@ async function checkOffline() {
     set('warn', 'cloudOff', 'Не получилось включить офлайн-режим: ' + esc(e.message));
   }
 }
-renderFoot();
 checkOffline();
 
 // ---------- камера ----------
@@ -1919,11 +1903,19 @@ function leaderTarget() {
 }
 function drawPointer(tx, ty, color, crown = false) {
   const sx = W / 2 + (tx - cam.x) * cam.z, sy = H / 2 + (ty - cam.y) * cam.z;
-  const pad = 54;
-  if (sx > pad && sx < W - pad && sy > pad && sy < H - pad) return;
+  // кончик стрелки — примерно в 9 px от края экрана (центр стрелки на pad от края; вырезы экрана не заходим)
+  const pad = 30, pl = pad + safe.l, pr = pad + safe.r, pb = pad + safe.b;
+  const underHud = hudBoxes.some((b) => sx > b.left && sx < b.right && sy < b.bottom); // голова под счётом или таблицей — не видна
+  if (sx > pl && sx < W - pr && sy > pad + safe.t && sy < H - pb && !underHud) return;
   const dx = sx - W / 2, dy = sy - H / 2;
-  const k = Math.min((W / 2 - pad) / Math.abs(dx || 1e-6), (H / 2 - (dy < 0 ? Math.max(pad, hudBottom + 24) : pad)) / Math.abs(dy || 1e-6)); // сверху — счёт и таблица
-  const px = W / 2 + dx * k, py = H / 2 + dy * k, a = Math.atan2(dy, dx);
+  const at = (pt) => { const k = Math.min((W / 2 - (dx < 0 ? pl : pr)) / Math.abs(dx || 1e-6), (H / 2 - (dy < 0 ? pt : pb)) / Math.abs(dy || 1e-6)); return [W / 2 + dx * k, H / 2 + dy * k]; };
+  let [px, py] = at(pad + safe.t);
+  // упёрлись в счёт или таблицу — опускаемся под них (с запасом на стрелку и корону)
+  if (hudBoxes.some((b) => px > b.left - 48 && px < b.right + 48 && py < b.bottom + 24)) { // 48 — стрелка с короной
+    const pt = Math.max(pad + safe.t, hudBottom + 24);
+    [px, py] = at(pt);
+  }
+  const a = Math.atan2(dy, dx);
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
   ctx.save();
   ctx.translate(px, py); ctx.rotate(a);
@@ -2001,7 +1993,7 @@ function draw() {
   for (const f of sceneFoods()) {
     if (f.x < vx0 || f.x > vx1 || f.y < vy0 || f.y > vy1) continue;
     ctx.globalAlpha = f.life > 0 && f.life - f.age < 3 ? Math.max(0, (f.life - f.age) / 3) : 1;
-    const rr = f.r * 1.9 * (1 + 0.12 * Math.sin(time * 3 + f.ph));
+    const rr = (f.lr ??= foodLookOf(f.v)) * 1.9 * (1 + 0.12 * Math.sin(time * 3 + f.ph)); // размер по цене (f.r — для поедания)
     ctx.drawImage(foodSprite(f.c), f.x - rr, f.y - rr, rr * 2, rr * 2);
   }
   ctx.globalAlpha = 1;
@@ -2059,7 +2051,7 @@ function draw() {
   drawJoystick();
 }
 
-let hudT = 0, hudBottom = 100;
+let hudT = 0, hudBottom = 100, hudBoxes = [];
 function updateHud(dt) {
   hudT -= dt;
   if (hudT > 0) return;
@@ -2086,7 +2078,9 @@ function updateHud(dt) {
   if (rk && rk.rank > 3 && me) html += `${rk.rank > 4 ? '<div class="gap">···</div>' : ''}${row({ id: myId, name: me.name, mass: me.mass }, rk.rank - 1)}`;
   $('board').innerHTML = html;
   // стрелка лидера сверху не заходит под счёт и таблицу (в установленной игре они ниже из-за статус-бара)
-  hudBottom = Math.max($('board').getBoundingClientRect().bottom, document.querySelector('.hud-tl').getBoundingClientRect().bottom);
+  // что сверху занято (счёт, таблица, комната) — стрелка лидера обходит только эти места, между ними стоит у края
+  hudBoxes = [$('board'), document.querySelector('.hud-tl'), $('roomBox')].map((e) => e.getBoundingClientRect()).filter((b) => b.width && b.top < H / 2);
+  hudBottom = Math.max(...hudBoxes.map((b) => b.bottom), 0);
 }
 
 // одиночная игра: что съела своя змейка (мир копит удалённую еду, когда track)
@@ -2161,6 +2155,6 @@ if (inviteCode && /^\d{4}$/.test(inviteCode)) {
 // для автотестов
 window.__snake = {
   get mode() { return mode; }, get ui() { return ui; }, get me() { return me; }, get world() { return world; },
-  get net() { return net; }, get joy() { return joy; }, get run() { return run; }, get save() { return save; }, startSolo,
+  get net() { return net; }, get joy() { return joy; }, get run() { return run; }, get save() { return save; }, get cam() { return cam; }, startSolo,
   get fx() { return { gulps: gulps.length, sparks: sparks.length, lumps: lumps.length, kick: kick.t, whoosh: !!whoosh, time }; },
 };

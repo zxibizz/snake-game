@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>Змейка</title>
-<meta name="theme-color" content="#111411">
+<meta name="theme-color" content="#0D1424">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -13,12 +13,14 @@
 <link rel="icon" href="icons/icon-192.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <style>
-/* Material 3, тёмная схема от зелёного */
+/* Material 3, тёмная схема от синего; --cta — главная кнопка экрана и каждого диалога («Играть», «Создать комнату», «Понятно»):
+   тёплая на холодном фоне — ребёнок знает, что жёлтую надо жать */
 :root{
-  --surface:#111411; --surf-low:#191D19; --surf:#1D211D; --surf-high:#272B27; --surf-highest:#323632;
-  --on:#E1E3DE; --on-var:#C2C9BD; --outline:#8C9388; --outline-var:#424940;
-  --primary:#88D982; --on-primary:#003A06; --pc:#00530F; --on-pc:#A3F69C;
-  --sc:#3A4B38; --on-sc:#D5E8CF; --tc:#1F4D53; --on-tc:#BCEBF1; --tertiary:#A0CFD4;
+  --surface:#0D1424; --surf-low:#121A2D; --surf:#162034; --surf-high:#1E2A44; --surf-highest:#283552;
+  --on:#E3E8F5; --on-var:#B8C2DA; --outline:#7F8AA6; --outline-var:#3A4560;
+  --primary:#8EB8FF; --on-primary:#00285E; --pc:#1A4A9E; --on-pc:#D8E2FF;
+  --sc:#2A3A5C; --on-sc:#D6E2FF; --tc:#4F3A5C; --on-tc:#F2DAFF; --tertiary:#DDBCE0;
+  --cta:#FFC83D; --on-cta:#3A2800;
   --ec:#93000A; --on-ec:#FFDAD6; --error:#FFB4AB;
   --elev1:0 1px 2px rgba(0,0,0,.3),0 1px 3px 1px rgba(0,0,0,.15);
   --elev3:0 1px 3px rgba(0,0,0,.3),0 4px 8px 3px rgba(0,0,0,.15);
@@ -46,7 +48,7 @@ svg.i{width:24px;height:24px;fill:currentColor;flex:none}
 .btn::after{content:"";position:absolute;inset:0;background:currentColor;opacity:0;transition:opacity .15s}
 .btn:active::after{opacity:.12}
 .btn svg.i{width:18px;height:18px}
-.btn.filled{background:var(--primary);color:var(--on-primary)}
+.btn.filled{background:var(--cta);color:var(--on-cta);font-weight:700}
 .btn.tonal{background:var(--sc);color:var(--on-sc)}
 .btn.outlined{border:1px solid var(--outline);color:var(--primary)}
 .btn.text{color:var(--primary);padding:0 12px}
@@ -57,37 +59,39 @@ svg.i{width:24px;height:24px;fill:currentColor;flex:none}
 
 /* --- главный экран: один экран без прокрутки --- */
 .screen{position:fixed;inset:0;overflow:auto;touch-action:pan-y;-webkit-overflow-scrolling:touch;
-  background:rgba(17,20,17,.84);padding:calc(16px + env(safe-area-inset-top)) 20px calc(16px + env(safe-area-inset-bottom))}
+  background:rgba(13,20,36,.86);padding:calc(16px + env(safe-area-inset-top)) 20px calc(16px + env(safe-area-inset-bottom))}
 .home{max-width:420px;min-height:100%;margin:0 auto;display:flex;flex-direction:column;gap:20px;justify-content:space-between}
-.top{display:flex;align-items:center;justify-content:space-between;gap:12px}
-.top h1{margin:0;font-size:28px;font-weight:500;line-height:36px}
+.top{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:12px}
+.top h1{margin:0;font-size:24px;font-weight:500;line-height:36px;text-align:center}
+.top .icon-btn{width:44px;height:44px;background:var(--surf-high);box-shadow:none;justify-self:start}
+.top .stars{justify-self:end}
 .stars{display:inline-flex;align-items:center;gap:6px;height:36px;padding:0 14px;border-radius:18px;background:var(--surf-high);
   font-size:16px;font-weight:600;color:#FFD447}
 .stars svg.i{width:18px;height:18px}
 .pick{display:flex;flex-direction:column;align-items:center;gap:8px}
-#preview{width:100%;height:150px;display:block}
-@media (max-height:600px){#preview{height:96px}}
-.skin-row{display:flex;align-items:center;justify-content:space-between;width:100%}
-.skin-info{flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;min-height:44px;justify-content:center}
-.skin-info b{font-size:18px;font-weight:500}
-.skin-info small{font-size:13px;color:var(--on-var);display:flex;align-items:center;gap:4px}
-.skin-info small svg.i{width:14px;height:14px}
-.types{display:flex;justify-content:center;gap:4px;width:100%}
-.types button{flex:0 1 44px;min-width:0;aspect-ratio:1;max-width:44px;border:0;border-radius:50%;padding:0;background:none;position:relative;cursor:pointer}
-.types button canvas{width:100%;height:100%;display:block}
-.types button.on{background:var(--surf-highest);box-shadow:inset 0 0 0 2px var(--primary)}
-.types button.locked canvas{opacity:.35}
-.types .lk{position:absolute;right:0;bottom:0;display:flex;color:var(--on-var)}
-.types .lk svg.i{width:14px;height:14px}
-.icon-btn.flat{background:none;box-shadow:none;color:var(--on)}
-.icon-btn.flat:disabled{opacity:.25}
-.go{display:flex;flex-direction:column;gap:12px}
-.go .seg{margin:0}
+/* змейка крупно, по бокам стрелки; листаются открытые раскраски и одна следующая */
+.pv-wrap{position:relative;width:100%;padding:0 40px} /* стрелки по бокам, не поверх головы и хвоста */
+#preview{width:100%;height:min(250px,30vh);display:block}
+.pv-wrap .arr{position:absolute;top:50%;transform:translateY(-50%);width:48px;height:64px;border-radius:24px;
+  display:flex;align-items:center;justify-content:center;background:rgba(30,42,68,.7);color:var(--on)}
+.pv-wrap .arr:active{background:var(--surf-highest)}
+.pv-wrap .arr svg.i{width:36px;height:36px}
+#skinPrev{left:-6px} #skinNext{right:-6px}
+.skin-info{display:flex;flex-direction:column;align-items:center;gap:2px;min-height:48px;justify-content:center}
+.skin-info b{font-size:20px;font-weight:500}
+.skin-info small{font-size:15px;color:var(--on-var);display:flex;align-items:center;gap:4px}
+.skin-info small svg.i{width:16px;height:16px}
+.go{display:flex;flex-direction:column;gap:16px}
+/* сложность — три лёгкие вкладки */
+.tabs{display:flex;justify-content:center;gap:4px}
+.tabs button{height:40px;padding:0 16px;border-radius:20px;font-size:15px;font-weight:500;color:var(--on-var)}
+.tabs button.on{background:var(--sc);color:var(--on-sc);font-weight:600}
+#btnPlay{height:80px;border-radius:40px;font-size:24px;box-shadow:0 0 0 5px rgba(255,200,61,.22),0 8px 22px rgba(255,200,61,.35)}
+#btnPlay svg.i{width:34px;height:34px}
+#btnTogether{height:48px;font-size:16px;color:var(--primary)}
+#btnTogether svg.i{width:20px;height:20px}
 .best{text-align:center;font-size:13px;color:var(--on-var);min-height:18px;display:flex;align-items:center;justify-content:center;gap:4px}
 .best svg.i{width:16px;height:16px;color:#FFD447}
-.foot{align-self:center;display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--outline);padding:8px 12px}
-.foot svg.i{width:16px;height:16px}
-.foot.ok svg.i{color:var(--primary)}
 .btn.big{height:56px;border-radius:28px;font-size:16px}
 .field{position:relative}
 .field input{width:100%;height:56px;border-radius:4px;border:1px solid var(--outline);background:transparent;color:var(--on);
@@ -104,12 +108,19 @@ svg.i{width:24px;height:24px;fill:currentColor;flex:none}
 .note svg.i{width:20px;height:20px}
 .note.ok{color:var(--primary)}
 .note.warn{color:var(--error)}
+/* маленький телефон (iPhone SE): всё на одном экране */
+@media (max-height:600px){
+  .home{gap:12px}
+  .go{gap:10px}
+  #btnPlay{height:68px;border-radius:34px}
+}
 /* телефон боком: выбор змейки слева, кнопки справа */
 @media (orientation:landscape) and (max-height:520px){
-  .home{max-width:760px;display:grid;grid-template-columns:1fr 1fr;grid-template-rows:auto 1fr auto;gap:8px 32px;align-items:center}
+  .home{max-width:760px;display:grid;grid-template-columns:1fr 1fr;grid-template-rows:auto 1fr;gap:8px 32px;align-items:center}
   .top{grid-column:1/3}
-  .foot{grid-column:1/3}
-  #preview{height:110px}
+  #preview{height:min(160px,45vh)}
+  #btnPlay{height:64px;border-radius:32px}
+  .go{gap:10px}
 }
 
 /* --- игровой интерфейс: пауза, длина и место, топ-3 --- */
@@ -120,7 +131,7 @@ svg.i{width:24px;height:24px;fill:currentColor;flex:none}
 #hud{position:fixed;inset:0;pointer-events:none}
 .hud-tl{position:absolute;top:calc(12px + var(--hud-top));left:calc(12px + env(safe-area-inset-left));
   display:flex;gap:12px;align-items:center}
-.hud-tl .icon-btn{width:44px;height:44px;background:rgba(39,43,39,.7);box-shadow:none}
+.hud-tl .icon-btn{width:44px;height:44px;background:rgba(30,42,68,.7);box-shadow:none}
 .shadow{text-shadow:0 1px 3px rgba(0,0,0,.9),0 0 8px rgba(0,0,0,.5)}
 #score{display:flex;align-items:baseline;gap:8px}
 #score b{font-size:28px;font-weight:600;line-height:32px}
@@ -135,18 +146,18 @@ svg.i{width:24px;height:24px;fill:currentColor;flex:none}
 .hud-tc{position:absolute;top:calc(12px + var(--hud-top));left:50%;transform:translateX(-50%)}
 .chip{display:inline-flex;align-items:center;gap:6px;padding:0 14px;font-size:13px;font-weight:500;white-space:nowrap}
 .chip svg.i{width:18px;height:18px}
-#roomChip{pointer-events:auto;background:rgba(39,43,39,.7);border:0;height:36px;border-radius:18px;color:var(--on)}
+#roomChip{pointer-events:auto;background:rgba(30,42,68,.7);border:0;height:36px;border-radius:18px;color:var(--on)}
 #roomChip svg.i{color:var(--primary)}
 #fab{pointer-events:auto;position:absolute;right:calc(24px + env(safe-area-inset-right));bottom:calc(28px + env(safe-area-inset-bottom));
-  width:76px;height:76px;border-radius:50%;background:rgba(136,217,130,.16);border:2px solid rgba(136,217,130,.45);color:var(--primary);
+  width:76px;height:76px;border-radius:50%;background:rgba(142,184,255,.16);border:2px solid rgba(142,184,255,.45);color:var(--primary);
   display:flex;align-items:center;justify-content:center;touch-action:none;transition:transform .08s,background .08s}
 #fab svg.i{width:var(--fab-i,34px);height:var(--fab-i,34px)}
 #fab.on{background:var(--primary);color:var(--on-primary);transform:scale(.94)}
 .hud-tl{z-index:1} /* пауза всегда сверху, даже если кнопку ускорения поставили на неё */
 /* настройка кнопки ускорения: пунктир и пульс; перетаскивают пальцем или касанием поля */
-#fab.edit{border-style:dashed;border-color:var(--primary);background:rgba(136,217,130,.28);animation:fabPulse 1.4s ease-in-out infinite;cursor:grab}
+#fab.edit{border-style:dashed;border-color:var(--primary);background:rgba(142,184,255,.28);animation:fabPulse 1.4s ease-in-out infinite;cursor:grab}
 #fab.edit.drag{animation:none;transform:scale(1.06);cursor:grabbing}
-@keyframes fabPulse{50%{box-shadow:0 0 0 10px rgba(136,217,130,.18)}}
+@keyframes fabPulse{50%{box-shadow:0 0 0 10px rgba(142,184,255,.18)}}
 #fabPanel{pointer-events:auto;position:absolute;left:50%;bottom:calc(24px + env(safe-area-inset-bottom));transform:translateX(-50%);
   width:min(360px,calc(100vw - 32px));background:var(--surf-high);border-radius:28px;padding:20px 24px 16px;box-shadow:var(--elev3);z-index:2}
 #fabPanel.at-top{bottom:auto;top:calc(72px + var(--hud-top))}
@@ -168,7 +179,7 @@ svg.i{width:24px;height:24px;fill:currentColor;flex:none}
 
 #update{position:fixed;z-index:5;top:calc(68px + var(--hud-top));left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:4px;
   width:max-content;max-width:calc(100vw - 24px);padding:4px 4px 4px 16px;border-radius:8px;background:#E1E3DE;color:#2E312D;font-size:14px;box-shadow:var(--elev3)}
-#update .btn{color:#1E6B3A;padding:0 12px}
+#update .btn{color:#1A4A9E;padding:0 12px}
 
 /* --- диалоги --- */
 .scrim{position:fixed;inset:0;background:rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;padding:24px;
@@ -252,30 +263,29 @@ svg.i{width:24px;height:24px;fill:currentColor;flex:none}
   <div id="update" role="status" hidden><span>Вышло обновление игры</span><button class="btn text" id="btnUpdate">Обновить</button></div>
   <div class="home">
     <header class="top">
+      <button class="icon-btn" id="btnInfo" aria-label="Как играть" data-icon="help"></button>
       <h1>Змейка</h1>
       <span class="stars" id="stars" aria-label="Звёзды"></span>
     </header>
 
     <section class="pick">
-      <canvas id="preview"></canvas>
-      <div class="types" id="types" role="tablist" aria-label="Вид змейки"></div>
-      <div class="skin-row">
-        <button class="icon-btn flat" id="skinPrev" aria-label="Предыдущая раскраска" data-icon="left"></button>
-        <div class="skin-info"><b id="skinName"></b><small id="skinLock"></small></div>
-        <button class="icon-btn flat" id="skinNext" aria-label="Следующая раскраска" data-icon="right"></button>
+      <div class="pv-wrap">
+        <canvas id="preview"></canvas>
+        <button class="arr" id="skinPrev" aria-label="Предыдущая змейка" data-icon="left"></button>
+        <button class="arr" id="skinNext" aria-label="Следующая змейка" data-icon="right"></button>
       </div>
+      <div class="skin-info"><b id="skinName"></b><small id="skinLock"></small></div>
     </section>
 
     <section class="go">
-      <div class="seg" id="diff">
+      <div class="tabs" id="diff">
         <button data-d="easy">Лёгкий</button><button data-d="medium">Средний</button><button data-d="hard">Сложный</button>
       </div>
       <div class="best" id="best"></div>
       <button class="btn filled big" id="btnPlay"><span data-icon="play"></span>Играть</button>
-      <button class="btn tonal big" id="btnTogether"><span data-icon="group"></span>Играть вместе</button>
+      <button class="btn" id="btnTogether"><span data-icon="group"></span>Играть вместе</button>
     </section>
 
-    <button class="foot" id="btnInfo"></button>
   </div>
 </main>
 

@@ -2,7 +2,7 @@
 // Здесь нет DOM и сети — только мир, змейки, еда, боты и столкновения.
 
 // Версия протокола и файлов: при изменении любого файла в public/ поднять и здесь, и в sw.js (тест сверяет).
-export const VERSION = '28';
+export const VERSION = '29';
 export const TAU = Math.PI * 2;
 export const R = 7000;                  // радиус арены (координаты по сети — Int16 / 4, предел 8191)
 export const BASE_SPEED = 210;          // пикс/с — у «Малыша»; с каждым званием змейка быстрее, см. speedOf
@@ -234,7 +234,9 @@ export const radiusOf = (m) => (m <= 900 ? 9 + Math.sqrt(Math.max(0, m)) * 0.95 
 export const spacingOf = (m) => radiusOf(m) * 0.42;
 export const bodyLenOf = (m) => 38 * Math.pow(Math.max(1, m), 0.55);
 export const countOf = (m) => Math.max(6, Math.round(bodyLenOf(m) / spacingOf(m)));
-export const foodRadiusOf = (v) => Math.min(13, 3.2 + Math.sqrt(v) * 2);
+export const foodRadiusOf = (v) => Math.min(13, 3.2 + Math.sqrt(v) * 2); // для поедания (баланс), не для картинки
+// на экране крошка по цене: площадь пропорциональна цене — 1, 2 и 4 у обычной еды различимы на глаз, капли рывка мельче
+export const foodLookOf = (v) => Math.min(16, 4.6 * Math.sqrt(v));
 
 // каждый сегмент тянется за предыдущим на расстоянии sp
 export function followChain(segs, sp) {
