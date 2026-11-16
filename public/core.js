@@ -2,7 +2,7 @@
 // Здесь нет DOM и сети — только мир, змейки, еда, боты и столкновения.
 
 // Версия протокола и файлов: при изменении любого файла в public/ поднять и здесь, и в sw.js (тест сверяет).
-export const VERSION = '18';
+export const VERSION = '19';
 export const TAU = Math.PI * 2;
 export const R = 7000;                  // радиус арены (координаты по сети — Int16 / 4, предел 8191)
 export const BASE_SPEED = 210;          // пикс/с — у «Малыша»; с каждым званием змейка быстрее, см. speedOf
@@ -111,6 +111,24 @@ export const SKINS = [
   skin('Северное сияние', ['#0E6B5C', '#1FAB89', '#62D2A2', '#A8F0C6', '#9A8CFF', '#6C4CD6'], { bounce: true, head: '#1FAB89', stars: 14250 }),
   skin('Павлин', ['#005F73', '#0A9396', '#94D2BD', '#E9D8A6', '#EE9B00', '#CA6702', '#9B2226'], { bounce: true, head: '#0A9396', stars: 21850 }),
 ];
+// похожие раскраски: среднее расстояние до ближайшего цвета другой палитры в OKLab (обе стороны).
+// Ниже SKIN_NEAR_D глазом на арене не различить (Пастельная радуга ~ Мороженое ≈ 0,04, Радуга ~ Закат ≈ 0,09).
+// Бот не берёт раскраску человека и похожие на неё — иначе свою змейку легко спутать с чужой.
+const SKIN_NEAR_D = 0.1;
+const oklab = (hex) => {
+  const [r, g, b] = [1, 3, 5].map((i) => { const c = parseInt(hex.slice(i, i + 2), 16) / 255; return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; });
+  const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b);
+  const m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b);
+  const q = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b);
+  return [0.2104542553 * l + 0.7936177850 * m - 0.0040720468 * q, 1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * q,
+    0.0259040371 * l + 0.7827717662 * m - 0.8086757626 * q];
+};
+const skinLab = SKINS.map((s) => [...new Set(s.p)].map((k) => oklab(PAL[k])));
+const coverOf = (A, B) => A.reduce((t, a) => t + Math.min(...B.map((b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]))), 0) / A.length;
+export const skinDist = (i, j) => (coverOf(skinLab[i], skinLab[j]) + coverOf(skinLab[j], skinLab[i])) / 2;
+// SKIN_NEAR[i] — раскраски, которые путаются с i (и сама i)
+export const SKIN_NEAR = SKINS.map((_, i) => SKINS.map((_, j) => j).filter((j) => skinDist(i, j) < SKIN_NEAR_D));
+
 // цвет сегмента i: рисуется каждый второй сегмент («бусина»), цвета считаются по бусинам
 export const segColor = (skin, i) => { const s = SKINS[skin] || SKINS[0]; return s.p[Math.floor((i >> 1) / s.run) % s.p.length]; };
 
@@ -249,6 +267,7 @@ export class World {
     this.pending = [];
     this.events = [];
     this.nextSnakeId = 1;
+    this.humanSkins = new Set(); // раскраски людей: боты их и похожие не берут
     this.nextFoodId = 1;
     this.time = 0;
     this.byId = new Map();
@@ -596,9 +615,25 @@ export class World {
     // при создании мира тела лежат целиком; новички посреди игры выползают из точки —
     // длинное тело не возникает поперёк чужого пути
     return this.addSnake(new Snake(this.nextSnakeId++, segs[0].x, segs[0].y, mass,
-      randi(0, SKINS.length - 1), this.pickName(), false, 0, a, initial ? segs : coilBody(segs[0].x, segs[0].y, mass)));
+      this.botSkin(), this.pickName(), false, 0, a, initial ? segs : coilBody(segs[0].x, segs[0].y, mass)));
   }
-  addHuman({ name, skin, team = 0, mass = START_MASS, inv = 2 }) {
+  // раскраска бота: не как у людей и не похожая; если людей столько, что похожие закрыли всё, — хотя бы не такая же
+  botSkin() {
+    const near = new Set(), own = this.humanSkins;
+    for (const k of own) for (const j of SKIN_NEAR[k] || [k]) near.add(j);
+    const all = SKINS.map((_, i) => i);
+    let pool = all.filter((i) => !near.has(i));
+    if (!pool.length) pool = all.filter((i) => !own.has(i));
+    if (!pool.length) pool = all;
+    return pool[randi(0, pool.length - 1)];
+  }
+  // keep — id змеек, которые кто-то уже видит: их не перекрашиваем, чтобы цвет не сменился на глазах
+  addHuman({ name, skin, team = 0, mass = START_MASS, inv = 2, keep = null }) {
+    if (!this.humanSkins.has(skin)) {
+      this.humanSkins.add(skin);
+      const near = new Set(SKIN_NEAR[skin] || [skin]);
+      for (const b of this.snakes) if (!b.human && near.has(b.skin) && !(keep && keep.has(b.id))) b.skin = this.botSkin();
+    }
     let p = null;
     const mate = team ? this.humans().find((h) => h.team === team) : null;
     if (mate) { // в команде появляемся рядом со своими

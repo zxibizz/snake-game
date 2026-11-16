@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { World, Snake, countOf, spacingOf, SNAKES_N, DIFF, R, GOLD, SKINS, PAL, TITLES, titleOf,
   speedOf, turnOf, remainsOf, radiusOf, boostCostOf, BASE_SPEED, BOOST_SPEED, MIN_BOOST_MASS, layBody, angDiff, keepMass, START_MASS,
-  FLY_N, FLY_MAX, FLY_BASE, flyRadius } from '../public/core.js';
+  FLY_N, FLY_MAX, FLY_BASE, flyRadius, SKIN_NEAR, skinDist } from '../public/core.js';
 
 // змейка B лежит поперёк пути головы змейки A
 function crossing(teamA, teamB) {
@@ -362,3 +362,33 @@ test('почти полная бабочка не съедает сверх вм
   assert.equal(w.flies.length, 1);
 });
 function rand0(i) { return [0, 3, -3, 6][i]; }
+
+test('похожие раскраски: пары, которые путаются, — рядом; непохожие — нет', () => {
+  const ix = (n) => SKINS.findIndex((s) => s.name === n);
+  assert.ok(SKIN_NEAR[ix('Пастельная радуга')].includes(ix('Мороженое')));
+  assert.ok(SKIN_NEAR[ix('Радуга')].includes(ix('Тутти-фрутти')));
+  assert.ok(!SKIN_NEAR[ix('Океан')].includes(ix('Осень')));
+  SKINS.forEach((_, i) => { assert.ok(SKIN_NEAR[i].includes(i)); assert.equal(skinDist(i, i), 0); });
+  // у каждой раскраски остаётся из чего выбирать ботам
+  SKINS.forEach((_, i) => assert.ok(SKINS.length - SKIN_NEAR[i].length >= 6, SKINS[i].name));
+});
+
+test('боты не носят раскраску игрока и похожие на неё', () => {
+  for (let skin = 0; skin < SKINS.length; skin++) {
+    const w = new World({ diff: 'hard' });
+    w.addHuman({ name: 'H', skin, inv: 999 });
+    for (let i = 0; i < 20 * 40; i++) w.step(1 / 40); // и новички посреди игры
+    const bad = w.snakes.filter((s) => !s.human && SKIN_NEAR[skin].includes(s.skin));
+    assert.equal(bad.length, 0, `${SKINS[skin].name}: ${bad.map((s) => SKINS[s.skin].name)}`);
+  }
+});
+
+test('новый игрок не перекрашивает ботов, которых уже видят', () => {
+  const w = new World({ diff: 'easy' });
+  w.addHuman({ name: 'A', skin: 0, inv: 999 });
+  const b = w.snakes.find((s) => !s.human);
+  b.skin = 3; // как у второго игрока
+  w.addHuman({ name: 'B', skin: 3, inv: 999, keep: new Set([b.id]) });
+  assert.equal(b.skin, 3);
+  assert.ok(w.snakes.filter((s) => !s.human && s !== b).every((s) => !SKIN_NEAR[3].includes(s.skin) && !SKIN_NEAR[0].includes(s.skin)));
+});

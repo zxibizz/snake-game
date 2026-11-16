@@ -84,6 +84,8 @@ const flatSegs = (s) => {
   s.segs.forEach((p, i) => { out[i * 2] = Math.round(p.x); out[i * 2 + 1] = Math.round(p.y); });
   return out;
 };
+// кого уже видит кто-нибудь в комнате — таких ботов при входе нового игрока не перекрашиваем
+const seenIn = (room) => { const ids = new Set(); for (const o of room.clients) if (o.known) for (const id of o.known) ids.add(id); return ids; };
 const metaOf = (s) => ({ id: s.id, name: s.name, skin: s.skin, team: s.team, human: s.human, segs: flatSegs(s) });
 // оставшаяся жизнь временной еды в секундах (0 — обычная еда, живёт всегда)
 const lifeLeft = (f) => (f.life ? Math.max(1, Math.min(255, Math.ceil(f.life - f.age))) : 0);
@@ -246,6 +248,7 @@ function join(c, room) {
   c.room = room;
   room.clients.add(c);
   room.joined++;
+  c.known = new Set(); // id из прошлой комнаты не должны мешать перекраске ботов (seenIn)
   c.kills = 0; c.lastMass = 0; // в новой комнате — с начала; длину из прошлой не переносим
   if (old) {
     room.clients.delete(old);
@@ -257,7 +260,7 @@ function join(c, room) {
   }
   if (!c.snake) {
     c.snake = room.world.addHuman({ name: c.name, skin: c.skin, team: room.mode === 'team' ? TEAM : 0,
-      mass: keepMass(room.diff, c.lastMass), inv: 2 });
+      mass: keepMass(room.diff, c.lastMass), inv: 2, keep: seenIn(room) });
   }
   updateBots(room);
   const w = room.world;
