@@ -1321,7 +1321,7 @@ function drawPointer(tx, ty, color, crown = false) {
   const pad = 54;
   if (sx > pad && sx < W - pad && sy > pad && sy < H - pad) return;
   const dx = sx - W / 2, dy = sy - H / 2;
-  const k = Math.min((W / 2 - pad) / Math.abs(dx || 1e-6), (H / 2 - (dy < 0 ? 100 : pad)) / Math.abs(dy || 1e-6)); // сверху — счёт и таблица
+  const k = Math.min((W / 2 - pad) / Math.abs(dx || 1e-6), (H / 2 - (dy < 0 ? Math.max(pad, hudBottom + 24) : pad)) / Math.abs(dy || 1e-6)); // сверху — счёт и таблица
   const px = W / 2 + dx * k, py = H / 2 + dy * k, a = Math.atan2(dy, dx);
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
   ctx.save();
@@ -1426,7 +1426,7 @@ function draw() {
   drawJoystick();
 }
 
-let hudT = 0;
+let hudT = 0, hudBottom = 100;
 function updateHud(dt) {
   hudT -= dt;
   if (hudT > 0) return;
@@ -1452,6 +1452,8 @@ function updateHud(dt) {
   let html = rows.slice(0, 3).map(row).join('');
   if (rk && rk.rank > 3 && me) html += `${rk.rank > 4 ? '<div class="gap">···</div>' : ''}${row({ id: myId, name: me.name, mass: me.mass }, rk.rank - 1)}`;
   $('board').innerHTML = html;
+  // стрелка лидера сверху не заходит под счёт и таблицу (в установленной игре они ниже из-за статус-бара)
+  hudBottom = Math.max($('board').getBoundingClientRect().bottom, document.querySelector('.hud-tl').getBoundingClientRect().bottom);
 }
 
 // ---------- главный цикл ----------

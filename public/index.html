@@ -98,22 +98,25 @@ svg.i{width:24px;height:24px;fill:currentColor;flex:none}
 }
 
 /* --- игровой интерфейс: пауза, длина и место, топ-3 --- */
+:root{--hud-top:env(safe-area-inset-top)}
+/* установленная игра на iPhone: статус-бар поверх страницы и чуть затеняет край — отступаем дальше от него */
+@media (display-mode: standalone){:root{--hud-top:calc(env(safe-area-inset-top) + 12px)}}
 #hud{position:fixed;inset:0;pointer-events:none}
-.hud-tl{position:absolute;top:calc(12px + env(safe-area-inset-top));left:calc(12px + env(safe-area-inset-left));
+.hud-tl{position:absolute;top:calc(12px + var(--hud-top));left:calc(12px + env(safe-area-inset-left));
   display:flex;gap:12px;align-items:center}
 .hud-tl .icon-btn{width:44px;height:44px;background:rgba(39,43,39,.7);box-shadow:none}
 .shadow{text-shadow:0 1px 3px rgba(0,0,0,.9),0 0 8px rgba(0,0,0,.5)}
 #score{display:flex;align-items:baseline;gap:8px}
 #score b{font-size:28px;font-weight:600;line-height:32px}
 #score small{font-size:15px;font-weight:500;color:var(--on-var)}
-#board{position:absolute;top:calc(14px + env(safe-area-inset-top));right:calc(14px + env(safe-area-inset-right));
+#board{position:absolute;top:calc(14px + var(--hud-top));right:calc(14px + env(safe-area-inset-right));
   font-size:13px;min-width:130px;color:var(--on-var)}
 #board .row{display:flex;justify-content:space-between;gap:12px;white-space:nowrap;line-height:20px}
 #board .row.me{color:var(--primary);font-weight:600}
 #board .row.mate{color:var(--tertiary)}
 #board .row .c{color:#FFD447}
 #board .gap{line-height:10px;text-align:center;opacity:.6}
-.hud-tc{position:absolute;top:calc(12px + env(safe-area-inset-top));left:50%;transform:translateX(-50%)}
+.hud-tc{position:absolute;top:calc(12px + var(--hud-top));left:50%;transform:translateX(-50%)}
 .chip{display:inline-flex;align-items:center;gap:6px;padding:0 14px;font-size:13px;font-weight:500;white-space:nowrap}
 .chip svg.i{width:18px;height:18px}
 #roomChip{pointer-events:auto;background:rgba(39,43,39,.7);border:0;height:36px;border-radius:18px;color:var(--on)}
@@ -126,12 +129,12 @@ svg.i{width:24px;height:24px;fill:currentColor;flex:none}
 #hint{position:absolute;left:50%;bottom:calc(120px + env(safe-area-inset-bottom));transform:translateX(-50%);width:max-content;max-width:80vw;
   text-align:center;font-size:16px;line-height:22px;color:var(--on);transition:opacity .6s}
 #hint.fade{opacity:0}
-#snack{position:absolute;z-index:20;top:calc(68px + env(safe-area-inset-top));left:50%;transform:translate(-50%,-8px);
+#snack{position:absolute;z-index:20;top:calc(68px + var(--hud-top));left:50%;transform:translate(-50%,-8px);
   background:#E1E3DE;color:#2E312D;padding:12px 16px;border-radius:4px;font-size:14px;box-shadow:var(--elev3);
   opacity:0;transition:opacity .2s,transform .2s;white-space:nowrap;max-width:92vw;overflow:hidden;text-overflow:ellipsis}
 #snack.show{opacity:1;transform:translate(-50%,0)}
 
-#update{position:fixed;z-index:5;top:calc(68px + env(safe-area-inset-top));left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:4px;
+#update{position:fixed;z-index:5;top:calc(68px + var(--hud-top));left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:4px;
   width:max-content;max-width:calc(100vw - 24px);padding:4px 4px 4px 16px;border-radius:8px;background:#E1E3DE;color:#2E312D;font-size:14px;box-shadow:var(--elev3)}
 #update .btn{color:#1E6B3A;padding:0 12px}
 
