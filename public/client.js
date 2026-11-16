@@ -53,13 +53,40 @@ const TOKEN = (crypto.randomUUID ? crypto.randomUUID() : String(Math.random()).s
 const hello = (o) => ({ ...o, name: myName(), skin: save.skin, token: TOKEN, v: VERSION });
 
 // ---------- звук (синтез, без файлов) ----------
+// iPhone: звук включается только из «настоящего» жеста (касание отпущено, клик, клавиша), а не из pointerdown;
+// после сворачивания или звонка контекст становится 'interrupted' и сам не просыпается. Беззвучный режим
+// (переключатель сбоку) Web Audio слушается — так решил владелец.
 let actx = null, lastEatSound = 0;
-function ensureAudio() {
-  if (!actx) { try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch { actx = null; } }
-  if (actx && actx.state === 'suspended') actx.resume();
+let audioStuck = 0, resumeBusy = false; // с какого момента жесты не будят контекст; ждём ли ответа resume()
+function newAudio() {
+  try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch { actx = null; return; }
+  try { // пустой отрывок в жесте — старые iOS иначе не открывают вывод
+    const src = actx.createBufferSource();
+    src.buffer = actx.createBuffer(1, 1, 22050);
+    src.connect(actx.destination); src.start(0);
+  } catch { /* */ }
 }
+function wakeAudio() {
+  if (!actx || actx.state === 'running' || resumeBusy) return;
+  resumeBusy = true;
+  Promise.resolve(actx.resume()).catch(() => {}).finally(() => { resumeBusy = false; });
+}
+function ensureAudio() { // только из жестов: pointerup / touchend / click / keydown
+  if (!actx) { newAudio(); audioStuck = 0; }
+  if (!actx || actx.state === 'running') { audioStuck = 0; return; }
+  // iOS 17 иногда не будит прерванный контекст: resume() уже ответил, а жесты не помогают дольше 1,5 с — новый
+  const now = performance.now();
+  if (!audioStuck) audioStuck = now;
+  else if (!resumeBusy && now - audioStuck > 1500) {
+    Promise.resolve(actx.close()).catch(() => {});
+    newAudio(); audioStuck = 0;
+  }
+  wakeAudio();
+}
+['pointerup', 'touchend', 'click', 'keydown'].forEach((ev) => window.addEventListener(ev, ensureAudio, { capture: true, passive: true }));
+document.addEventListener('visibilitychange', () => { if (!document.hidden) wakeAudio(); }); // после звонка iOS часто будит и без жеста
 function tone(f0, f1, dur, vol, type = 'sine', delay = 0) {
-  if (!save.sound || !actx) return;
+  if (!save.sound || !actx || (actx.state !== 'running' && !resumeBusy)) return; // спящему контексту не копить звуки
   const t = actx.currentTime + delay;
   const o = actx.createOscillator(), g = actx.createGain();
   o.type = type;
@@ -209,7 +236,6 @@ let fabDown = false;
 const keys = new Set();
 
 canvas.addEventListener('pointerdown', (e) => {
-  ensureAudio();
   if (e.pointerType === 'mouse') {
     inputKind = 'mouse'; mouse.down = e.button === 0; mouse.x = e.clientX; mouse.y = e.clientY; mouse.has = true;
     return;
@@ -244,7 +270,7 @@ document.addEventListener('dblclick', (e) => e.preventDefault());
 
 const fab = $('fab');
 fab.addEventListener('pointerdown', (e) => {
-  e.preventDefault(); ensureAudio(); fabDown = true; fab.classList.add('on');
+  e.preventDefault(); fabDown = true; fab.classList.add('on');
   try { fab.setPointerCapture(e.pointerId); } catch { /* */ }
 });
 const fabUp = () => { fabDown = false; fab.classList.remove('on'); };
@@ -625,7 +651,6 @@ function onNetDeath(m) {
   }, 700);
 }
 function startNet(firstMsg) {
-  ensureAudio();
   mode = 'net'; ui = 'conn'; me = null; world = null; net.kills = 0; net.retry = 0; net.eaten = 0;
   run = null; feast = null; effects = [];
   netReset();
@@ -653,7 +678,6 @@ $('roomChip').addEventListener('click', shareRoom);
 
 // ---------- одиночная игра ----------
 function startSolo(diff) {
-  ensureAudio();
   mode = 'solo'; diffKey = diff;
   world = new World({ diff });
   me = world.addHuman({ name: soloName(), skin: save.skin, inv: 2 });
@@ -838,7 +862,7 @@ function finishRun() {
 const soundAction = () => ({
   label: '', kind: 'text sound', icon: save.sound ? 'vol' : 'volOff', aria: 'Звук',
   onClick: (e) => {
-    save.sound = !save.sound; persist(); ensureAudio();
+    save.sound = !save.sound; persist();
     e.currentTarget.innerHTML = icon(save.sound ? 'vol' : 'volOff');
   },
 });
