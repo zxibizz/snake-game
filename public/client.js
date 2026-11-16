@@ -363,6 +363,8 @@ const FIELD = '#161A16', GRID = '#202620', OUTSIDE = '#2B1715', EDGE = '#FFB4AB'
 // обводка своей змейки: белая 60 % поверх поля; силуэты бусин накладываются друг на друга, поэтому цвет — уже смешанный с полем, плотный
 const MINE_RGB = 162;
 const ON = '#E3E8F5', PRIMARY = '#8EB8FF', TERTIARY = '#DDBCE0', GOLD_C = '#FFD447', REVENGE = '#FF6B5E';
+// короны тройки лидеров: золото, серебро, бронза — [заливка, обводка, размер от золотой]
+const CROWNS = [[GOLD_C, '#8a5a00', 1], ['#DCE3EC', '#5E6B7A', 0.9], ['#E0975A', '#6E3A12', 0.82]];
 function makeGrid() {
   const s = 2, t = 80;
   const c = document.createElement('canvas');
@@ -626,7 +628,8 @@ const kick = { t: -9, z: 0, shake: 0 }; // толчок камеры: z — пр
 let slowUntil = 0;       // одиночная игра: миг замедления после своей победы
 let wasBoost = false;
 const REDUCED = !!(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches);
-let leaderId = 0;        // у кого корона
+let leaderId = 0;        // у кого золотая корона
+let podium = [];         // id первых трёх: золотая, серебряная, бронзовая корона
 const cam = { x: 0, y: 0, z: 1 };
 
 function newRun(diff) {
@@ -1403,7 +1406,7 @@ function onMyKill(id, vm, km, pos, color) {
   else sfx.win();
   addXp(xp);
 }
-const RANK_STEPS = [[SNAKES_N >> 1, 10, false], [10, 40, true], [3, 80, true], [1, 200, true]]; // [место, звёзды, волна]
+const RANK_STEPS = [[SNAKES_N >> 1, 10, false], [10, 40, true], [3, 80, true], [2, 120, true], [1, 200, true]]; // [место, звёзды, волна]
 // место и число змей на арене
 function myRank() {
   if (!me) return null;
@@ -2047,7 +2050,8 @@ function drawSnake(s, vx0, vy0, vx1, vy1) {
     ctx.beginPath(); ctx.arc(h.x, h.y, r * 1.7 + 4 * Math.sin(time * 6), 0, TAU);
     ctx.lineWidth = 3 / cam.z; ctx.strokeStyle = REVENGE; ctx.stroke();
   }
-  if (s.id === leaderId) drawCrown(h.x, h.y - r - 30 / cam.z, Math.max(r * 0.6, 10 / cam.z));
+  const place = podium.indexOf(s.id);
+  if (place >= 0) drawCrown(h.x, h.y - r - 30 / cam.z, Math.max(r * 0.6, 10 / cam.z) * CROWNS[place][2], undefined, place);
   if (mode !== null) {
     ctx.font = `500 ${Math.round(13 / cam.z)}px Roboto, system-ui, sans-serif`;
     ctx.textAlign = 'center';
@@ -2055,12 +2059,12 @@ function drawSnake(s, vx0, vy0, vx1, vy1) {
     ctx.fillText(s.name, h.x, h.y - r - 10 / cam.z);
   }
 }
-function drawCrown(x, y, w, lw = 2 / cam.z) {
+function drawCrown(x, y, w, lw = 2 / cam.z, place = 0) {
   ctx.beginPath();
   ctx.moveTo(x - w, y); ctx.lineTo(x - w, y - w * 0.9); ctx.lineTo(x - w * 0.5, y - w * 0.45); ctx.lineTo(x, y - w * 1.1);
   ctx.lineTo(x + w * 0.5, y - w * 0.45); ctx.lineTo(x + w, y - w * 0.9); ctx.lineTo(x + w, y); ctx.closePath();
-  ctx.fillStyle = GOLD_C; ctx.fill();
-  ctx.lineWidth = lw; ctx.strokeStyle = '#8a5a00'; ctx.stroke();
+  ctx.fillStyle = CROWNS[place][0]; ctx.fill();
+  ctx.lineWidth = lw; ctx.strokeStyle = CROWNS[place][1]; ctx.stroke();
 }
 function drawJoystick() {
   if (!joy.active || mode === null) return;
@@ -2255,10 +2259,11 @@ function updateHud(dt) {
   if (mode === 'net') rows = net.lb ? net.lb.top.map((t) => ({ id: t[0], name: t[1], mass: t[2], human: t[3], team: t[4] })) : [];
   else rows = sceneSnakes().filter((s) => s.alive).sort((a, b) => b.mass - a.mass).slice(0, 3);
   leaderId = rows.length ? rows[0].id : 0;
+  podium = rows.slice(0, 3).map((s) => s.id);
   const myId = mode === 'net' ? net.youId : me && me.id;
   const row = (s, i) => {
     const cls = s.id === myId ? ' me' : (mode === 'net' && net.roomMode === 'team' && s.human && s.team === net.myTeam) ? ' mate' : '';
-    const place = i === 0 ? `<span class="c">${icon('trophy').replace('class="i"', 'class="i" style="width:12px;height:12px;vertical-align:-1px"')}</span> ` : `${i + 1}. `;
+    const place = i < 3 ? `<span class="c c${i}">${icon('trophy').replace('class="i"', 'class="i" style="width:12px;height:12px;vertical-align:-1px"')}</span> ` : `${i + 1}. `;
     return `<div class="row${cls}"><span>${place}${esc(s.name)}</span><span>${Math.floor(s.mass)}</span></div>`;
   };
   let html = rows.slice(0, 3).map(row).join('');
