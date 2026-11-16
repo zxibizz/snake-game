@@ -46,6 +46,8 @@ delete save.daily; // задания дня убраны
 if (!SKINS[save.skin]) save.skin = 0;
 if (!DIFF[save.diff]) save.diff = 'easy';
 if (!(save.vol >= 0 && save.vol <= 1)) save.vol = 1;
+// кнопка ускорения: размер и место (доли экрана, отдельно для вертикального и горизонтального) — игрок задаёт на паузе
+if (!save.fab || typeof save.fab !== 'object') save.fab = {};
 const persist = () => { try { localStorage.setItem('zmeigrad', JSON.stringify(save)); } catch { /* ничего */ } };
 const myName = () => save.name || 'Игрок';
 const soloName = () => 'Ты'; // одному имя не нужно
@@ -306,6 +308,7 @@ let fabDown = false;
 const keys = new Set();
 
 canvas.addEventListener('pointerdown', (e) => {
+  if (fabEdit) { fabDragStart(e, true); return; } // настройка кнопки: касание поля переносит её сюда
   if (e.pointerType === 'mouse') {
     inputKind = 'mouse'; mouse.down = e.button === 0; mouse.x = e.clientX; mouse.y = e.clientY; mouse.has = true;
     return;
@@ -340,7 +343,9 @@ document.addEventListener('dblclick', (e) => e.preventDefault());
 
 const fab = $('fab');
 fab.addEventListener('pointerdown', (e) => {
-  e.preventDefault(); fabDown = true; fab.classList.add('on');
+  e.preventDefault();
+  if (fabEdit) { fabDragStart(e, false); return; }
+  fabDown = true; fab.classList.add('on');
   try { fab.setPointerCapture(e.pointerId); } catch { /* */ }
 });
 const fabUp = () => { fabDown = false; fab.classList.remove('on'); };
@@ -349,9 +354,90 @@ fab.addEventListener('pointercancel', fabUp);
 fab.addEventListener('lostpointercapture', fabUp);
 if (isTouch) fab.hidden = false;
 
+// --- размер и место кнопки ускорения (на планшете до угла далеко тянуться) ---
+const FAB_DEF = 76, FAB_MIN = 56, FAB_MAX = 180, FAB_PAD = 8;
+let fabEdit = false, fabDrag = null; // fabDrag: { pid, dx, dy } — палец и сдвиг от центра кнопки
+const fabSize = () => Math.min(FAB_MAX, Math.max(FAB_MIN, Number(save.fab.size) || FAB_DEF));
+const fabKey = () => (W > H ? 'land' : 'port');
+const fabOk = (v) => Array.isArray(v) && v.length === 2 && v.every((x) => x >= 0 && x <= 1);
+// место для этой ориентации; нет своего — берём из другой (повернул планшет — кнопка примерно там же)
+function fabSpot() {
+  const k = fabKey(), o = k === 'land' ? 'port' : 'land';
+  return fabOk(save.fab[k]) ? save.fab[k] : fabOk(save.fab[o]) ? save.fab[o] : null;
+}
+function clampFab(x, y) {
+  const r = fabSize() / 2 + FAB_PAD;
+  return [Math.min(Math.max(x, r), Math.max(r, W - r)), Math.min(Math.max(y, r), Math.max(r, H - r))];
+}
+function applyFab() {
+  const s = fabSize(), spot = fabSpot();
+  fab.style.width = fab.style.height = `${s}px`;
+  fab.style.setProperty('--fab-i', `${Math.round(s * 0.45)}px`);
+  if (spot) {
+    const [x, y] = clampFab(spot[0] * W, spot[1] * H);
+    fab.style.left = `${x - s / 2}px`; fab.style.top = `${y - s / 2}px`; fab.style.right = fab.style.bottom = 'auto';
+  } else fab.style.left = fab.style.top = fab.style.right = fab.style.bottom = ''; // по умолчанию — правый нижний угол (CSS)
+  if (fabEdit) placeFabPanel();
+}
+function fabCenter() { const r = fab.getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; }
+function setFabAt(x, y) { const [cx, cy] = clampFab(x, y); save.fab[fabKey()] = [cx / W, cy / H]; applyFab(); }
+// окно настройки — на другой половине экрана, чем кнопка, чтобы не закрывать её
+function placeFabPanel() {
+  const p = $('fabPanel'), [x, y] = fabCenter();
+  p.classList.toggle('side', W > H);
+  p.classList.toggle('at-top', W <= H && y > H / 2);
+  p.classList.toggle('at-left', W > H && x > W / 2);
+}
+function fabDragStart(e, jump) {
+  if (fabDrag) return;
+  const [cx, cy] = fabCenter();
+  fabDrag = { pid: e.pointerId, dx: jump ? 0 : cx - e.clientX, dy: jump ? 0 : cy - e.clientY };
+  if (jump) setFabAt(e.clientX, e.clientY);
+  fab.classList.add('drag');
+  try { (jump ? canvas : fab).setPointerCapture(e.pointerId); } catch { /* */ }
+}
+window.addEventListener('pointermove', (e) => {
+  if (fabDrag && e.pointerId === fabDrag.pid) setFabAt(e.clientX + fabDrag.dx, e.clientY + fabDrag.dy);
+});
+const fabDragEnd = (e) => { if (fabDrag && e.pointerId === fabDrag.pid) { fabDrag = null; fab.classList.remove('drag'); persist(); } };
+window.addEventListener('pointerup', fabDragEnd);
+window.addEventListener('pointercancel', fabDragEnd);
+function startFabEdit() {
+  closeDialog();
+  fabEdit = true; fabUp(); hideHint(); joy.active = false; joy.pid = null;
+  fab.classList.add('edit'); $('fabPanel').hidden = false;
+  const rng = $('fabSize');
+  rng.min = FAB_MIN; rng.max = FAB_MAX; rng.value = fabSize();
+  showFabRange();
+  applyFab();
+}
+function showFabRange() {
+  const rng = $('fabSize');
+  rng.style.setProperty('--p', `${(rng.value - FAB_MIN) / (FAB_MAX - FAB_MIN) * 100}%`);
+}
+function endFabEdit() {
+  if (!fabEdit) return;
+  fabEdit = false; fabDrag = null;
+  fab.classList.remove('edit', 'drag'); $('fabPanel').hidden = true;
+  persist();
+}
+$('fabSize').addEventListener('input', () => {
+  const c = fabCenter();
+  save.fab.size = Number($('fabSize').value); showFabRange();
+  if (fabSpot()) setFabAt(c[0], c[1]); else applyFab(); // растёт вокруг своего центра
+});
+$('fabSize').addEventListener('change', persist);
+$('fabReset').addEventListener('click', () => {
+  save.fab = {}; $('fabSize').value = FAB_DEF; showFabRange(); applyFab(); persist();
+});
+$('fabDone').addEventListener('click', () => { endFabEdit(); menuDialog(); });
+window.addEventListener('resize', applyFab);
+applyFab();
+
 const TURN_KEYS = ['ArrowLeft', 'ArrowRight', 'KeyA', 'KeyD'];
 window.addEventListener('keydown', (e) => {
   if (e.target && e.target.tagName === 'INPUT') return;
+  if (fabEdit && (e.code === 'Escape' || e.code === 'Enter')) { endFabEdit(); menuDialog(); return; }
   if (e.code === 'Escape' || e.code === 'KeyP') { openMenu(); return; }
   if ([...TURN_KEYS, 'ArrowUp', 'KeyW', 'Space', 'ShiftLeft', 'ShiftRight'].includes(e.code)) {
     keys.add(e.code); e.preventDefault();
@@ -951,18 +1037,23 @@ function bindVol() {
   rng.addEventListener('change', () => { persist(); unlockHtmlAudio(); if (soundOn()) sfx.win(); }); // отпустил — пробный звук
   show();
 }
+// на сенсорном экране — ещё настройка кнопки ускорения
+const fabBtnHtml = () => (isTouch ? `<button class="btn tonal wide fab-set" id="btnFabSet">${icon('bolt')}Кнопка ускорения</button>` : '');
+function bindFabBtn() { const b = $('btnFabSet'); if (b) b.addEventListener('click', startFabEdit); }
 function openMenu() {
-  if (ui !== 'play') return;
-  if (mode === 'solo') {
-    ui = 'paused';
-    dialog('Пауза', volHtml(), [{ label: 'В меню', kind: 'text', onClick: toHome }, { label: 'Продолжить', kind: 'filled', onClick: resume }]);
-    bindVol();
-  } else if (mode === 'net') {
+  if (ui !== 'play' || fabEdit) return;
+  if (mode === 'solo') ui = 'paused';
+  menuDialog();
+}
+function menuDialog() {
+  if (mode === 'solo' && ui === 'paused') {
+    dialog('Пауза', volHtml() + fabBtnHtml(), [{ label: 'В меню', kind: 'text', onClick: toHome }, { label: 'Продолжить', kind: 'filled', onClick: resume }]);
+  } else if (mode === 'net' && ui === 'play') {
     dialog(`Комната ${net.code}`, `<p>${net.roomMode === 'team' ? 'Команда против ботов' : 'Все против всех'} · боты: ${DIFF[net.diff].label.toLowerCase()}</p>` +
-      '<p>Игра продолжается, пока открыто меню.</p>' + volHtml(),
+      '<p>Игра продолжается, пока открыто меню.</p>' + volHtml() + fabBtnHtml(),
     [{ label: 'Выйти', kind: 'text', onClick: leaveNet }, { label: 'Играть', kind: 'filled', onClick: closeDialog }]);
-    bindVol();
-  }
+  } else return;
+  bindVol(); bindFabBtn();
 }
 function resume() { if (ui === 'paused') { ui = 'play'; closeDialog(); last = performance.now(); } }
 $('btnMenu').addEventListener('click', openMenu);
@@ -978,6 +1069,7 @@ function toHome() {
   if (run) finishRun();
   mode = null; me = null; ui = 'home'; feast = null; effects = []; clearGlow();
   closeDialog();
+  endFabEdit();
   hideHint();
   world = new World({ diff: 'easy', bots: SNAKES_N >> 1, foodN: FOOD_N >> 1 }); // демо за меню — вдвое легче игры для телефона
   demoFocus = null;
@@ -994,6 +1086,7 @@ function showHome(v) {
 
 // ---------- диалоги и снекбар ----------
 function dialog(title, body, actions) {
+  endFabEdit(); // игра кончилась или выход, пока настраивал кнопку
   $('dlgTitle').textContent = title;
   $('dlgBody').innerHTML = body;
   const box = $('dlgActions');
@@ -1202,7 +1295,7 @@ function renderFoot() {
 }
 $('btnInfo').addEventListener('click', () => {
   const ctl = isTouch
-    ? 'Коснись экрана в любом месте и веди пальцем — это джойстик. Держи молнию, чтобы ускориться: каждая секунда сжигает 5 % длины, но не меньше 10.'
+    ? 'Коснись экрана в любом месте и веди пальцем — это джойстик. Держи молнию, чтобы ускориться: каждая секунда сжигает 5 % длины, но не меньше 10. Размер и место молнии — на паузе.'
     : 'Змейка ползёт к курсору мыши. Левая кнопка или пробел — ускорение: каждая секунда сжигает 5 % длины, но не меньше 10. Можно стрелками ← →. Пауза — Esc.';
   const ih = installHint();
   dialog('Как играть', `<p>${ctl}</p><p>Подрежь соперника — пусть врежется в тебя головой. Золотая стрелка с короной у края экрана показывает, где лидер.</p>` +

@@ -132,8 +132,24 @@ svg.i{width:24px;height:24px;fill:currentColor;flex:none}
 #fab{pointer-events:auto;position:absolute;right:calc(24px + env(safe-area-inset-right));bottom:calc(28px + env(safe-area-inset-bottom));
   width:76px;height:76px;border-radius:50%;background:rgba(136,217,130,.16);border:2px solid rgba(136,217,130,.45);color:var(--primary);
   display:flex;align-items:center;justify-content:center;touch-action:none;transition:transform .08s,background .08s}
-#fab svg.i{width:34px;height:34px}
+#fab svg.i{width:var(--fab-i,34px);height:var(--fab-i,34px)}
 #fab.on{background:var(--primary);color:var(--on-primary);transform:scale(.94)}
+.hud-tl{z-index:1} /* пауза всегда сверху, даже если кнопку ускорения поставили на неё */
+/* настройка кнопки ускорения: пунктир и пульс; перетаскивают пальцем или касанием поля */
+#fab.edit{border-style:dashed;border-color:var(--primary);background:rgba(136,217,130,.28);animation:fabPulse 1.4s ease-in-out infinite;cursor:grab}
+#fab.edit.drag{animation:none;transform:scale(1.06);cursor:grabbing}
+@keyframes fabPulse{50%{box-shadow:0 0 0 10px rgba(136,217,130,.18)}}
+#fabPanel{pointer-events:auto;position:absolute;left:50%;bottom:calc(24px + env(safe-area-inset-bottom));transform:translateX(-50%);
+  width:min(360px,calc(100vw - 32px));background:var(--surf-high);border-radius:28px;padding:20px 24px 16px;box-shadow:var(--elev3);z-index:2}
+#fabPanel.at-top{bottom:auto;top:calc(72px + var(--hud-top))}
+#fabPanel.side{bottom:auto;top:50%;left:75%;transform:translate(-50%,-50%);width:min(340px,calc(50vw - 32px))}
+#fabPanel.side.at-left{left:25%}
+#fabPanel h3{margin:0 0 8px;font-size:20px;font-weight:400;line-height:28px}
+#fabPanel p{margin:0 0 4px;font-size:14px;line-height:20px;color:var(--on-var)}
+#fabPanel .vol svg.i{color:var(--on-var)}
+#fabPanel .vol .big svg.i{width:32px;height:32px}
+#fabPanel .actions{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}
+.fab-set{margin-top:20px}
 #hint{position:absolute;left:50%;bottom:calc(120px + env(safe-area-inset-bottom));transform:translateX(-50%);width:max-content;max-width:80vw;
   text-align:center;font-size:16px;line-height:22px;color:var(--on);transition:opacity .6s}
 #hint.fade{opacity:0}
@@ -205,6 +221,12 @@ svg.i{width:24px;height:24px;fill:currentColor;flex:none}
   <div class="hud-tc" id="roomBox" hidden><button class="chip" id="roomChip"></button></div>
   <div id="board" class="shadow"></div>
   <button id="fab" hidden aria-label="Ускорение" data-icon="bolt"></button>
+  <div id="fabPanel" hidden>
+    <h3>Кнопка ускорения</h3>
+    <p>Перетащи молнию или коснись места, где удобно</p>
+    <div class="vol"><span data-icon="bolt"></span><input type="range" id="fabSize" step="4" aria-label="Размер кнопки"><span data-icon="bolt" class="big"></span></div>
+    <div class="actions"><button class="btn text" id="fabReset">Как было</button><button class="btn filled" id="fabDone">Готово</button></div>
+  </div>
   <div id="hint" class="shadow" hidden></div>
 </div>
 
