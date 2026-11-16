@@ -216,7 +216,7 @@ window.addEventListener('resize', resize);
 resize();
 
 const FIELD = '#161A16', GRID = '#202620', OUTSIDE = '#2B1715', EDGE = '#FFB4AB';
-const MINE_EDGE = 'rgba(255,255,255,0.75)'; // обводка своей змейки
+const MINE_EDGE = 'rgba(255,255,255,0.6)'; // обводка своей змейки
 const ON = '#E1E3DE', PRIMARY = '#88D982', TERTIARY = '#A0CFD4', GOLD_C = '#FFD447', REVENGE = '#FF6B5E';
 function makeGrid() {
   const s = 2, t = 80;
@@ -1389,7 +1389,7 @@ function drawSnake(s, vx0, vy0, vx1, vy1) {
   // радиус бусины: хвост сужается; на гребне волны успеха — шире
   const radAt = (i, gwi) => (i > n - tail ? r * (0.55 + 0.45 * (n - i) / tail) : r) * (1 + 0.22 * gwi);
   if (s === me) { // своя змейка — в светлой обводке: подложка чуть шире бусин, чтобы не спутать с похожей чужой
-    const ow = 1.6 / cam.z;
+    const ow = 1 / cam.z;
     ctx.beginPath();
     for (let i = (n - 1) & ~1; i >= 2; i -= step) {
       const q = segs[i];
