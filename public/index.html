@@ -67,11 +67,34 @@ svg.i{width:24px;height:24px;fill:currentColor;flex:none}
 .field label{position:absolute;left:12px;top:-8px;padding:0 4px;background:var(--surf);font-size:12px;color:var(--on-var)}
 .field input:focus + label{color:var(--primary)}
 .label{font-size:12px;color:var(--on-var);margin:0 0 8px 4px}
-#skins{display:flex;gap:10px;flex-wrap:wrap}
-.skin{width:40px;height:40px;border-radius:20px;display:flex;align-items:center;justify-content:center;color:#111}
-.skin svg.i{width:20px;height:20px;opacity:0}
-.skin.sel{outline:2px solid var(--on);outline-offset:2px}
+#skins{display:grid;grid-template-columns:repeat(auto-fill,minmax(52px,1fr));gap:10px}
+.skin{height:52px;border-radius:16px;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#111;
+  position:relative;box-shadow:inset 0 -3px 0 rgba(0,0,0,.25)}
+.skin svg.i{width:22px;height:22px;opacity:0;filter:drop-shadow(0 0 2px #fff)}
+.skin.sel{outline:3px solid var(--on);outline-offset:2px}
 .skin.sel svg.i{opacity:1}
+.skin.locked{filter:grayscale(.6) brightness(.6)}
+.skin.locked svg.i{opacity:1;fill:#fff;filter:none}
+.skin .lv{position:absolute;bottom:2px;font-size:10px;font-weight:700;color:#fff;text-shadow:0 1px 2px #000}
+.skin-name{font-size:13px;color:var(--on-var);margin:8px 4px 0;min-height:18px}
+.lvl{display:flex;align-items:center;gap:14px;margin-bottom:16px}
+.lvl .badge{width:52px;height:52px;border-radius:16px;background:var(--pc);color:var(--on-pc);display:flex;flex-direction:column;
+  align-items:center;justify-content:center;flex:none;font-weight:700;font-size:20px;line-height:20px}
+.lvl .badge small{font-size:10px;font-weight:500;letter-spacing:.5px}
+.lvl .info{flex:1;display:flex;flex-direction:column;gap:6px;font-size:13px;color:var(--on-var)}
+.lvl .info b{color:var(--on);font-size:15px;font-weight:500}
+.bar{height:8px;border-radius:4px;background:var(--surf-highest);overflow:hidden}
+.bar i{display:block;height:100%;border-radius:4px;background:var(--primary);transition:width .3s}
+.bar.gold i{background:linear-gradient(90deg,#FFD447,#FF8A3D)}
+.tasks{display:flex;flex-direction:column;gap:12px}
+.task{display:flex;align-items:center;gap:12px}
+.task .ti{width:36px;height:36px;border-radius:18px;background:var(--surf-highest);color:var(--on-var);display:flex;align-items:center;justify-content:center;flex:none}
+.task.done .ti{background:var(--primary);color:var(--on-primary)}
+.task .tt{flex:1;display:flex;flex-direction:column;gap:5px;font-size:14px}
+.task .tt small{font-size:12px;color:var(--on-var)}
+.task .rw{font-size:13px;font-weight:600;color:#FFD447;white-space:nowrap}
+.task.done .rw{color:var(--primary)}
+.star{color:#FFD447}
 .list{background:var(--surf);border-radius:16px;overflow:hidden}
 .item{display:flex;align-items:center;gap:16px;width:100%;padding:12px 16px;min-height:72px;text-align:left;position:relative}
 .item+.item{border-top:1px solid var(--outline-var)}
@@ -101,9 +124,21 @@ svg.i{width:24px;height:24px;fill:currentColor;flex:none}
 #hud{position:fixed;inset:0;pointer-events:none}
 .hud-tl{position:absolute;top:calc(12px + env(safe-area-inset-top));left:calc(12px + env(safe-area-inset-left));
   display:flex;gap:8px;align-items:flex-start;flex-wrap:wrap;max-width:46vw}
+#banner{position:absolute;top:22%;left:50%;transform:translateX(-50%);text-align:center;pointer-events:none;opacity:0;white-space:nowrap}
+#banner b{display:block;font-size:40px;font-weight:800;letter-spacing:1px;color:#FFD447;
+  text-shadow:0 3px 0 #8a5a00,0 6px 18px rgba(0,0,0,.6);-webkit-text-stroke:1px #6b3f00}
+#banner small{display:block;margin-top:6px;font-size:16px;font-weight:500;color:#fff;text-shadow:0 2px 6px rgba(0,0,0,.8)}
+#banner.show{animation:ban 2.6s ease-out}
+@keyframes ban{0%{opacity:0;transform:translateX(-50%) scale(.6)}10%{opacity:1;transform:translateX(-50%) scale(1.12)}
+  18%{transform:translateX(-50%) scale(1)}80%{opacity:1}100%{opacity:0;transform:translateX(-50%) translateY(-20px)}}
+#board .row .c{color:#FFD447;margin-right:2px}
+#board .head{font-size:11px;color:var(--outline);margin-bottom:2px;display:flex;justify-content:space-between;gap:8px}
 .stat{background:var(--surf-high);border-radius:16px;padding:6px 14px;box-shadow:var(--elev1);min-height:48px;
   display:flex;flex-direction:column;justify-content:center}
-.stat b{font-size:16px;font-weight:500;line-height:20px}
+.stat b{font-size:16px;font-weight:500;line-height:20px;display:flex;gap:8px;align-items:baseline}
+.stat small.rk{color:var(--primary);font-weight:500}
+.stat small .star{display:inline-flex;align-items:center;gap:2px}
+.stat .bar{height:5px;margin:3px 0 2px;min-width:110px}
 .stat small{font-size:12px;color:var(--on-var);display:flex;align-items:center;gap:4px;line-height:16px}
 .stat small svg.i{width:14px;height:14px}
 .hud-tc{position:absolute;top:calc(12px + env(safe-area-inset-top));left:50%;transform:translateX(-50%)}
@@ -144,15 +179,25 @@ svg.i{width:24px;height:24px;fill:currentColor;flex:none}
 .dialog .hint{font-size:12px;color:var(--on-var);margin:0 4px 16px;line-height:16px}
 .dialog .sub{font-size:14px;font-weight:500;color:var(--on);margin:8px 0 4px}
 .big-num{font-size:45px;line-height:52px;color:var(--on);font-weight:400}
+.sum{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:8px 0 12px}
+.sum div{background:var(--surf-highest);border-radius:12px;padding:8px 10px;display:flex;flex-direction:column}
+.sum div b{font-size:18px}
+.sum div small{font-size:11px;color:var(--on-var)}
+.xp-line{display:flex;align-items:center;gap:8px;font-weight:600;color:#FFD447;margin:4px 0}
+.dialog .tasks{margin:8px 0}
 .record{display:inline-flex;align-items:center;gap:6px;color:var(--primary);font-weight:500}
 
 @media (max-width:600px){
   .hud-tl{max-width:150px}
   #board{font-size:11px;min-width:0;padding:6px 10px}
+  #banner b{font-size:30px}
+  #banner small{font-size:14px}
+  .stat .bar{min-width:90px}
   #board .row{line-height:16px;gap:8px}
   #mini{width:88px;height:88px}
   #fab{width:80px;height:80px;border-radius:24px}
   .hud-tc{top:auto;bottom:calc(16px + env(safe-area-inset-bottom))}
+  #snack{top:calc(150px + env(safe-area-inset-top));white-space:normal;text-align:center;max-width:86vw}
 }
 </style>
 </head>
@@ -170,29 +215,35 @@ svg.i{width:24px;height:24px;fill:currentColor;flex:none}
   <canvas id="mini" width="224" height="224"></canvas>
   <button id="fab" hidden aria-label="Ускорение" data-icon="bolt"></button>
   <div id="snack"></div>
+  <div id="banner"><b></b><small></small></div>
 </div>
 
 <main id="home" class="screen">
   <div class="col">
     <header class="brand">
       <img src="icons/icon-192.png" alt="">
-      <div><h1>Змейград</h1><p>Ешь, расти и не врезайся в других змей</p></div>
+      <div><h1>Змейград</h1><p>Сто змей на арене. Стань самой длинной!</p></div>
     </header>
 
     <section class="card">
+      <div class="lvl" id="lvl"></div>
       <div class="field"><input id="name" maxlength="12" autocomplete="off" placeholder=" "><label for="name">Имя</label></div>
-      <div class="label">Цвет змейки</div>
+      <div class="label">Раскраска змейки</div>
       <div id="skins"></div>
+      <div class="skin-name" id="skinName"></div>
     </section>
+
+    <h2 class="section-title">Задания на сегодня <small id="tasksNote"></small></h2>
+    <section class="card tasks" id="tasks"></section>
 
     <h2 class="section-title">Играть одному <small>работает без интернета</small></h2>
     <div class="list">
       <button class="item" data-d="easy"><span class="lead easy" data-icon="mood"></span>
-        <span class="txt"><b>Лёгкий</b><small>Добрые боты, можно продолжать после проигрыша</small></span><span id="best-easy"></span></button>
+        <span class="txt"><b>Лёгкий</b><small>Боты подрезают, но можно продолжать после проигрыша</small></span><span id="best-easy"></span></button>
       <button class="item" data-d="medium"><span class="lead medium" data-icon="neutral"></span>
-        <span class="txt"><b>Средний</b><small>Боты посерьёзнее, одна жизнь</small></span><span id="best-medium"></span></button>
+        <span class="txt"><b>Средний</b><small>Боты хитрее и смелее, одна жизнь</small></span><span id="best-medium"></span></button>
       <button class="item" data-d="hard"><span class="lead hard" data-icon="fire"></span>
-        <span class="txt"><b>Сложный</b><small>Боты охотятся и окружают, одна жизнь</small></span><span id="best-hard"></span></button>
+        <span class="txt"><b>Сложный</b><small>Боты охотятся стаей и окружают, одна жизнь</small></span><span id="best-hard"></span></button>
     </div>
 
     <h2 class="section-title">Играть вместе <small>нужен интернет</small></h2>

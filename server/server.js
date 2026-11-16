@@ -5,13 +5,14 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { acceptUpgrade } from './ws.js';
-import { World, DIFF, SKINS, START_MASS, TAU, VERSION } from '../public/core.js';
+import { World, R, DIFF, SKINS, START_MASS, SNAKES_N, TAU, VERSION, FOOD_CELL, FOOD_CELLS, foodCellOf } from '../public/core.js';
 
 const PORT = Number(process.env.PORT) || 8080;
 const PUBLIC = path.resolve(fileURLToPath(new URL('../public/', import.meta.url)));
 const TICK = 1 / 40;            // шагов мира в секунду: 40
 const SEND_EVERY = 2;           // снимков в секунду: 20
-const MAX_ROOMS = 20;
+const LB_EVERY = 40;            // таблица лидеров и мини-карта: раз в секунду
+const MAX_ROOMS = 8;            // комната — сотня змей, около 5 % ядра
 const MAX_HUMANS = 8;
 const MAX_CONN = 120;
 const ROOM_IDLE_MS = 60_000;    // пустая комната живёт минуту — на случай переподключения
@@ -70,13 +71,13 @@ function createRoom(mode, diff) {
   if (!code) return null;
   const world = new World({ diff });
   world.track = true;
-  const room = { code, mode, diff, world, clients: new Set(), tick: 0, emptySince: Date.now(), kills: [], joined: 0 };
+  const room = { code, mode, diff, world, clients: new Set(), tick: 0, emptySince: Date.now(), kills: [], feast: null, joined: 0 };
   rooms.set(code, room);
   log(`room ${code} created: ${mode}/${diff}, rooms=${rooms.size}`);
   return room;
 }
 function updateBots(room) {
-  room.world.targetBots = Math.max(6, DIFF[room.diff].bots - 2 * room.clients.size);
+  room.world.targetBots = Math.max(40, SNAKES_N - room.clients.size);
 }
 const flatSegs = (s) => {
   const out = new Array(s.segs.length * 2);
@@ -86,13 +87,136 @@ const flatSegs = (s) => {
 const metaOf = (s) => ({ id: s.id, name: s.name, skin: s.skin, team: s.team, human: s.human, segs: flatSegs(s) });
 // оставшаяся жизнь временной еды в секундах (0 — обычная еда, живёт всегда)
 const lifeLeft = (f) => (f.life ? Math.max(1, Math.min(255, Math.ceil(f.life - f.age))) : 0);
-const foodOf = (f) => [f.id, Math.round(f.x), Math.round(f.y), Math.round(f.v * 100) / 100, f.c, lifeLeft(f)];
+const feastOf = (w) => (w.feast ? { x: Math.round(w.feast.x), y: Math.round(w.feast.y), life: Math.max(1, Math.round(w.feast.until - w.time)) } : null);
 
 function cleanName(n) {
   const s = String(n || '').replace(/[\u0000-\u001f\u007f<>]/g, '').trim().slice(0, 12);
   return s || 'Игрок';
 }
 const cleanSkin = (k) => (Number.isInteger(k) && k >= 0 && k < SKINS.length ? k : 0);
+
+// ---------- кого видит игрок ----------
+// Змей на арене сотня, а на экране — два-три десятка: каждому игроку шлём только тех, у кого хоть часть тела
+// ближе AOI к его голове; уходит из вида с запасом HYST, чтобы не мигала. Еду — только из клеток вокруг игрока.
+const AOI = 2300, HYST = 500, FOOD_AOI = 2600;
+function viewCenter(c) {
+  if (c.snake && c.snake.alive) { c.cx = c.snake.x; c.cy = c.snake.y; }
+  return [c.cx, c.cy];
+}
+function visibleTo(c, w) {
+  const [cx, cy] = viewCenter(c);
+  const out = [];
+  for (const s of w.snakes) {
+    if (!s.alive) continue;
+    if (s === c.snake) { out.push(s); continue; }
+    const lim = AOI + (c.known.has(s.id) ? HYST : 0), lim2 = lim * lim;
+    const segs = s.segs, step = Math.max(1, Math.floor(lim / (s.r * 0.42) / 6)); // шаг выборки — ~1/6 радиуса
+    for (let k = 0; k < segs.length; k += step) {
+      const dx = segs[k].x - cx, dy = segs[k].y - cy;
+      if (dx * dx + dy * dy < lim2) { out.push(s); break; }
+    }
+  }
+  return out;
+}
+function cellsFor(c) {
+  const [cx, cy] = viewCenter(c);
+  const out = new Set();
+  for (let gy = 0; gy < FOOD_CELLS; gy++) {
+    const y0 = gy * FOOD_CELL - R, ny = Math.max(y0, Math.min(cy, y0 + FOOD_CELL));
+    for (let gx = 0; gx < FOOD_CELLS; gx++) {
+      const x0 = gx * FOOD_CELL - R, nx = Math.max(x0, Math.min(cx, x0 + FOOD_CELL));
+      if ((nx - cx) ** 2 + (ny - cy) ** 2 < FOOD_AOI * FOOD_AOI) out.add(gy * FOOD_CELLS + gx);
+    }
+  }
+  return out;
+}
+
+// ---------- бинарные сообщения ----------
+// Снимок: u8 тип=1 | u32 тик | u16 змей × [u32 id, i16 x·4, i16 y·4, u16 угол, u16 взгляд, f32 масса, u8 флаги]
+//   | u16 новой еды × FOOD_REC | u16 съеденной × u32 id
+// Вся еда вокруг (после входа и после догонялки): u8 тип=2 | u32 штук × FOOD_REC
+// Клетки еды сменились: u8 тип=3 | u8 ушло × u8 клетка | u8 пришло × u8 клетка | u32 штук × FOOD_REC
+// FOOD_REC: u32 id, i16 x·4, i16 y·4, u16 ценность·100, u8 цвет, u8 сколько секунд ещё лежит (0 — всегда)
+const q4 = (v) => Math.max(-32768, Math.min(32767, Math.round(v * 4)));
+const qa = (a) => Math.round((((a % TAU) + TAU) % TAU) / TAU * 65535);
+function writeFood(buf, o, f) {
+  o = buf.writeUInt32LE(f.id, o);
+  o = buf.writeInt16LE(q4(f.x), o);
+  o = buf.writeInt16LE(q4(f.y), o);
+  o = buf.writeUInt16LE(Math.min(65535, Math.round(f.v * 100)), o);
+  o = buf.writeUInt8(f.c, o);
+  return buf.writeUInt8(lifeLeft(f), o);
+}
+const foodIn = (w, cells) => w.foods.filter((f) => !f.dead && cells.has(foodCellOf(f.x, f.y)));
+function allFood(w, cells) {
+  const foods = foodIn(w, cells);
+  const buf = Buffer.alloc(5 + foods.length * 12);
+  let o = buf.writeUInt8(2, 0);
+  o = buf.writeUInt32LE(foods.length, o);
+  for (const f of foods) o = writeFood(buf, o, f);
+  return buf;
+}
+function cellFood(w, leave, enter) {
+  const foods = foodIn(w, new Set(enter));
+  const buf = Buffer.alloc(1 + 1 + leave.length + 1 + enter.length + 4 + foods.length * 12);
+  let o = buf.writeUInt8(3, 0);
+  o = buf.writeUInt8(leave.length, o);
+  for (const k of leave) o = buf.writeUInt8(k, o);
+  o = buf.writeUInt8(enter.length, o);
+  for (const k of enter) o = buf.writeUInt8(k, o);
+  o = buf.writeUInt32LE(foods.length, o);
+  for (const f of foods) o = writeFood(buf, o, f);
+  return buf;
+}
+// изменения еды с прошлого снимка: общий список на комнату, каждому — из его клеток
+function foodChanges(w) {
+  const gone = new Set(w.foodRemoved.map((f) => f.id));
+  const added = w.foodAdded.filter((f) => !gone.has(f.id)).map((f) => [f, foodCellOf(f.x, f.y)]);
+  const addedIds = new Set(w.foodAdded.map((f) => f.id));
+  const removed = w.foodRemoved.filter((f) => !addedIds.has(f.id)).map((f) => [f.id, foodCellOf(f.x, f.y)]);
+  w.foodAdded = [];
+  w.foodRemoved = [];
+  return { added, removed };
+}
+function foodPart(ch, cells) {
+  const added = ch.added.filter(([, k]) => cells.has(k)).slice(0, 65535);
+  const removed = ch.removed.filter(([, k]) => cells.has(k)).slice(0, 65535);
+  const buf = Buffer.alloc(2 + added.length * 12 + 2 + removed.length * 4);
+  let o = buf.writeUInt16LE(added.length, 0);
+  for (const [f] of added) o = writeFood(buf, o, f);
+  o = buf.writeUInt16LE(removed.length, o);
+  for (const [id] of removed) o = buf.writeUInt32LE(id, o);
+  return buf;
+}
+function snakePart(tick, snakes) {
+  const buf = Buffer.alloc(7 + snakes.length * 17);
+  let o = buf.writeUInt8(1, 0);
+  o = buf.writeUInt32LE(tick, o);
+  o = buf.writeUInt16LE(snakes.length, o);
+  for (const s of snakes) {
+    o = buf.writeUInt32LE(s.id, o);
+    o = buf.writeInt16LE(q4(s.x), o);
+    o = buf.writeInt16LE(q4(s.y), o);
+    o = buf.writeUInt16LE(qa(s.a), o);
+    o = buf.writeUInt16LE(qa(s.ta), o);
+    o = buf.writeFloatLE(s.mass, o);
+    o = buf.writeUInt8((s.isBoosting ? 1 : 0) | (s.inv > 0 ? 2 : 0), o);
+  }
+  return buf;
+}
+// таблица лидеров и мини-карта: раз в секунду, одна на комнату
+function leaderboard(room) {
+  const w = room.world;
+  const list = w.snakes.filter((s) => s.alive).sort((a, b) => b.mass - a.mass);
+  const mm = [];
+  for (const s of list) mm.push(Math.round(s.x / 25), Math.round(s.y / 25), Math.floor(s.mass));
+  return {
+    t: 'lb', n: list.length,
+    top: list.slice(0, 10).map((s) => [s.id, s.name, Math.floor(s.mass), s.human ? 1 : 0, s.team]),
+    hum: list.filter((s) => s.human).map((s) => [s.id, s.name, Math.round(s.x), Math.round(s.y), Math.floor(s.mass), s.team]),
+    mm,
+  };
+}
 
 function join(c, room) {
   // переподключение: тот же токен уже в комнате (старое соединение ещё не отвалилось) — забираем его змейку
@@ -116,11 +240,16 @@ function join(c, room) {
   }
   updateBots(room);
   const w = room.world;
+  c.known = new Set();
+  const vis = visibleTo(c, w);
+  for (const s of vis) c.known.add(s.id);
+  c.cells = cellsFor(c);
   c.send({
     t: 'welcome', code: room.code, mode: room.mode, diff: room.diff, you: c.snake.id, tick: room.tick,
-    snakes: w.snakes.filter((s) => s.alive).map(metaOf),
-    foods: w.foods.filter((f) => !f.dead).map(foodOf),
+    snakes: vis.map(metaOf), feast: feastOf(w),
   });
+  c.ws.sendBinary(allFood(w, c.cells));
+  c.send(leaderboard(room));
   log(`room ${room.code}: ${old ? 'rejoin' : 'join'}, players=${room.clients.size}`);
 }
 function leave(c) {
@@ -138,85 +267,71 @@ function leave(c) {
 }
 const clientOf = (room, snake) => [...room.clients].find((c) => c.snake === snake);
 
-// ---------- снимок мира (бинарный) ----------
-// u8 тип=1 | u32 тик | u16 змей × [u32 id, i16 x·4, i16 y·4, u16 угол, u16 взгляд, f32 масса, u8 флаги]
-// | u16 новой еды × [u32 id, i16 x·4, i16 y·4, u16 ценность·100, u8 цвет, u8 временная] | u16 съеденной × u32 id
-const q4 = (v) => Math.max(-32768, Math.min(32767, Math.round(v * 4)));
-const qa = (a) => Math.round((((a % TAU) + TAU) % TAU) / TAU * 65535);
-function buildSnapshot(room) {
-  const w = room.world;
-  const snakes = w.snakes.filter((s) => s.alive);
-  const gone = new Set(w.foodRemoved);
-  const added = w.foodAdded.filter((f) => !gone.has(f.id));
-  const addedIds = new Set(w.foodAdded.map((f) => f.id));
-  const removed = w.foodRemoved.filter((id) => !addedIds.has(id));
-  const buf = Buffer.alloc(1 + 4 + 2 + snakes.length * 17 + 2 + added.length * 12 + 2 + removed.length * 4);
-  let o = 0;
-  o = buf.writeUInt8(1, o);
-  o = buf.writeUInt32LE(room.tick, o);
-  o = buf.writeUInt16LE(snakes.length, o);
-  for (const s of snakes) {
-    o = buf.writeUInt32LE(s.id, o);
-    o = buf.writeInt16LE(q4(s.x), o);
-    o = buf.writeInt16LE(q4(s.y), o);
-    o = buf.writeUInt16LE(qa(s.a), o);
-    o = buf.writeUInt16LE(qa(s.ta), o);
-    o = buf.writeFloatLE(s.mass, o);
-    o = buf.writeUInt8((s.isBoosting ? 1 : 0) | (s.inv > 0 ? 2 : 0), o);
-  }
-  o = buf.writeUInt16LE(added.length, o);
-  for (const f of added) {
-    o = buf.writeUInt32LE(f.id, o);
-    o = buf.writeInt16LE(q4(f.x), o);
-    o = buf.writeInt16LE(q4(f.y), o);
-    o = buf.writeUInt16LE(Math.min(65535, Math.round(f.v * 100)), o);
-    o = buf.writeUInt8(f.c, o);
-    o = buf.writeUInt8(lifeLeft(f), o);
-  }
-  o = buf.writeUInt16LE(removed.length, o);
-  for (const id of removed) o = buf.writeUInt32LE(id, o);
-  w.foodAdded = [];
-  w.foodRemoved = [];
-  return buf;
-}
-
 function stepRoom(room) {
   const w = room.world;
   const events = w.step(TICK);
   room.tick++;
   for (const e of events) {
+    if (e.type === 'feast') { room.feast = feastOf(w); continue; }
     const v = e.victim, k = e.killer;
     if (v.human || (k && k.human)) {
-      room.kills.push({ v: v.id, vn: v.name, vh: v.human, k: k ? k.id : 0, kn: k ? k.name : '', kh: !!(k && k.human) });
+      room.kills.push({ v: v.id, vn: v.name, vh: v.human, vm: Math.floor(e.vm), k: k ? k.id : 0, kn: k ? k.name : '', kh: !!(k && k.human), km: Math.floor(e.km) });
     }
-    if (k && k.human) { const kc = clientOf(room, k); if (kc) kc.kills++; }
+    if (k && k.human) { const kc = clientOf(room, k); if (kc) { kc.kills++; if (kc.rvId === v.id) kc.rvId = 0; } }
     if (v.human) {
       const c = clientOf(room, v);
       if (c) {
         c.snake = null;
         c.lastMass = v.mass;
-        c.send({ t: 'dead', by: k ? k.name : null, mass: Math.floor(v.mass), max: Math.floor(v.maxMass), kills: c.kills });
+        c.rvId = k ? k.id : 0; // обидчик: клиент показывает стрелку к нему
+        c.send({ t: 'dead', by: k ? k.name : null, byId: k ? k.id : 0, mass: Math.floor(v.mass), max: Math.floor(v.maxMass), kills: c.kills, eaten: Math.floor(v.eaten) });
       }
     }
   }
   if (room.tick % SEND_EVERY) return;
-  if (w.spawned.length || room.kills.length) {
-    const msg = JSON.stringify({ t: 'ev', spawn: w.spawned.filter((s) => s.alive).map(metaOf), kill: room.kills });
-    for (const c of room.clients) c.ws.sendText(msg);
-    w.spawned = [];
-    room.kills = [];
-  }
-  const snap = buildSnapshot(room);
+  const kills = room.kills, feast = room.feast;
+  room.kills = []; room.feast = null;
+  const food = foodChanges(w);
+  const lb = room.tick % LB_EVERY === 0 ? JSON.stringify(leaderboard(room)) : null;
   for (const c of room.clients) {
     // медленный клиент пропускает снимки, а не копит очередь; когда догонит — получит всю еду заново,
     // иначе изменения еды из пропущенных снимков у него потеряются
     if (c.ws.buffered > 256 * 1024) { c.lagging = true; continue; }
+    const vis = visibleTo(c, w);
     if (c.lagging) {
       if (c.ws.buffered > 32 * 1024) continue;
       c.lagging = false;
-      c.send({ t: 'sync', snakes: w.snakes.filter((s) => s.alive).map(metaOf), foods: w.foods.filter((f) => !f.dead).map(foodOf) });
+      c.known = new Set(vis.map((s) => s.id));
+      c.cells = cellsFor(c);
+      c.send({ t: 'sync', snakes: vis.map(metaOf), feast: feastOf(w) });
+      c.ws.sendBinary(allFood(w, c.cells));
+    } else {
+      const cells = cellsFor(c);
+      const out = [...c.cells].filter((k) => !cells.has(k)), into = [...cells].filter((k) => !c.cells.has(k));
+      c.cells = cells;
+      if (out.length || into.length) c.ws.sendBinary(cellFood(w, out, into));
+      const enter = [];
+      const known = new Set();
+      for (const s of vis) { known.add(s.id); if (!c.known.has(s.id)) enter.push(metaOf(s)); }
+      c.known = known;
+      if (enter.length || kills.length || feast) {
+        const m = { t: 'ev' };
+        if (enter.length) m.spawn = enter;
+        if (kills.length) m.kill = kills;
+        if (feast) m.feast = feast;
+        c.send(m);
+      }
     }
-    c.ws.sendBinary(snap);
+    c.ws.sendBinary(Buffer.concat([snakePart(room.tick, vis), foodPart(food, c.cells)]));
+    if (lb) {
+      c.ws.sendText(lb);
+      const st = { t: 'st', eaten: c.snake && c.snake.alive ? Math.floor(c.snake.eaten) : 0, kills: c.kills };
+      if (c.rvId) {
+        const k = w.byId.get(c.rvId);
+        if (k && k.alive) st.rv = [Math.round(k.x), Math.round(k.y)]; else { st.rv = 0; c.rvId = 0; }
+      }
+      if (c.snake && c.snake.alive || 'rv' in st) c.send(st);
+    }
   }
 }
 
@@ -248,6 +363,7 @@ server.on('upgrade', (req, socket, head) => {
   conns++;
   const c = {
     ws, room: null, snake: null, name: 'Игрок', skin: 0, kills: 0, lastMass: 0, token: '', creates: 0, lagging: false,
+    known: new Set(), cells: new Set(), cx: 0, cy: 0, rvId: 0,
     tokens: MSG_BURST, refilled: Date.now(),
     send: (o) => ws.sendText(JSON.stringify(o)),
   };
