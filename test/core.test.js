@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { World, Snake, countOf, spacingOf, SNAKES_N, DIFF, R, GOLD, SKINS, PAL, TITLES, titleOf } from '../public/core.js';
+import { World, Snake, countOf, spacingOf, SNAKES_N, DIFF, R, GOLD, SKINS, PAL, TITLES, titleOf,
+  speedOf, turnOf, remainsOf, radiusOf, boostCostOf, BASE_SPEED, BOOST_SPEED, MIN_BOOST_MASS } from '../public/core.js';
 
 // змейка B лежит поперёк пути головы змейки A
 function crossing(teamA, teamB) {
@@ -52,12 +53,12 @@ test('версия в core.js и sw.js совпадает', async () => {
   assert.equal(sw.match(/const VERSION = '([^']+)'/)[1], VERSION);
 });
 
-test('при старте на арене сотня змей и есть гиганты, тела внутри арены', () => {
+test('при старте на арене все змеи и есть гиганты, тела внутри арены', () => {
   const w = new World({ diff: 'easy' });
   w.addHuman({ name: 'H', skin: 0 });
   assert.equal(w.snakes.length, SNAKES_N);
   const giants = w.snakes.filter((s) => s.mass >= DIFF.easy.giantMin).length;
-  assert.ok(giants >= 4, `гигантов ${giants}`);
+  assert.ok(giants >= 2, `гигантов ${giants}`);
   for (const s of w.snakes) {
     for (const q of s.segs) assert.ok(Math.hypot(q.x, q.y) < R, `${s.name} вылез за край`);
   }
@@ -66,14 +67,15 @@ test('при старте на арене сотня змей и есть гиг
 test('боты подрезают друг друга, ускоряются и держат число гигантов', () => {
   const w = new World({ diff: 'easy' });
   let botKills = 0, boosting = 0;
-  for (let i = 0; i < 30 * 40; i++) {
+  for (let i = 0; i < 90 * 40; i++) {
     for (const e of w.step(1 / 40)) if (e.type === 'kill' && e.killer && !e.killer.human) botKills++;
     if (i % 40 === 0) boosting += w.snakes.filter((s) => s.isBoosting).length;
   }
-  assert.ok(botKills >= 10, `побед ботов за 30 с: ${botKills}`);
+  assert.ok(botKills >= 2, `побед ботов за 90 с: ${botKills}`);
+  assert.ok(botKills <= 90, `арена спокойная, а не свалка: побед ботов за 90 с: ${botKills}`);
   assert.ok(boosting >= 30, `ускорялись ${boosting}`);
   const giants = w.snakes.filter((s) => s.mass >= DIFF.easy.giantMin).length;
-  assert.ok(giants >= 3, `гигантов через 30 с: ${giants}`);
+  assert.ok(giants >= 2, `гигантов через 90 с: ${giants}`);
 });
 
 test('пир: груда золотой еды и событие', () => {
@@ -96,7 +98,7 @@ test('останки змеи — в цветах её раскраски', () =
   const drop = w.foods.slice(n0);
   assert.ok(drop.length > 10);
   assert.ok(drop.every((f) => cols.has(f.c)));
-  assert.ok(Math.abs(drop.reduce((a, f) => a + f.v, 0) - 300 * 0.75) < 1);
+  assert.ok(Math.abs(drop.reduce((a, f) => a + f.v, 0) - remainsOf(300)) < 1);
 });
 
 test('звания по длине', () => {
@@ -111,4 +113,50 @@ test('палитра влезает в байт, у раскрасок есть 
     assert.ok(sk.p.length > 0 && sk.p.every((c) => PAL[c]), sk.name);
     assert.ok(PAL[sk.head], sk.name);
   }
+});
+
+test('чем выше звание, тем быстрее змейка, но ускорение малыша обгоняет гиганта', () => {
+  assert.equal(speedOf(15, false), BASE_SPEED);
+  assert.equal(speedOf(15, true), BOOST_SPEED);
+  for (let i = 1; i < TITLES.length; i++) {
+    assert.ok(speedOf(TITLES[i][0], false) > speedOf(TITLES[i][0] - 1, false), `ступень скорости на звании «${TITLES[i][1]}»`);
+  }
+  assert.ok(speedOf(15, true) > speedOf(1e6, false) * 1.3, 'гиганта можно обогнать на ускорении');
+  assert.ok(speedOf(1e6, true) > speedOf(1e6, false) * 1.3);
+});
+
+test('останки: у малышей три четверти длины, у гигантов доля меньше', () => {
+  assert.equal(remainsOf(40), 30);
+  assert.ok(Math.abs(remainsOf(100) - 75) < 1e-9, 'без скачка на стыке');
+  assert.ok(remainsOf(4000) / 4000 < 0.35);
+  for (let m = 20; m < 20000; m *= 1.3) assert.ok(remainsOf(m * 1.3) > remainsOf(m), 'больше змея — больше останков');
+});
+
+test('толстая змейка поворачивает медленнее, но не замирает', () => {
+  assert.ok(turnOf(radiusOf(15)) > 5);
+  assert.ok(turnOf(radiusOf(15)) > turnOf(radiusOf(5000)));
+  assert.ok(turnOf(radiusOf(20000)) > 2);
+});
+
+test('рывок дорогой: длина уходит тем быстрее, чем длиннее змейка, и без еды он не окупается', () => {
+  for (const m0 of [100, 1000, 4000]) {
+    const w = new World({ diff: 'easy', foodN: 0, bots: 0 });
+    const s = w.addHuman({ name: 'H', skin: 0, mass: m0, inv: 999 });
+    s.boost = true;
+    for (let i = 0; i < 40; i++) w.step(1 / 40);
+    const lost = m0 - s.mass;
+    assert.ok(Math.abs(lost - boostCostOf(m0)) < boostCostOf(m0) * 0.05, `за секунду рывка ${lost.toFixed(1)} из ${m0}`);
+    assert.ok(lost >= 10 && lost >= m0 * 0.02, `рывок слишком дешёвый: ${lost.toFixed(1)} из ${m0}`);
+    const left = w.foods.reduce((a, f) => a + f.v, 0);
+    assert.ok(left <= lost * 0.55, `позади остаётся не больше половины потраченного: ${left.toFixed(1)} из ${lost.toFixed(1)}`);
+  }
+});
+
+test('малыш ускориться не может', () => {
+  const w = new World({ diff: 'easy', foodN: 0, bots: 0 });
+  const s = w.addHuman({ name: 'H', skin: 0, inv: 999 });
+  assert.ok(s.mass < MIN_BOOST_MASS);
+  s.boost = true;
+  w.step(1 / 40);
+  assert.equal(s.isBoosting, false);
 });

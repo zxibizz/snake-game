@@ -1,12 +1,12 @@
 // Клиент: отрисовка, управление, меню; одиночная игра считает мир сама, совместная — получает его с сервера.
 import {
-  World, SKINS, PAL, GOLD, DIFF, R, TAU, START_MASS, VERSION, TITLES, titleOf, segColor,
+  World, SKINS, PAL, GOLD, DIFF, R, TAU, START_MASS, SNAKES_N, FOOD_N, VERSION, TITLES, titleOf, segColor,
   radiusOf, spacingOf, countOf, bodyLenOf, foodRadiusOf, followChain, fitLength, clamp, angDiff,
 } from './core.js';
 
 const TICK_MS = 25;        // сервер: 40 шагов в секунду
 const INTERP_MS = 110;     // рисуем мир с задержкой на два снимка — так движение плавное
-const JOY_R = 64;          // радиус джойстика
+const JOY_R = 44;          // радиус джойстика: чем он меньше, тем короче движение пальца для разворота
 
 // ---------- иконки (Material Icons, Apache 2.0) ----------
 const ICONS = {
@@ -228,7 +228,7 @@ canvas.addEventListener('pointermove', (e) => {
     joy.bx = joy.x - dx / len * JOY_R; joy.by = joy.y - dy / len * JOY_R;
     dx = joy.x - joy.bx; dy = joy.y - joy.by;
   }
-  if (len > 10) joy.angle = Math.atan2(dy, dx);
+  if (len > 8) joy.angle = Math.atan2(dy, dx);
 });
 const endPointer = (e) => {
   if (e.pointerType === 'mouse') { mouse.down = false; return; }
@@ -540,7 +540,7 @@ function netInput() {
   const { a, b } = steer();
   const now = performance.now();
   const changed = (a !== null && (net.lastA === null || Math.abs(angDiff(a, net.lastA)) > 0.02)) || b !== net.lastB;
-  if ((changed && now - net.lastSent > 50) || now - net.lastSent > 1000) {
+  if ((changed && now - net.lastSent > 40) || now - net.lastSent > 1000) {
     const m = { t: 'in', b: b ? 1 : 0 };
     if (a !== null) { m.a = Math.round(a * 1000) / 1000; net.lastA = a; }
     net.lastB = b; net.lastSent = now;
@@ -676,7 +676,7 @@ function onMyKill(id, vm, km, pos, color) {
   else sfx.win();
   addXp(xp);
 }
-const RANK_STEPS = [[50, 10, ''], [10, 40, 'Ты в первой десятке!'], [3, 80, 'Ты в тройке лидеров!'], [1, 200, 'Ты — самая длинная змея арены!']];
+const RANK_STEPS = [[SNAKES_N >> 1, 10, ''], [10, 40, 'Ты в первой десятке!'], [3, 80, 'Ты в тройке лидеров!'], [1, 200, 'Ты — самая длинная змея арены!']];
 // место и число змей на арене
 function myRank() {
   if (!me) return null;
@@ -806,7 +806,7 @@ function toHome() {
   mode = null; me = null; ui = 'home'; feast = null; effects = []; clearBanners();
   closeDialog();
   hideHint();
-  world = new World({ diff: 'easy', bots: 45, foodN: 3500 }); // демо за меню — полегче для телефона
+  world = new World({ diff: 'easy', bots: SNAKES_N >> 1, foodN: FOOD_N >> 1 }); // демо за меню — вдвое легче игры для телефона
   demoFocus = null;
   viewSkin = save.skin;
   cam.x = 0; cam.y = 0;

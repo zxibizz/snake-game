@@ -77,7 +77,7 @@ function createRoom(mode, diff) {
   return room;
 }
 function updateBots(room) {
-  room.world.targetBots = Math.max(40, SNAKES_N - room.clients.size);
+  room.world.targetBots = SNAKES_N - room.clients.size;
 }
 const flatSegs = (s) => {
   const out = new Array(s.segs.length * 2);
@@ -96,7 +96,7 @@ function cleanName(n) {
 const cleanSkin = (k) => (Number.isInteger(k) && k >= 0 && k < SKINS.length ? k : 0);
 
 // ---------- кого видит игрок ----------
-// Змей на арене сотня, а на экране — два-три десятка: каждому игроку шлём только тех, у кого хоть часть тела
+// Змей на арене десятки, а на экране — единицы: каждому игроку шлём только тех, у кого хоть часть тела
 // ближе AOI к его голове; уходит из вида с запасом HYST, чтобы не мигала. Еду — только из клеток вокруг игрока.
 const AOI = 2300, HYST = 500, FOOD_AOI = 2600;
 function viewCenter(c) {

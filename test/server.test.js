@@ -1,7 +1,7 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { VERSION } from '../public/core.js';
+import { VERSION, SNAKES_N } from '../public/core.js';
 
 const PORT = 18000 + Math.floor(Math.random() * 1000);
 let proc;
@@ -124,14 +124,14 @@ test('игрок видит только змей рядом, таблица —
   await a.opened;
   a.send({ t: 'create', name: 'A', mode: 'ffa', diff: 'easy', v: VERSION });
   const wa = await a.next('welcome');
-  assert.ok(wa.snakes.length < 100, `в поле зрения ${wa.snakes.length} из 100`);
+  assert.ok(wa.snakes.length < SNAKES_N, `в поле зрения ${wa.snakes.length} из ${SNAKES_N}`);
   assert.ok(wa.snakes.some((s) => s.id === wa.you), 'себя видно');
   const food = await a.next('food');
-  assert.ok(food.bytes > 5 + 13 * 600, `еда вокруг пришла одним бинарным сообщением: ${food.bytes} байт`);
+  assert.ok(food.bytes > 5 + 13 * 150, `еда вокруг пришла одним бинарным сообщением: ${food.bytes} байт`);
   const lb = await a.next('lb');
-  assert.equal(lb.n, 100);
+  assert.equal(lb.n, SNAKES_N);
   assert.equal(lb.top.length, 10);
-  assert.equal(lb.mm.length, 300);
+  assert.equal(lb.mm.length, SNAKES_N * 3);
   assert.ok(lb.top[0][2] >= lb.top[9][2]);
   const snap = await a.next('snap');
   assert.ok(snap.n <= wa.snakes.length + 5, `в снимке ${snap.n} змей`);

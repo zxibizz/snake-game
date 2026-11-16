@@ -2,15 +2,22 @@
 // Здесь нет DOM и сети — только мир, змейки, еда, боты и столкновения.
 
 // Версия протокола и файлов: при изменении любого файла в public/ поднять и здесь, и в sw.js (тест сверяет).
-export const VERSION = '5';
+export const VERSION = '6';
 export const TAU = Math.PI * 2;
-export const R = 6000;                  // радиус арены
-export const BASE_SPEED = 175;          // пикс/с
-export const BOOST_SPEED = 345;
-export const MIN_BOOST_MASS = 12;
+export const R = 7000;                  // радиус арены (координаты по сети — Int16 / 4, предел 8191)
+export const BASE_SPEED = 210;          // пикс/с — у «Малыша»; с каждым званием змейка быстрее, см. speedOf
+export const BOOST_SPEED = 400;
+export const SPEED_PER_TITLE = 0.035;   // прибавка к скорости за каждое звание
+export const BOT_FEUD = 0.06;           // доля попыток охоты, в которых бот согласен подрезать другого бота: меньше — спокойнее арена
+// Рывок дорогой: в секунду уходит BOOST_COST длины и ещё BOOST_SHARE от всей длины — едой по пути его не окупить,
+// длинной змее он обходится в десятки длины в секунду. Половина потраченного остаётся едой позади.
+export const BOOST_COST = 10;
+export const BOOST_SHARE = 0.02;
+export const BOOST_DROP = 0.5;
+export const MIN_BOOST_MASS = 20;
 export const START_MASS = 15;
-export const SNAKES_N = 100;            // змей на арене вместе с игроками
-export const FOOD_N = 7000;
+export const SNAKES_N = 60;             // змей на арене вместе с игроками
+export const FOOD_N = 4200;
 export const FEAST_LIFE = 45;           // сколько секунд лежит пир
 const CELL = 100;
 // еда по сети раздаётся крупными клетками: игроку — только клетки вокруг него
@@ -25,25 +32,26 @@ const G2 = GRID_N * GRID_N;
 // mass — разброс масс ботов при создании мира; giants — сколько ботов не меньше giantMin держать на арене.
 // aggr — как часто бот ищет, кого подрезать; humanAggr — насколько охотно выбирает игрока;
 // maxHunters — сколько ботов сразу охотятся на одного игрока; grace — секунд после появления игрока без охоты;
-// rest — средняя пауза бота между охотами, с.
+// rest — средняя пауза бота между охотами, с; foresee — на сколько секунд вперёд крупный бот просчитывает чужие головы
+// (0 — только базовые 0,45 с): чем больше, тем труднее подрезать гиганта.
 export const DIFF = {
   easy: {
-    label: 'Лёгкий', mass: [15, 8000], giants: 8, giantMin: 2000,
-    speed: 0.97, turn: 0.95, react: 0.2, look: 230,
-    aggr: 0.3, humanAggr: 0.45, maxHunters: 1, grace: 10, huntRange: 480, boost: 0.55, rest: 6,
-    encircle: false, flee: false, edgeKills: false, respawn: true,
+    label: 'Лёгкий', mass: [15, 2500], giants: 4, giantMin: 800,
+    speed: 0.97, turn: 0.95, react: 0.2, look: 275,
+    aggr: 0.3, humanAggr: 0.45, maxHunters: 1, grace: 10, huntRange: 480, boost: 0.55, rest: 6, foresee: 0,
+    encircle: false, edgeKills: false, respawn: true,
   },
   medium: {
-    label: 'Средний', mass: [15, 10000], giants: 9, giantMin: 2500,
-    speed: 1, turn: 1, react: 0.13, look: 280,
-    aggr: 0.55, humanAggr: 0.85, maxHunters: 2, grace: 6, huntRange: 640, boost: 0.8, rest: 4,
-    encircle: true, flee: true, edgeKills: true, respawn: false,
+    label: 'Средний', mass: [15, 3500], giants: 5, giantMin: 1100,
+    speed: 1, turn: 1, react: 0.13, look: 335,
+    aggr: 0.55, humanAggr: 0.85, maxHunters: 2, grace: 6, huntRange: 640, boost: 0.8, rest: 4, foresee: 0.4,
+    encircle: true, edgeKills: true, respawn: false,
   },
   hard: {
-    label: 'Сложный', mass: [20, 12000], giants: 10, giantMin: 3000,
-    speed: 1.03, turn: 1.08, react: 0.08, look: 340,
-    aggr: 0.9, humanAggr: 1.3, maxHunters: 4, grace: 3, huntRange: 820, boost: 0.95, rest: 2,
-    encircle: true, flee: true, edgeKills: true, respawn: false,
+    label: 'Сложный', mass: [20, 6000], giants: 6, giantMin: 1800,
+    speed: 1.03, turn: 1.08, react: 0.08, look: 410,
+    aggr: 0.9, humanAggr: 1.3, maxHunters: 4, grace: 3, huntRange: 820, boost: 0.95, rest: 2, foresee: 0.9,
+    encircle: true, edgeKills: true, respawn: false,
   },
 };
 
@@ -92,6 +100,18 @@ export function titleOf(mass) {
   while (i + 1 < TITLES.length && mass >= TITLES[i + 1][0]) i++;
   return i;
 }
+
+// скорость растёт ступенями — вместе со званием; ускорение прибавляет поменьше, чтобы гиганта всё ещё можно было обогнать
+export function speedOf(mass, boosting) {
+  const k = SPEED_PER_TITLE * titleOf(mass);
+  return boosting ? BOOST_SPEED * (1 + k * 0.5) : BASE_SPEED * (1 + k);
+}
+// поворотливость, рад/с: толстая змейка поворачивает медленнее
+export const turnOf = (r) => 7 / (1 + Math.max(0, r - 11) / 40);
+// во сколько длины в секунду обходится рывок
+export const boostCostOf = (m) => BOOST_COST + m * BOOST_SHARE;
+// сколько длины остаётся едой после проигрыша: у малышей — три четверти, у гигантов — заметно меньшая доля
+export const remainsOf = (m) => (m <= 100 ? Math.max(4, m * 0.75) : 75 * Math.pow(m / 100, 0.75));
 
 export const BOT_NAMES = ['Шустрик', 'Пончик', 'Зигзаг', 'Кексик', 'Ракета', 'Бублик', 'Молния', 'Ириска',
   'Тортик', 'Шнурок', 'Пиксель', 'Фантик', 'Желейка', 'Комета', 'Бантик', 'Карамелька', 'Вжух',
@@ -372,8 +392,8 @@ export class World {
   kill(s, killer) {
     if (!s.alive) return;
     s.alive = false;
-    const total = Math.max(4, s.mass * 0.75);
-    const n = Math.min(Math.round(s.segs.length * 1.2), Math.max(3, Math.round(total / 3)));
+    const total = remainsOf(s.mass);
+    const n = Math.min(Math.round(s.segs.length * 0.6), Math.max(3, Math.round(total / 4)));
     const step = s.segs.length / n, v = total / n;
     for (let i = 0; i < n; i++) {
       const k = Math.floor(i * step), p = s.segs[k];
@@ -409,8 +429,8 @@ export class World {
       if (o === b || !o.alive || o.inv > 0) continue;
       const dx = o.x - b.x, dy = o.y - b.y;
       if (dx * dx + dy * dy > r2) continue;
-      const v = (o.isBoosting ? BOOST_SPEED : BASE_SPEED) * (o.human ? 1 : D.speed);
-      out.push({ x: o.x, y: o.y, r: o.r, vx: Math.cos(o.a) * v, vy: Math.sin(o.a) * v });
+      const v = speedOf(o.mass, o.isBoosting) * (o.human ? 1 : D.speed);
+      out.push({ id: o.id, x: o.x, y: o.y, r: o.r, vx: Math.cos(o.a) * v, vy: Math.sin(o.a) * v });
     }
     return out;
   }
@@ -418,8 +438,9 @@ export class World {
   pickTarget(b) {
     const D = this.D;
     let best = null, bs = Infinity;
+    const feud = Math.random() < BOT_FEUD;
     for (const s of this.snakes) {
-      if (s === b || !s.alive || s.inv > 0) continue;
+      if (s === b || !s.alive || s.inv > 0 || (!s.human && !feud)) continue;
       const d = Math.hypot(s.x - b.x, s.y - b.y);
       if (d > D.huntRange) continue;
       const n = this.hunted.get(s.id) || 0;
@@ -428,7 +449,7 @@ export class World {
         if (s.age <= D.grace || n >= D.maxHunters || Math.random() > D.humanAggr) continue;
         w = 1;
       } else {
-        if (n >= 2) continue;
+        if (n >= 1) continue;
         w = s.mass > b.mass * 4 ? 1.6 : 1; // на гиганта лезут неохотно, но лезут
       }
       if (d * w < bs) { bs = d * w; best = s; }
@@ -447,7 +468,7 @@ export class World {
       if (P && (!P.alive || P.inv > 0 || Math.hypot(P.x - hx, P.y - hy) > D.huntRange * 1.8)) P = null;
       if (!P) { b.hunt = 0; b.huntCd = rand(0.5, 1.5) * D.rest / b.pers; }
     }
-    if (!P && b.huntCd <= 0 && b.mass > 25 && Math.random() < D.aggr * b.pers * 0.5) {
+    if (!P && b.huntCd <= 0 && b.mass > 60 && Math.random() < D.aggr * b.pers * 0.5) {
       P = this.pickTarget(b);
       if (P) { b.hunt = rand(2.5, 6); b.huntTarget = P.id; this.hunted.set(P.id, (this.hunted.get(P.id) || 0) + 1); }
       else b.huntCd = rand(0.5, 1.5);
@@ -459,7 +480,7 @@ export class World {
       const along = -(dx * pc + dy * ps);     // > 0 — бот впереди головы цели
       const lat = dx * ps - dy * pc;          // с какой стороны от цели бот
       const side = lat >= 0 ? 1 : -1;
-      const canBoost = b.mass > 30 && Math.random() < D.boost;
+      const canBoost = b.mass > 45 && Math.random() < D.boost;
       if (D.encircle && b.mass > P.mass * 3 && dist < 320 && bodyLenOf(b.mass) > TAU * Math.max(dist, 80) * 1.15) {
         desired = Math.atan2(dy, dx) + b.side * (Math.PI / 2 - 0.35); // кружим и сжимаем кольцо
       } else if (along < 40) {
@@ -497,35 +518,36 @@ export class World {
       else if (best > 0) {
         desired = Math.atan2(by - hy, bx - hx);
         // за богатой едой (останки змей, пир) — с ускорением
-        if (bv >= 3 && bd < 380 && b.mass > 40 && Math.random() < D.boost * 0.35 * b.pers) b.boost = true;
+        if (bv >= 3 && bd < 380 && b.mass > 40 && Math.random() < D.boost * 0.15 * b.pers) b.boost = true;
       } else { b.wander += rand(-0.6, 0.6); desired = b.wander; }
       if (hx * hx + hy * hy > (R * 0.88) ** 2) desired = Math.atan2(-hy, -hx) + rand(-0.5, 0.5);
     }
 
     const look = D.look * (1 + b.r / 50) * (b.boost ? 1.4 : 1);
     const heads = this.nearHeads(b, look);
-    const vb = (b.boost ? BOOST_SPEED : BASE_SPEED) * D.speed;
-    let bestA = b.a, bestScore = -1e9, bestDg = 0, aheadDg = 0;
+    const vb = speedOf(b.mass, b.boost) * D.speed;
+    const tFar = 0.46 + D.foresee * clamp((b.r - 30) / 20, 0, 1); // гигант смотрит дальше: ему дольше отворачивать
+    const prey = P ? P.id : 0;                                     // …но не от своей цели: к ней он и идёт наперерез
+    let bestA = b.a, bestScore = -1e9, bestDg = 0;
     const dOff = clamp(angDiff(desired, b.a), -2.1, 2.1);
     for (let i = -1; i < OFFS.length; i++) {
       const off = i < 0 ? dOff : OFFS[i];
       const a = b.a + off;
       const dg = this.rayDanger(b, bi, a, look);
-      if (i === 0) aheadDg = dg;
-      // чужие головы: где окажемся мы и они через 0,15–0,45 с
+      // чужие головы: где окажемся мы и они через 0,15–0,45 с (крупный бот на среднем и сложном — до 1,35 с)
       let hd = 0;
       for (const o of heads) {
-        for (let t = 0.15; t <= 0.46; t += 0.15) {
+        const tMax = o.id === prey ? 0.46 : tFar;
+        for (let t = 0.15; t <= tMax; t += 0.15) {
           const dx = b.x + Math.cos(a) * vb * t - (o.x + o.vx * t), dy = b.y + Math.sin(a) * vb * t - (o.y + o.vy * t);
           const rr = b.r + o.r + 45, d2 = dx * dx + dy * dy;
-          if (d2 < rr * rr) { hd = Math.max(hd, 1.2 - t - Math.sqrt(d2) / rr * 0.4); }
+          if (d2 < rr * rr) { hd = Math.max(hd, 1.2 - Math.min(t, 0.8) - Math.sqrt(d2) / rr * 0.4); }
         }
       }
       const sc = Math.cos(angDiff(desired, a)) - Math.max(dg, hd) * 4 - Math.abs(off) * 0.05;
       if (sc > bestScore) { bestScore = sc; bestA = a; bestDg = dg; }
     }
-    if (bestDg > 0.3) b.boost = false;                        // впереди тесно — не разгоняемся
-    else if (D.flee && aheadDg > 0.55 && b.mass > 30) b.boost = true; // выскакиваем из ловушки
+    if (bestDg > 0.3) b.boost = false;                        // впереди тесно — не разгоняемся: на скорости не отвернуть
     b.ta = bestA;
   }
 
@@ -533,21 +555,21 @@ export class World {
   moveSnake(s, dt) {
     const D = this.D;
     s.r = radiusOf(s.mass);
-    const turn = 4.6 / (1 + (s.r - 11) / 28) * (s.human ? 1 : D.turn);
+    const turn = turnOf(s.r) * (s.human ? 1 : D.turn);
     const d = angDiff(s.ta, s.a), mt = turn * dt;
     s.a += d > mt ? mt : d < -mt ? -mt : d;
 
     const boosting = s.boost && s.mass > MIN_BOOST_MASS;
     s.isBoosting = boosting;
-    const v = (boosting ? BOOST_SPEED : BASE_SPEED) * (s.human ? 1 : D.speed);
+    const v = speedOf(s.mass, boosting) * (s.human ? 1 : D.speed);
     const segs = s.segs, h = segs[0];
     h.x += Math.cos(s.a) * v * dt; h.y += Math.sin(s.a) * v * dt;
     if (boosting) {
-      const loss = (5 + s.mass * 0.004) * dt;
+      const loss = boostCostOf(s.mass) * dt;
       s.mass -= loss; s.dropAcc += loss;
       if (s.dropAcc > 2) {
         const k = segs.length - 1, t = segs[k];
-        this.addFood(t.x + rand(-4, 4), t.y + rand(-4, 4), s.dropAcc * 0.75, segColor(s.skin, k), 30);
+        this.addFood(t.x + rand(-4, 4), t.y + rand(-4, 4), s.dropAcc * BOOST_DROP, segColor(s.skin, k), 30);
         s.dropAcc = 0;
       }
     }
