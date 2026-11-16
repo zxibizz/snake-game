@@ -3,7 +3,7 @@
 import {
   World, SKINS, TYPES, SKINS_OF, PAL, foodLookOf, GOLD, DIFF, R, TAU, START_MASS, SNAKES_N, FOOD_N, VERSION, TITLES, titleOf, segColor,
   radiusOf, spacingOf, countOf, bodyLenOf, foodRadiusOf, followChain, fitLength, clamp, angDiff, keepMass,
-  FLY_MAX, flyK, flyScale, flyRadius, flyEase, MIN_BOOST_MASS, Snake,
+  FLY_MAX, flyK, flyScale, flyRadius, flyEase, MIN_BOOST_MASS, Snake, speedOf, turnOf,
 } from './core.js';
 import { Room, runRoom, encodeSelf, FR, FLR, readFood } from './room.js';
 import { host, join, loopback } from './rtc.js';
@@ -1191,11 +1191,96 @@ function netUpdate(now, dt) {
     }
   }
 }
-function netInput() {
+function netInput(now) {
   if (!me || ui === 'dead') return;
+  // меню комнаты открыто — игра не стоит, змейкой правит осторожный автопилот
+  if (ui === 'play' && !$('dlg').hidden) {
+    if (now - auto.t >= AUTO_MS) { auto.t = now; me.ta = autoSteer(me); }
+    me.boost = false; net.lastB = false;
+    return;
+  }
+  auto.t = -1e9; auto.ta = null;
   const { a, b } = steer();
   if (a !== null) me.ta = a;
   me.boost = b; net.lastB = b;
+}
+// ---------- автопилот на паузе ----------
+// Перебирает курсы вокруг нынешнего и для каждого проигрывает путь дугой — с настоящей поворотливостью и скоростью —
+// на AUTO_T секунд вперёд. Препятствия: тела видимых змей (свои по команде — нет), их головы с упреждением по курсу,
+// край арены. Курс выбирается по наименьшему зазору на пути (разбиться позже лучше, чем раньше), еда — чуть-чуть
+// и только когда вокруг просторно; ускорения нет. Выбранного курса держится, пока другой не заметно лучше.
+const AUTO_MS = 80, AUTO_T = 1.6, AUTO_DT = 0.06, AUTO_N = 24, AUTO_CELL = 90, AUTO_SAFE = 160;
+const auto = { t: -1e9, ta: null };
+function autoSteer(s) {
+  const h = s.segs[0], v = speedOf(s.mass, false), turn = turnOf(s.r);
+  const far = v * AUTO_T + 400;
+  // препятствия — в сетку, чтобы на каждом шаге пути смотреть только соседние клетки
+  const grid = new Map(), heads = [];
+  const put = (x, y, r) => {
+    const k = Math.floor(x / AUTO_CELL) * 100003 + Math.floor(y / AUTO_CELL);
+    let c = grid.get(k);
+    if (!c) grid.set(k, (c = []));
+    c.push(x, y, r);
+  };
+  let maxR = 0;
+  for (const o of net.snakes.values()) {
+    if (!o.visible || (s.team && o.team === s.team)) continue;
+    const reach = bodyLenOf(o.mass) + far;
+    if (Math.abs(o.segs[0].x - h.x) > reach || Math.abs(o.segs[0].y - h.y) > reach) continue;
+    if (o.r > maxR) maxR = o.r;
+    for (const q of o.segs) if (Math.abs(q.x - h.x) < far && Math.abs(q.y - h.y) < far) put(q.x, q.y, o.r);
+    heads.push([o.segs[0].x, o.segs[0].y, Math.cos(o.a) * speedOf(o.mass, o.isBoosting), Math.sin(o.a) * speedOf(o.mass, o.isBoosting), o.r]);
+  }
+  const span = Math.ceil((maxR + s.r + AUTO_SAFE) / AUTO_CELL);
+  const clearAt = (x, y, t) => {
+    let best = R - Math.hypot(x, y) - s.r; // до края арены
+    const cx = Math.floor(x / AUTO_CELL), cy = Math.floor(y / AUTO_CELL);
+    for (let gx = cx - span; gx <= cx + span; gx++) {
+      for (let gy = cy - span; gy <= cy + span; gy++) {
+        const c = grid.get(gx * 100003 + gy);
+        if (!c) continue;
+        for (let i = 0; i < c.length; i += 3) {
+          const d = Math.hypot(c[i] - x, c[i + 1] - y) - c[i + 2] - s.r;
+          if (d < best) best = d;
+        }
+      }
+    }
+    for (const [hx, hy, vx, vy, r] of heads) { // чужая голова — туда, куда она доползёт к этому времени, с запасом
+      const d = Math.hypot(hx + vx * t - x, hy + vy * t - y) - r * 1.5 - s.r - 20;
+      if (d < best) best = d;
+    }
+    return best;
+  };
+  const foods = [];
+  for (const f of net.foods.values()) if (Math.abs(f.x - h.x) < far && Math.abs(f.y - h.y) < far) foods.push(f);
+  let bestA = s.a, bestScore = -Infinity, keepScore = -Infinity;
+  for (let i = 0; i < AUTO_N; i++) {
+    const off = (i % 2 ? 1 : -1) * Math.ceil(i / 2) * (TAU / AUTO_N); // 0, +15°, −15°, … до ±180°
+    const ta = s.a + off;
+    let x = h.x, y = h.y, a = s.a, minC = Infinity, crash = -1, food = 0;
+    for (let t = AUTO_DT; t <= AUTO_T + 1e-9; t += AUTO_DT) {
+      const d = angDiff(ta, a), mt = turn * AUTO_DT;
+      a += d > mt ? mt : d < -mt ? -mt : d;
+      x += Math.cos(a) * v * AUTO_DT; y += Math.sin(a) * v * AUTO_DT;
+      const c = clearAt(x, y, t);
+      if (c < minC) minC = c;
+      if (c < 0) { crash = t; break; }
+    }
+    let score;
+    if (crash >= 0) score = -1000 + crash * 300;          // не избежать — хотя бы попозже
+    else {
+      score = Math.min(minC, AUTO_SAFE * 2) - Math.abs(off) * 15; // простор важнее; резкие повороты — только если нужно
+      if (minC > AUTO_SAFE) { // вокруг свободно — можно и поесть по дороге
+        for (const f of foods) if (Math.hypot(f.x - x, f.y - y) < 160) food += f.v;
+        score += Math.min(food, 40) * 1.5;
+      }
+    }
+    if (auto.ta !== null && Math.abs(angDiff(ta, auto.ta)) < TAU / AUTO_N / 2 + 1e-6) keepScore = score;
+    if (score > bestScore) { bestScore = score; bestA = ta; }
+  }
+  if (auto.ta !== null && keepScore > -Infinity && bestScore - keepScore < 25) bestA = auto.ta; // не дёргаться
+  auto.ta = bestA;
+  return bestA;
 }
 // своя змейка: движение по правилам core.js, столкновения — с тем, что видно на экране, еда и бабочки — тоже
 function selfStep(dt, now) {
@@ -1551,7 +1636,7 @@ function menuDialog() {
   if (mode === 'solo' && ui === 'paused') pauseDialog('Пауза', '', 'Продолжить', resume, toHome);
   else if (mode === 'net' && ui === 'play') {
     pauseDialog(`Комната ${net.code}`, `<p class="pz-note">${net.roomMode === 'team' ? 'Команда против ботов' : 'Все против всех'} · боты: ${DIFF[net.diff].label.toLowerCase()}. ` +
-      'Игра идёт, пока открыто меню.' + (net.isHost ? ' Ты хозяин комнаты: не сворачивай игру, иначе комната встанет у всех.' : '') +
+      'Игра идёт: пока открыто меню, змейкой осторожно правит автопилот.' + (net.isHost ? ' Ты хозяин комнаты: не сворачивай игру, иначе комната встанет у всех.' : '') +
       '</p>', 'Играть', closeDialog, leaveNet);
   }
 }
@@ -2277,7 +2362,7 @@ function frame(now) {
   time += dt; lastDt = dt;
   if (feast && time > feast.until) feast = null;
   if (mode === 'net') {
-    netInput();
+    netInput(now);
     selfStep(dt, now);
     netUpdate(now, dt);
     if (ui === 'play') playTime += dt;
@@ -2333,6 +2418,6 @@ if (inviteCode && /^\d{4}$/.test(inviteCode)) {
 // для автотестов
 window.__snake = {
   get mode() { return mode; }, get ui() { return ui; }, get me() { return me; }, get world() { return world; },
-  get net() { return net; }, get joy() { return joy; }, get run() { return run; }, get save() { return save; }, get cam() { return cam; }, startSolo,
+  get net() { return net; }, autoSteer, get joy() { return joy; }, get run() { return run; }, get save() { return save; }, get cam() { return cam; }, startSolo,
   get fx() { return { gulps: gulps.length, sparks: sparks.length, lumps: lumps.length, kick: kick.t, whoosh: !!whoosh, time }; },
 };
