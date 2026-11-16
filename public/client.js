@@ -1,7 +1,7 @@
 // Клиент: отрисовка, управление, меню; одиночная игра считает мир сама, совместная — получает его с сервера.
 import {
   World, SKINS, PAL, GOLD, DIFF, R, TAU, START_MASS, VERSION, TITLES, titleOf, segColor,
-  radiusOf, spacingOf, countOf, bodyLenOf, foodRadiusOf, followChain, fitLength, clamp, angDiff, foodCellOf,
+  radiusOf, spacingOf, countOf, bodyLenOf, foodRadiusOf, followChain, fitLength, clamp, angDiff,
 } from './core.js';
 
 const TICK_MS = 25;        // сервер: 40 шагов в секунду
@@ -454,14 +454,16 @@ function onWelcome(m) {
   ui = 'play';
   hudT = 0;
 }
-function addNetFood(id, x, y, v, c, life) {
-  net.foods.set(id, { id, x, y, v, c, r: foodRadiusOf(v), ph: Math.random() * TAU, life, age: 0 });
+function addNetFood(id, x, y, v, c, life, cell) {
+  net.foods.set(id, { id, x, y, v, c, r: foodRadiusOf(v), ph: Math.random() * TAU, life, age: 0, cell });
 }
-const readFood = (dv, o) => [dv.getUint32(o, true), dv.getInt16(o + 4, true) / 4, dv.getInt16(o + 6, true) / 4,
-  dv.getUint16(o + 8, true) / 100, dv.getUint8(o + 10), dv.getUint8(o + 11)];
+const FR = 13; // запись еды: u8 клетка, u32 id, i16 x·4, i16 y·4, u16 ценность·100, u8 цвет, u8 жизнь
+const readFood = (dv, o) => [dv.getUint32(o + 1, true), dv.getInt16(o + 5, true) / 4, dv.getInt16(o + 7, true) / 4,
+  dv.getUint16(o + 9, true) / 100, dv.getUint8(o + 11), dv.getUint8(o + 12), dv.getUint8(o)];
 function onSync(m) { // догнали после пропущенных снимков: змеи рядом — заново, еда придёт следом целиком
   for (const s of m.snakes) net.snakes.set(s.id, makeNetSnake(s));
   setFeast(m.feast);
+  if (m.kill && m.kill.length) onEvents({ kill: m.kill });
 }
 function onEvents(m) {
   for (const s of m.spawn || []) net.snakes.set(s.id, makeNetSnake(s)); // вошла в поле зрения — тело целиком
@@ -484,7 +486,7 @@ function onBinary(buf) {
   if (type === 2) { // вся еда вокруг разом
     net.foods.clear();
     const n = dv.getUint32(1, true);
-    for (let i = 0, o = 5; i < n; i++, o += 12) addNetFood(...readFood(dv, o));
+    for (let i = 0, o = 5; i < n; i++, o += FR) addNetFood(...readFood(dv, o));
     for (const s of net.buf) s.applied = true;
     return;
   }
@@ -495,9 +497,11 @@ function onBinary(buf) {
     for (let i = 0; i < nl; i++) drop.add(dv.getUint8(o++));
     const ne = dv.getUint8(o++);
     for (let i = 0; i < ne; i++) drop.add(dv.getUint8(o++));
-    for (const [id, f] of net.foods) if (drop.has(foodCellOf(f.x, f.y))) net.foods.delete(id);
+    for (const [id, f] of net.foods) if (drop.has(f.cell)) net.foods.delete(id);
+    // снимки в буфере ещё не применены — их еду из этих клеток не возвращаем
+    for (const sn of net.buf) if (!sn.applied) sn.added = sn.added.filter((f) => !drop.has(f[6]));
     const n = dv.getUint32(o, true); o += 4;
-    for (let i = 0; i < n; i++, o += 12) addNetFood(...readFood(dv, o));
+    for (let i = 0; i < n; i++, o += FR) addNetFood(...readFood(dv, o));
     return;
   }
   if (type !== 1) return;
@@ -519,7 +523,7 @@ function onBinary(buf) {
   }
   const added = [];
   const na = dv.getUint16(o, true); o += 2;
-  for (let i = 0; i < na; i++, o += 12) added.push(readFood(dv, o));
+  for (let i = 0; i < na; i++, o += FR) added.push(readFood(dv, o));
   const removed = [];
   const nr = dv.getUint16(o, true); o += 2;
   for (let i = 0; i < nr; i++) { removed.push(dv.getUint32(o, true)); o += 4; }
@@ -606,7 +610,8 @@ function onNetDeath(m) {
   ui = 'dead';
   onLifeEnd(Math.max(m.eaten || 0, net.eaten), m.max);
   net.eaten = 0;
-  if (m.byId) { run.revenge = { id: m.byId, name: m.by }; net.rv = null; }
+  run.revenge = m.byId ? { id: m.byId, name: m.by } : null; // о край — мстить некому
+  net.rv = null;
   const who = m.by ? `На пути была змейка «${esc(m.by)}»` : 'Это край арены';
   setTimeout(() => {
     if (ui !== 'dead' || mode !== 'net') return;
@@ -882,7 +887,7 @@ function toHome() {
   if (run) finishRun();
   mode = null; me = null; ui = 'home'; feast = null; effects = [];
   closeDialog();
-  world = new World({ diff: 'easy' });
+  world = new World({ diff: 'easy', bots: 45, foodN: 3500 }); // демо за меню — полегче для телефона
   demoFocus = null;
   cam.x = 0; cam.y = 0;
   showHome(true);

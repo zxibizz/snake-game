@@ -219,7 +219,7 @@ export class World {
     const d2 = x * x + y * y, lim = R - 15;
     if (d2 > lim * lim) { const k = lim / Math.sqrt(d2); x *= k; y *= k; }
     const f = { id: this.nextFoodId++, x, y, v, r: foodRadiusOf(v), c,
-      ph: Math.random() * TAU, life: life || 0, age: 0, dead: false };
+      ph: Math.random() * TAU, life: life || 0, age: 0, dead: false, cell: foodCellOf(x, y) };
     this.foods.push(f);
     if (this.track) this.foodAdded.push(f);
     return f;
@@ -318,29 +318,38 @@ export class World {
     if (giants < D.giants && Math.random() < 0.5) return rand(D.giantMin, hi * 0.8);
     return lo * Math.pow(hi / lo, Math.pow(Math.random(), 3));
   }
-  // место для бота: всё тело внутри арены, далеко от игроков и не поперёк чужой головы
-  placeBot(mass) {
+  // место для бота: всё тело внутри арены, далеко от игроков и не поперёк чужой головы.
+  // Не нашлось — null (бот появится позже); при создании мира берём последнюю попытку.
+  placeBot(mass, force) {
     const humans = this.humans(), L = bodyLenOf(mass), r = radiusOf(mass);
     const curl = L > 500 ? (1.1 * Math.PI) / L : 0;
-    let segs = null, a = 0;
+    const heads = this.snakes.filter((s) => s.alive).map((s) => s.segs[0]);
+    let inside = null;
     for (let t = 0; t < 30; t++) {
       const pa = Math.random() * TAU, pd = Math.sqrt(Math.random()) * R * 0.9;
       const x = Math.cos(pa) * pd, y = Math.sin(pa) * pd;
-      a = Math.atan2(-y, -x) + rand(-1.3, 1.3);
-      segs = layBody(x, y, a, mass, curl * (Math.random() < 0.5 ? -1 : 1), 1 / 500, rand(0, TAU));
+      const a = Math.atan2(-y, -x) + rand(-1.3, 1.3);
+      const segs = layBody(x, y, a, mass, curl * (Math.random() < 0.5 ? -1 : 1), 1 / 500, rand(0, TAU));
+      if (segs.some((q) => q.x * q.x + q.y * q.y > (R - r - 40) ** 2)) continue;
+      inside = { segs, a };
       let ok = this.isSafe(x, y, 250 + r);
       for (let k = 0; ok && k < segs.length; k += 3) {
         const q = segs[k];
-        if (q.x * q.x + q.y * q.y > (R - r - 40) ** 2) ok = false;
-        else for (const h of humans) if (Math.hypot(h.x - q.x, h.y - q.y) < 900) { ok = false; break; }
+        for (const h of humans) if (Math.hypot(h.x - q.x, h.y - q.y) < 900) { ok = false; break; }
+        for (const h of heads) if (ok && Math.abs(h.x - q.x) < 200 + r && Math.abs(h.y - q.y) < 200 + r) { ok = false; break; }
       }
-      if (ok) break;
+      if (ok) return inside;
     }
-    return { segs, a };
+    if (force && inside) return inside;
+    if (!force) return null;
+    const a = rand(0, TAU); // крайний случай: дугой из центра
+    return { segs: layBody(0, 0, a, mass, curl, 0, 0), a };
   }
   spawnBot(initial) {
     const mass = this.botMass(initial);
-    const { segs, a } = this.placeBot(mass);
+    const place = this.placeBot(mass, initial);
+    if (!place) return null;
+    const { segs, a } = place;
     return this.addSnake(new Snake(this.nextSnakeId++, segs[0].x, segs[0].y, mass,
       randi(0, SKINS.length - 1), this.pickName(), false, 0, a, segs));
   }
@@ -395,22 +404,14 @@ export class World {
     return 0;
   }
   // головы соседей в радиусе rad вместе со скоростью — чтобы не столкнуться лоб в лоб
-  nearHeads(b, bi, rad) {
+  nearHeads(b, rad) {
     const out = [], D = this.D, r2 = rad * rad;
-    const cr = Math.ceil(rad / CELL);
-    const c0 = this.cellOf(b.x, b.y), cx0 = c0 % GRID_N, cy0 = (c0 / GRID_N) | 0;
-    const { segHead, segNext, segS, segK, snakes } = this;
-    for (let cy = Math.max(0, cy0 - cr); cy <= Math.min(GRID_N - 1, cy0 + cr); cy++) {
-      for (let cx = Math.max(0, cx0 - cr); cx <= Math.min(GRID_N - 1, cx0 + cr); cx++) {
-        for (let it = segHead[cy * GRID_N + cx]; it >= 0; it = segNext[it]) {
-          if (segK[it] !== 0 || segS[it] === bi) continue;
-          const o = snakes[segS[it]];
-          const dx = o.x - b.x, dy = o.y - b.y;
-          if (dx * dx + dy * dy > r2) continue;
-          const v = (o.isBoosting ? BOOST_SPEED : BASE_SPEED) * (o.human ? 1 : D.speed);
-          out.push({ x: o.x, y: o.y, r: o.r, vx: Math.cos(o.a) * v, vy: Math.sin(o.a) * v });
-        }
-      }
+    for (const o of this.snakes) {
+      if (o === b || !o.alive || o.inv > 0) continue;
+      const dx = o.x - b.x, dy = o.y - b.y;
+      if (dx * dx + dy * dy > r2) continue;
+      const v = (o.isBoosting ? BOOST_SPEED : BASE_SPEED) * (o.human ? 1 : D.speed);
+      out.push({ x: o.x, y: o.y, r: o.r, vx: Math.cos(o.a) * v, vy: Math.sin(o.a) * v });
     }
     return out;
   }
@@ -503,7 +504,7 @@ export class World {
     }
 
     const look = D.look * (1 + b.r / 50) * (b.boost ? 1.4 : 1);
-    const heads = this.nearHeads(b, bi, look);
+    const heads = this.nearHeads(b, look);
     const vb = (b.boost ? BOOST_SPEED : BASE_SPEED) * D.speed;
     let bestA = b.a, bestScore = -1e9, bestDg = 0, aheadDg = 0;
     const dOff = clamp(angDiff(desired, b.a), -2.1, 2.1);
@@ -593,15 +594,18 @@ export class World {
     }
 
     // голова в чужое тело
+    let maxR = 0;
+    for (const s of snakes) if (s.alive && s.r > maxR) maxR = s.r;
     for (let si = 0; si < snakes.length; si++) {
       const s = snakes[si];
       if (!s.alive || s.inv > 0) continue;
       const h = s.segs[0];
       const c0 = this.cellOf(h.x, h.y), cx0 = c0 % GRID_N, cy0 = (c0 / GRID_N) | 0;
+      const cr = Math.ceil((s.r * 0.55 + maxR * 0.85) / CELL);
       let hit = null;
-      for (let cy = cy0 - 1; cy <= cy0 + 1 && !hit; cy++) {
+      for (let cy = cy0 - cr; cy <= cy0 + cr && !hit; cy++) {
         if (cy < 0 || cy >= GRID_N) continue;
-        for (let cx = cx0 - 1; cx <= cx0 + 1 && !hit; cx++) {
+        for (let cx = cx0 - cr; cx <= cx0 + cr && !hit; cx++) {
           if (cx < 0 || cx >= GRID_N) continue;
           for (let it = segHead[cy * GRID_N + cx]; it >= 0; it = segNext[it]) {
             if (segS[it] === si) continue;
@@ -673,7 +677,7 @@ export class World {
       this.respawnQueue[i] -= dt;
       if (this.respawnQueue[i] <= 0) {
         this.respawnQueue.splice(i, 1);
-        if (bots < this.targetBots) { this.spawnBot(false); bots++; }
+        if (bots < this.targetBots && this.spawnBot(false)) bots++;
       }
     }
 

@@ -17,8 +17,13 @@ function client() {
   const inbox = [];
   const waiters = [];
   ws.onmessage = (e) => {
-    const m = typeof e.data === 'string' ? JSON.parse(e.data)
-      : { t: new Uint8Array(e.data)[0] === 2 ? 'food' : 'snap', bytes: e.data.byteLength, n: new DataView(e.data).getUint16(5, true) };
+    let m;
+    if (typeof e.data === 'string') m = JSON.parse(e.data);
+    else {
+      const type = new Uint8Array(e.data)[0];
+      m = { t: { 1: 'snap', 2: 'food', 3: 'cells' }[type], bytes: e.data.byteLength };
+      if (type === 1) m.n = new DataView(e.data).getUint16(5, true);
+    }
     const i = waiters.findIndex((w) => w.t === m.t);
     if (i >= 0) waiters.splice(i, 1)[0].res(m); else inbox.push(m);
   };
@@ -120,7 +125,7 @@ test('игрок видит только змей рядом, таблица —
   assert.ok(wa.snakes.length < 100, `в поле зрения ${wa.snakes.length} из 100`);
   assert.ok(wa.snakes.some((s) => s.id === wa.you), 'себя видно');
   const food = await a.next('food');
-  assert.ok(food.bytes > 5 + 12 * 1000, 'вся еда пришла одним бинарным сообщением');
+  assert.ok(food.bytes > 5 + 13 * 300, 'еда вокруг пришла одним бинарным сообщением');
   const lb = await a.next('lb');
   assert.equal(lb.n, 100);
   assert.equal(lb.top.length, 10);

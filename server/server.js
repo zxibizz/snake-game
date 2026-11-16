@@ -5,7 +5,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { acceptUpgrade } from './ws.js';
-import { World, R, DIFF, SKINS, START_MASS, SNAKES_N, TAU, VERSION, FOOD_CELL, FOOD_CELLS, foodCellOf } from '../public/core.js';
+import { World, R, DIFF, SKINS, START_MASS, SNAKES_N, TAU, VERSION, FOOD_CELL, FOOD_CELLS } from '../public/core.js';
 
 const PORT = Number(process.env.PORT) || 8080;
 const PUBLIC = path.resolve(fileURLToPath(new URL('../public/', import.meta.url)));
@@ -136,10 +136,12 @@ function cellsFor(c) {
 //   | u16 новой еды × FOOD_REC | u16 съеденной × u32 id
 // Вся еда вокруг (после входа и после догонялки): u8 тип=2 | u32 штук × FOOD_REC
 // Клетки еды сменились: u8 тип=3 | u8 ушло × u8 клетка | u8 пришло × u8 клетка | u32 штук × FOOD_REC
-// FOOD_REC: u32 id, i16 x·4, i16 y·4, u16 ценность·100, u8 цвет, u8 сколько секунд ещё лежит (0 — всегда)
+// FOOD_REC (13 байт): u8 клетка, u32 id, i16 x·4, i16 y·4, u16 ценность·100, u8 цвет, u8 сколько секунд ещё лежит (0 — всегда)
+const FR = 13;
 const q4 = (v) => Math.max(-32768, Math.min(32767, Math.round(v * 4)));
 const qa = (a) => Math.round((((a % TAU) + TAU) % TAU) / TAU * 65535);
 function writeFood(buf, o, f) {
+  o = buf.writeUInt8(f.cell, o);
   o = buf.writeUInt32LE(f.id, o);
   o = buf.writeInt16LE(q4(f.x), o);
   o = buf.writeInt16LE(q4(f.y), o);
@@ -147,10 +149,10 @@ function writeFood(buf, o, f) {
   o = buf.writeUInt8(f.c, o);
   return buf.writeUInt8(lifeLeft(f), o);
 }
-const foodIn = (w, cells) => w.foods.filter((f) => !f.dead && cells.has(foodCellOf(f.x, f.y)));
+const foodIn = (w, cells) => w.foods.filter((f) => !f.dead && cells.has(f.cell));
 function allFood(w, cells) {
   const foods = foodIn(w, cells);
-  const buf = Buffer.alloc(5 + foods.length * 12);
+  const buf = Buffer.alloc(5 + foods.length * FR);
   let o = buf.writeUInt8(2, 0);
   o = buf.writeUInt32LE(foods.length, o);
   for (const f of foods) o = writeFood(buf, o, f);
@@ -158,7 +160,7 @@ function allFood(w, cells) {
 }
 function cellFood(w, leave, enter) {
   const foods = foodIn(w, new Set(enter));
-  const buf = Buffer.alloc(1 + 1 + leave.length + 1 + enter.length + 4 + foods.length * 12);
+  const buf = Buffer.alloc(1 + 1 + leave.length + 1 + enter.length + 4 + foods.length * FR);
   let o = buf.writeUInt8(3, 0);
   o = buf.writeUInt8(leave.length, o);
   for (const k of leave) o = buf.writeUInt8(k, o);
@@ -171,9 +173,9 @@ function cellFood(w, leave, enter) {
 // изменения еды с прошлого снимка: общий список на комнату, каждому — из его клеток
 function foodChanges(w) {
   const gone = new Set(w.foodRemoved.map((f) => f.id));
-  const added = w.foodAdded.filter((f) => !gone.has(f.id)).map((f) => [f, foodCellOf(f.x, f.y)]);
+  const added = w.foodAdded.filter((f) => !gone.has(f.id)).map((f) => [f, f.cell]);
   const addedIds = new Set(w.foodAdded.map((f) => f.id));
-  const removed = w.foodRemoved.filter((f) => !addedIds.has(f.id)).map((f) => [f.id, foodCellOf(f.x, f.y)]);
+  const removed = w.foodRemoved.filter((f) => !addedIds.has(f.id)).map((f) => [f.id, f.cell]);
   w.foodAdded = [];
   w.foodRemoved = [];
   return { added, removed };
@@ -181,7 +183,7 @@ function foodChanges(w) {
 function foodPart(ch, cells) {
   const added = ch.added.filter(([, k]) => cells.has(k)).slice(0, 65535);
   const removed = ch.removed.filter(([, k]) => cells.has(k)).slice(0, 65535);
-  const buf = Buffer.alloc(2 + added.length * 12 + 2 + removed.length * 4);
+  const buf = Buffer.alloc(2 + added.length * FR + 2 + removed.length * 4);
   let o = buf.writeUInt16LE(added.length, 0);
   for (const [f] of added) o = writeFood(buf, o, f);
   o = buf.writeUInt16LE(removed.length, o);
@@ -296,14 +298,18 @@ function stepRoom(room) {
   for (const c of room.clients) {
     // медленный клиент пропускает снимки, а не копит очередь; когда догонит — получит всю еду заново,
     // иначе изменения еды из пропущенных снимков у него потеряются
+    // победы копим, пока клиент отстаёт: иначе он не узнает о своей победе
+    if (kills.length) { c.kq.push(...kills); if (c.kq.length > 200) c.kq.splice(0, c.kq.length - 200); }
     if (c.ws.buffered > 256 * 1024) { c.lagging = true; continue; }
     const vis = visibleTo(c, w);
+    const myKills = c.kq;
+    c.kq = [];
     if (c.lagging) {
       if (c.ws.buffered > 32 * 1024) continue;
       c.lagging = false;
       c.known = new Set(vis.map((s) => s.id));
       c.cells = cellsFor(c);
-      c.send({ t: 'sync', snakes: vis.map(metaOf), feast: feastOf(w) });
+      c.send({ t: 'sync', snakes: vis.map(metaOf), feast: feastOf(w), kill: myKills });
       c.ws.sendBinary(allFood(w, c.cells));
     } else {
       const cells = cellsFor(c);
@@ -314,10 +320,10 @@ function stepRoom(room) {
       const known = new Set();
       for (const s of vis) { known.add(s.id); if (!c.known.has(s.id)) enter.push(metaOf(s)); }
       c.known = known;
-      if (enter.length || kills.length || feast) {
+      if (enter.length || myKills.length || feast) {
         const m = { t: 'ev' };
         if (enter.length) m.spawn = enter;
-        if (kills.length) m.kill = kills;
+        if (myKills.length) m.kill = myKills;
         if (feast) m.feast = feast;
         c.send(m);
       }
@@ -363,7 +369,7 @@ server.on('upgrade', (req, socket, head) => {
   conns++;
   const c = {
     ws, room: null, snake: null, name: 'Игрок', skin: 0, kills: 0, lastMass: 0, token: '', creates: 0, lagging: false,
-    known: new Set(), cells: new Set(), cx: 0, cy: 0, rvId: 0,
+    known: new Set(), cells: new Set(), cx: 0, cy: 0, rvId: 0, kq: [],
     tokens: MSG_BURST, refilled: Date.now(),
     send: (o) => ws.sendText(JSON.stringify(o)),
   };
