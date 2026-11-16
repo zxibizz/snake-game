@@ -8,7 +8,6 @@ export const R = 7000;                  // радиус арены (коорди
 export const BASE_SPEED = 210;          // пикс/с — у «Малыша»; с каждым званием змейка быстрее, см. speedOf
 export const BOOST_SPEED = 400;
 export const SPEED_PER_TITLE = 0.035;   // прибавка к скорости за каждое звание
-export const BOT_FEUD = 0.06;           // доля попыток охоты, в которых бот согласен подрезать другого бота: меньше — спокойнее арена
 // Рывок дорогой: в секунду сгорает BOOST_SHARE всей длины, но не меньше BOOST_COST — едой по пути его не окупить,
 // длинной змее он обходится в десятки длины в секунду. Половина потраченного остаётся едой позади.
 export const BOOST_COST = 10;
@@ -52,9 +51,12 @@ export const preyFor = (b, s) => b.mass <= s.mass * PREY_GAP;
 // с какого места в таблице боты охотятся на игрока всерьёз (см. heatOf)
 export const RANK_HOT = 20;
 // Подрезка: хвост игрока, проложенный за последние CUT_NEW с, — «только что лёг». Если он лёг поперёк пути бота
-// ближе CUT_NEAR пикселей от его носа (от края до края), бот замечает его с опозданием D.fresh. Дальше — видит сразу
+// ближе D.cutNear пикселей от его носа (от края до края), бот замечает его с опозданием D.fresh. Дальше — видит сразу
 export const CUT_NEW = 1;
-export const CUT_NEAR = 110;
+// «зевок» бота (D.slip): сколько секунд длится, во сколько раз короче он видит и во сколько раз реже раздумывает
+export const SLIP_T = [0.6, 1.4];
+export const SLIP_LOOK = 0.3;
+export const SLIP_REACT = 3;
 const HEAD_K = Math.ceil(2 / 0.42); // голова с шеей — столько сегментов от головы (два радиуса при шаге 0,42 радиуса); их бот видит всегда
 
 // mass — разброс масс ботов при создании мира; giants — сколько ботов не меньше giantMin держать на арене.
@@ -66,24 +68,31 @@ const HEAD_K = Math.ceil(2 / 0.42); // голова с шеей — стольк
 // (0 — только базовые 0,45 с): чем больше, тем труднее подрезать гиганта;
 // wary — как часто бот замечает, что ему перерезают путь, и уходит вдоль чужого пути;
 // keep — какая доля длины остаётся после «Продолжить» (0 — с самого начала);
-// fresh — через сколько секунд бот замечает, что игрок только что перерезал ему путь своим хвостом: больше — легче подрезать.
+// fresh — через сколько секунд бот замечает, что игрок только что перерезал ему путь своим хвостом: больше — легче подрезать;
+// cutNear — насколько под носом (px от края до края) такой хвост застаёт бота врасплох.
+// Хаос: feud — доля попыток охоты, в которых бот согласен подрезать другого бота (меньше — спокойнее арена);
+// slip — сколько раз в минуту бот «зевает» в толкотне (у еды, останков, в погоне): SLIP_T с он видит только
+// под самым носом (SLIP_LOOK от обычного), не замечает подрезки и чужих голов — и может врезаться.
 export const DIFF = {
   easy: {
     label: 'Лёгкий', mass: [15, 2500], giants: 4, giantMin: 800,
-    speed: 0.97, turn: 0.95, react: 0.2, look: 275,
-    aggr: 0.3, humanAggr: [0, 0.7, 1], maxHunters: [1, 1, 2], grace: 10, huntRange: 480, boost: 0.55, rest: 6, foresee: 0, wary: 0.35, fresh: 0.3,
+    speed: 0.97, turn: 0.85, react: 0.5, look: 275,
+    aggr: 0.3, humanAggr: [0, 0.7, 1], maxHunters: [1, 1, 2], grace: 10, huntRange: 480, boost: 0.55, rest: 6, foresee: 0, wary: 0.2, fresh: 0.5, cutNear: 200,
+    feud: 0.3, slip: 6,
     edgeKills: false, keep: 0.8,
   },
   medium: {
     label: 'Средний', mass: [15, 3500], giants: 5, giantMin: 1100,
-    speed: 1, turn: 1, react: 0.13, look: 335,
-    aggr: 0.55, humanAggr: [0.4, 0.85, 1.2], maxHunters: [1, 2, 3], grace: 6, huntRange: 640, boost: 0.8, rest: 4, foresee: 0.4, wary: 0.6, fresh: 0.25,
+    speed: 1, turn: 0.9, react: 0.33, look: 335,
+    aggr: 0.55, humanAggr: [0.4, 0.85, 1.2], maxHunters: [1, 2, 3], grace: 6, huntRange: 640, boost: 0.8, rest: 4, foresee: 0.4, wary: 0.4, fresh: 0.4, cutNear: 170,
+    feud: 0.15, slip: 2.5,
     edgeKills: true, keep: 0.4,
   },
   hard: {
     label: 'Сложный', mass: [20, 6000], giants: 6, giantMin: 1800,
     speed: 1.03, turn: 1.08, react: 0.08, look: 410,
-    aggr: 0.9, humanAggr: [0.9, 1.3, 1.7], maxHunters: [2, 4, 5], grace: 3, huntRange: 820, boost: 0.95, rest: 2, foresee: 0.9, wary: 0.85, fresh: 0.18,
+    aggr: 0.9, humanAggr: [0.9, 1.3, 1.7], maxHunters: [2, 4, 5], grace: 3, huntRange: 820, boost: 0.95, rest: 2, foresee: 0.9, wary: 0.85, fresh: 0.18, cutNear: 110,
+    feud: 0.06, slip: 0.5,
     edgeKills: true, keep: 0,
   },
 };
@@ -232,7 +241,8 @@ export const angDiff = (a, b) => { // a - b в диапазоне [-π, π]
 // До 900 толщина растёт быстро, дальше медленно: гиганты толстые, но не на пол-экрана.
 export const radiusOf = (m) => (m <= 900 ? 9 + Math.sqrt(Math.max(0, m)) * 0.95 : 37.5 + 9 * Math.log(m / 900));
 export const spacingOf = (m) => radiusOf(m) * 0.42;
-export const bodyLenOf = (m) => 38 * Math.pow(Math.max(1, m), 0.55);
+// длина тела по массе
+export const bodyLenOf = (m) => 57 * Math.pow(Math.max(1, m), 0.55);
 export const countOf = (m) => Math.max(6, Math.round(bodyLenOf(m) / spacingOf(m)));
 export const foodRadiusOf = (v) => Math.min(13, 3.2 + Math.sqrt(v) * 2); // для поедания (баланс), не для картинки
 // на экране крошка по цене: площадь пропорциональна цене — 1, 2 и 4 у обычной еды различимы на глаз, капли рывка мельче
@@ -287,6 +297,7 @@ export class Snake {
     this.hside = 0; this.huntT0 = 0;
     this.goalC = -1; this.goalT = 0; this.goalV = 0; this.ambTarget = 0; this.ambUntil = 0;
     this.surpId = 0; this.surpT = 0; this.surpLast = -9; // чей хвост перерезал путь и когда бот это заметит
+    this.slipT = 0;                 // до какого времени бот «зевает» (D.slip)
     this.mem = new Map();           // что бот решил о встрече (заметил угрозу, устроит засаду, пойдёт на останки) — на несколько секунд
     this.r = radiusOf(mass);
     this.segs = segs || layBody(x, y, this.a, mass, 0, 0, 0);
@@ -800,7 +811,7 @@ export class World {
   pickTarget(b) {
     const D = this.D;
     let best = null, bs = Infinity;
-    const feud = Math.random() < BOT_FEUD;
+    const feud = Math.random() < D.feud;
     for (const s of this.snakes) {
       if (s === b || !s.alive || s.inv > 0 || (!s.human && !feud) || !preyFor(b, s)) continue;
       const d = Math.hypot(s.x - b.x, s.y - b.y);
@@ -847,7 +858,7 @@ export class World {
       const [t1, t2] = c;
       if (t2 > 1.6 || t2 < t1 + 0.08 || t2 > t1 + body * 0.8) continue;
       // на бота — редко (как и охота друг на друга), на игрока — по задиристости уровня, месту игрока и характеру бота
-      if (!this.decide(b, 'm' + o.id, h ? D.aggr * b.pers * Math.min(1.5, h.p / Math.max(0.1, D.humanAggr[1])) : BOT_FEUD * 3)) continue;
+      if (!this.decide(b, 'm' + o.id, h ? D.aggr * b.pers * Math.min(1.5, h.p / Math.max(0.1, D.humanAggr[1])) : D.feud * 3)) continue;
       // засада считается охотой: на игрока — не больше охотников, чем по heatOf
       if (!mine) this.hunted.set(s.id, (this.hunted.get(s.id) || 0) + 1);
       b.ambTarget = s.id; b.ambUntil = this.time + 0.6;
@@ -943,6 +954,12 @@ export class World {
     b.boost = false;
     const heads = this.nearHeads(b, Math.max(look0 * 1.4, 600));
     const vb = speedOf(b.mass, false) * D.speed;
+    // зевок: в толкотне (рядом чужие головы или погоня) бот иногда засматривается — D.slip раз в минуту
+    if (this.time >= b.slipT && (heads.length || b.hunt > 0) && Math.random() < D.slip / 60 * D.react) { // раз в D.react с — вероятность за раздумье
+      b.slipT = this.time + rand(SLIP_T[0], SLIP_T[1]);
+    }
+    if (hx * hx + hy * hy > (R * 0.85) ** 2) b.slipT = 0; // о край арены не зевают: врезаться в стену — не столкновение, а глупость
+    const slip = this.time < b.slipT;
 
     let P = null;
     if (b.hunt > 0) {
@@ -970,7 +987,7 @@ export class World {
       // «уже видел»: окно длиннее самой долгой слепоты с запасом на раздумье — иначе слепота продлевалась бы сама
       const seen = b.surpId === o0.id && this.time - b.surpLast < 1.3 * (D.fresh + D.react) + 0.2;
       if (!seen) {
-        const sudden = gap < CUT_NEAR && o0 !== P &&
+        const sudden = gap < D.cutNear && o0 !== P &&
           Math.cos(angDiff(o0.a, Math.atan2(hy - o0.y, hx - o0.x))) < 0.7;
         b.surpId = o0.id; b.surpT = sudden ? this.time + D.fresh * rand(0.7, 1.3) : 0;
       }
@@ -979,7 +996,7 @@ export class World {
     if (b.surpId && this.time < b.surpT) blind = this.byId.get(b.surpId) || null;
 
     // 1) угроза — важнее всего, кроме своей цели: к ней бот идёт наперерез намеренно
-    const th = this.threatOf(b, heads, vb);
+    const th = slip ? null : this.threatOf(b, heads, vb);
     if (th && (!P || th.id !== P.id)) {
       const side = Math.cos(th.s.a) * (hy - th.y) - Math.sin(th.s.a) * (hx - th.x) >= 0 ? 1 : -1;
       const along = th.s.a + side * 0.6, back = th.s.a + Math.PI - side * 0.6; // вдоль чужого пути или прочь от него
@@ -1056,11 +1073,11 @@ export class World {
     }
 
     // 5) обход препятствий
-    const look = look0 * (b.boost ? 1.4 : 1);
+    const look = look0 * (b.boost ? 1.4 : 1) * (slip ? SLIP_LOOK : 1);
     const vbb = speedOf(b.mass, b.boost) * D.speed;
     const tFar = 0.46 + D.foresee * clamp((b.r - 30) / 20, 0, 1); // гигант смотрит дальше: ему дольше отворачивать
     const prey = P ? P.id : 0;                                     // …но не от своей цели: к ней он и идёт наперерез
-    const near = heads.filter((o) => (o.x - hx) ** 2 + (o.y - hy) ** 2 < look * look); // дальние головы за tFar не доползут
+    const near = slip ? [] : heads.filter((o) => (o.x - hx) ** 2 + (o.y - hy) ** 2 < look * look); // дальние головы за tFar не доползут
     let bestA = b.a, bestScore = -1e9, bestDg = 0;
     const dOff = clamp(angDiff(desired, b.a), -2.1, 2.1);
     for (let i = -1; i < OFFS.length; i++) {
@@ -1160,7 +1177,7 @@ export class World {
       if (b.human || !b.alive) continue;
       if (b.hunt > 0) { b.hunt -= dt; if (b.hunt <= 0) this.stopHunt(b); }
       b.thinkT -= dt;
-      if (b.thinkT <= 0) { this.think(b, i); b.thinkT = this.D.react * rand(0.7, 1.3); }
+      if (b.thinkT <= 0) { this.think(b, i); b.thinkT = this.D.react * rand(0.7, 1.3) * (this.time < b.slipT ? SLIP_REACT : 1); }
     }
 
     // голова в чужое тело (в сетке только змеи без неуязвимости — maxR из buildGrids)
