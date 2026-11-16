@@ -198,42 +198,54 @@ function makeGrid() {
 }
 const gridPattern = makeGrid();
 
-// спрайты: сегмент змейки (объёмный шарик с обводкой) и светящаяся еда — по одному на цвет палитры
+// спрайты: бусины змейки, голова, светящаяся еда — по одному на цвет палитры
 function shade(hex, k) {
   const n = parseInt(hex.slice(1), 16);
   let r = n >> 16, g = (n >> 8) & 255, b = n & 255;
   if (k >= 0) { r += (255 - r) * k; g += (255 - g) * k; b += (255 - b) * k; } else { r *= 1 + k; g *= 1 + k; b *= 1 + k; }
   return `rgb(${r | 0},${g | 0},${b | 0})`;
 }
-const SPR = 64;
-const segSprites = PAL.map((col) => {
-  const c = document.createElement('canvas');
-  c.width = c.height = SPR;
-  const g = c.getContext('2d'), m = SPR / 2;
+const SPR = 64, BSPR = 96;
+// спрайты рисуются при первом обращении к цвету: цветов в палитре около сотни, на арене видна малая часть
+const lazy = (size, draw) => { const cache = []; return (k) => cache[k] || (cache[k] = (() => {
+  const c = document.createElement('canvas'); c.width = c.height = size;
+  draw(c.getContext('2d'), size / 2, PAL[k] || PAL[0]); return c;
+})()); };
+const headSprite = lazy(SPR, (g, m, col) => {
   g.beginPath(); g.arc(m, m, m - 1, 0, TAU); g.fillStyle = shade(col, -0.55); g.fill();
   const gr = g.createRadialGradient(m * 0.72, m * 0.62, m * 0.1, m, m, m - 3);
   gr.addColorStop(0, shade(col, 0.45)); gr.addColorStop(0.55, col); gr.addColorStop(1, shade(col, -0.25));
   g.beginPath(); g.arc(m, m, m - 3.5, 0, TAU); g.fillStyle = gr; g.fill();
-  return c;
 });
-const foodSprites = PAL.map((col) => {
-  const c = document.createElement('canvas');
-  c.width = c.height = SPR;
-  const g = c.getContext('2d'), m = SPR / 2;
+// бусина-чешуйка: смотрит вдоль +x (к голове), тёмная дужка — по заднему краю
+function drawBead(g, m, col) {
+  const R = m - 1, w = R * 0.09;
+  g.beginPath(); g.arc(m, m, R, 0, TAU); g.fillStyle = shade(col, -0.5); g.fill();
+  const gr = g.createRadialGradient(m + R * 0.3, m, R * 0.1, m, m, R);
+  gr.addColorStop(0, shade(col, 0.35)); gr.addColorStop(0.7, col); gr.addColorStop(1, shade(col, -0.3));
+  g.beginPath(); g.arc(m, m, R - w, 0, TAU); g.fillStyle = gr; g.fill();
+  g.beginPath(); g.arc(m, m, R * 0.62, Math.PI - 1, Math.PI + 1);
+  g.lineWidth = w; g.lineCap = 'round'; g.strokeStyle = shade(col, -0.35); g.stroke();
+}
+const beadSprite = lazy(BSPR, drawBead);
+// та же бусина, вспыхнувшая: для волны свечения при ускорении
+const beadLitSprite = lazy(BSPR, (g, m, col) => {
+  drawBead(g, m, col);
+  g.globalCompositeOperation = 'source-atop';
+  const gr = g.createRadialGradient(m + m * 0.2, m, 0, m, m, m);
+  gr.addColorStop(0, 'rgba(255,255,255,0.9)'); gr.addColorStop(0.6, 'rgba(255,255,255,0.45)'); gr.addColorStop(1, 'rgba(255,255,255,0.2)');
+  g.fillStyle = gr; g.fillRect(0, 0, m * 2, m * 2);
+});
+const foodSprite = lazy(SPR, (g, m, col) => {
   const gr = g.createRadialGradient(m, m, 0, m, m, m);
   gr.addColorStop(0, '#FFFFFF'); gr.addColorStop(0.18, shade(col, 0.4)); gr.addColorStop(0.36, col);
   gr.addColorStop(0.5, hexA(col, 0.35)); gr.addColorStop(1, hexA(col, 0));
   g.fillStyle = gr; g.fillRect(0, 0, SPR, SPR);
-  return c;
 });
-const glowSprites = PAL.map((col) => {
-  const c = document.createElement('canvas');
-  c.width = c.height = SPR;
-  const g = c.getContext('2d'), m = SPR / 2;
+const glowSprite = lazy(SPR, (g, m, col) => {
   const gr = g.createRadialGradient(m, m, m * 0.3, m, m, m);
-  gr.addColorStop(0, hexA(col, 0.55)); gr.addColorStop(1, hexA(col, 0));
+  gr.addColorStop(0, hexA(col, 0.6)); gr.addColorStop(1, hexA(col, 0));
   g.fillStyle = gr; g.fillRect(0, 0, SPR, SPR);
-  return c;
 });
 
 // ---------- общее состояние ----------
@@ -1100,26 +1112,41 @@ function drawSnake(s, vx0, vy0, vx1, vy1) {
   ctx.globalAlpha = s.inv > 0 ? 0.45 + 0.25 * Math.sin(time * 18) : 1;
   // рисуем бусины через сегмент: меньше перерисовки, а тело всё равно сплошное; мелкую на экране — реже
   const step = r * cam.z < 3 ? 4 : 2;
-  if (s.isBoosting) {
-    const g = r * 1.9, pulse = 0.55 + 0.25 * Math.sin(time * 20);
-    const a0 = ctx.globalAlpha;
-    ctx.globalAlpha = a0 * pulse;
+  const a0 = ctx.globalAlpha, boost = s.isBoosting;
+  // ускорение: по сегментам от головы к хвосту бежит волна, каждый светится своим цветом
+  const wave = (i) => { const w = 0.5 + 0.5 * Math.sin(time * 16 - i * 0.22); return w * w; };
+  if (boost) {
+    const g = r * 2;
     for (let i = (n - 1) & ~1; i >= 0; i -= 4) {
       const q = segs[i];
       if (q.x < x0 || q.x > x1 || q.y < y0 || q.y > y1) continue;
-      ctx.drawImage(glowSprites[segColor(s.skin, i)], q.x - g, q.y - g, g * 2, g * 2);
+      ctx.globalAlpha = a0 * (0.2 + 0.8 * wave(i));
+      ctx.drawImage(glowSprite(segColor(s.skin, i)), q.x - g, q.y - g, g * 2, g * 2);
     }
     ctx.globalAlpha = a0;
   }
+  // бусина повёрнута по ходу тела: матрица — мировая камера × поворот × масштаб
+  const T = ctx.getTransform(), k = T.a, hb = BSPR / 2;
   const tail = Math.min(10, n >> 2);
   for (let i = (n - 1) & ~1; i >= 2; i -= step) {
     const q = segs[i];
     if (q.x < x0 || q.x > x1 || q.y < y0 || q.y > y1) continue;
     const rr = i > n - tail ? r * (0.55 + 0.45 * (n - i) / tail) : r; // хвост сужается
-    ctx.drawImage(segSprites[segColor(s.skin, i)], q.x - rr, q.y - rr, rr * 2, rr * 2);
+    const p = segs[i - 1], o = segs[i + 1] || q;
+    let dx = p.x - o.x, dy = p.y - o.y;
+    const sc = k * rr / hb / (Math.hypot(dx, dy) || 1);
+    dx *= sc; dy *= sc;
+    ctx.setTransform(dx, dy, -dy, dx, k * q.x + T.e, k * q.y + T.f);
+    const c = segColor(s.skin, i);
+    ctx.drawImage(beadSprite(c), -hb, -hb);
+    if (boost) {
+      const w = wave(i);
+      if (w > 0.12) { ctx.globalAlpha = a0 * w; ctx.drawImage(beadLitSprite(c), -hb, -hb); ctx.globalAlpha = a0; }
+    }
   }
+  ctx.setTransform(T);
   const hr = r * 1.1;
-  ctx.drawImage(segSprites[sk.head], h.x - hr, h.y - hr, hr * 2, hr * 2);
+  ctx.drawImage(headSprite(sk.head), h.x - hr, h.y - hr, hr * 2, hr * 2);
   const a = s.a, look = s.ta;
   for (const side of [-1, 1]) {
     const ex = h.x + Math.cos(a + side * 0.6) * r * 0.55, ey = h.y + Math.sin(a + side * 0.6) * r * 0.55;
@@ -1210,7 +1237,7 @@ function draw() {
     if (f.x < vx0 || f.x > vx1 || f.y < vy0 || f.y > vy1) continue;
     ctx.globalAlpha = f.life > 0 && f.life - f.age < 3 ? Math.max(0, (f.life - f.age) / 3) : 1;
     const rr = f.r * 1.9 * (1 + 0.12 * Math.sin(time * 3 + f.ph));
-    ctx.drawImage(foodSprites[f.c] || foodSprites[0], f.x - rr, f.y - rr, rr * 2, rr * 2);
+    ctx.drawImage(foodSprite(f.c), f.x - rr, f.y - rr, rr * 2, rr * 2);
   }
   ctx.globalAlpha = 1;
 
