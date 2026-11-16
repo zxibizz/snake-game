@@ -271,13 +271,17 @@ function addXp(n) {
 
 // ---------- холст ----------
 const canvas = $('c'), ctx = canvas.getContext('2d');
-let W = 0, H = 0, DPR = 1, laidIH = 0; // laidIH — высота окна, по которой разложено (см. checkSize)
+let W = 0, H = 0, DPR = 1, tall = false, redraw = false; // tall — страница высотой с экран (см. resize), redraw — холст очищен
 // Установленная игра на iPhone (статус-бар поверх страницы): окно короче экрана примерно на высоту статус-бара,
 // и снизу остаётся пустая полоса. Там холст тянем на всю высоту экрана (screen у iOS — всегда в портретной ориентации).
 const IS_PWA = navigator.standalone === true ||
   (window.matchMedia && matchMedia('(display-mode: standalone), (display-mode: fullscreen)').matches);
 const IOS_PWA = IS_PWA && /iPhone|iPod/.test(navigator.userAgent || '');
 if (IS_PWA) document.documentElement.classList.add('pwa');
+// высота экрана в текущей ориентации (screen у iOS — всегда в портретной)
+function screenHeight() {
+  return window.innerHeight >= window.innerWidth ? Math.max(screen.width, screen.height) : Math.min(screen.width, screen.height);
+}
 function fullHeight() {
   const iw = window.innerWidth, ih = window.innerHeight;
   if (!IOS_PWA || !screen.width || !screen.height) return ih;
@@ -305,25 +309,31 @@ function unscroll() {
 }
 function resize() {
   DPR = Math.min(window.devicePixelRatio || 1, 2);
-  W = window.innerWidth; H = fullHeight(); laidIH = window.innerHeight;
-  // холст, интерфейс, затемнение диалогов и экраны меню — одной высоты (CSS: var(--app-h))
-  document.documentElement.style.setProperty('--app-h', H !== window.innerHeight ? `${H}px` : '');
-  document.documentElement.classList.toggle('tall', H !== window.innerHeight);
+  W = window.innerWidth; H = fullHeight();
+  // холст, интерфейс, затемнение диалогов и экраны меню — одной высоты (CSS: var(--app-h)). В установленной игре на iPhone
+  // раскладка по высоте экрана, даже если окно сейчас и само с экран: iOS то укорачивает окно на статус-бар, то растягивает
+  // вслед за страницей, и от этого раскладка меняться не должна (в 0.12.1 перекладка по кругу мигала). С клавиатурой — по окну.
+  tall = H !== window.innerHeight || (IOS_PWA && H === screenHeight());
+  document.documentElement.style.setProperty('--app-h', tall ? `${H}px` : '');
+  document.documentElement.classList.toggle('tall', tall);
   unscroll();
-  canvas.width = Math.round(W * DPR); canvas.height = Math.round(H * DPR);
+  // холст пересоздаём, только если размер правда изменился: присваивание очищает картинку (на паузе она не перерисовывается)
+  const cw = Math.round(W * DPR), ch = Math.round(H * DPR);
+  if (canvas.width !== cw || canvas.height !== ch) { canvas.width = cw; canvas.height = ch; redraw = true; }
 }
 window.addEventListener('resize', resize);
 resize();
 // iOS в установленной игре не всегда присылает resize: на старте окно бывает ещё высотой с экран, а потом молча
 // укорачивается на статус-бар — и поле с меню так и остаются по короткому окну (пустая полоса снизу).
-// Поэтому размеры ещё и сверяем сами (из главного цикла и при возврате в игру): если окно или нужная высота
-// не те, по которым разложено, — раскладываем заново.
+// Поэтому размеры ещё и сверяем сами (из главного цикла и при возврате в игру): если ширина или нужная высота
+// не те, по которым разложено, — раскладываем заново. Саму высоту окна не сравниваем: в растянутой странице iOS
+// то и дело меняет её между экраном и экраном без статус-бара, и перекладка по кругу мигала (0.12.1).
 let sizeCheckT = -Infinity;
 function checkSize(now, force = false) {
   if (!force && now - sizeCheckT < 500) return;
   sizeCheckT = now;
-  if (window.innerWidth !== W || window.innerHeight !== laidIH || fullHeight() !== H) { resize(); applyFab(); }
-  else if (H !== laidIH) unscroll();
+  if (window.innerWidth !== W || fullHeight() !== H) { resize(); applyFab(); }
+  else if (tall) unscroll();
 }
 const relayout = () => checkSize(performance.now(), true);
 if (window.visualViewport) visualViewport.addEventListener('resize', relayout);
@@ -2131,7 +2141,8 @@ function frame(now) {
     draw();
     if (mode) updateHud(dt);
     else if (!$('home').hidden && $('dlg').hidden) drawPreview();
-  }
+  } else if (redraw && mode) draw(); // на паузе картинка стоит — после смены размера холста нарисовать заново
+  redraw = false;
   checkSize(now);
   requestAnimationFrame(frame);
 }
