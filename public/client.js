@@ -96,7 +96,8 @@ function addXp(n) {
   if (run) run.xp += n;
   const fresh = SKINS.filter((x) => x.stars > before && x.stars <= save.xp);
   if (fresh.length) {
-    setTimeout(() => { sfx.level(); banner('Новая раскраска!', `«${fresh.map((x) => x.name).join('», «')}»`); }, 400);
+    if (run) run.unlocked.push(...fresh.map((x) => x.name));
+    if (mode && ui === 'play') banner('Новая раскраска!', `«${fresh.map((x) => x.name).join('», «')}»`, sfx.level, true);
     persist();
   }
 }
@@ -194,7 +195,7 @@ const cam = { x: 0, y: 0, z: 1 };
 
 function newRun(diff) {
   return { diff, xp: 0, kills: 0, eatenBase: 0, eatXp: 0, eatStat: 0, maxTitle: 0, bestRank: 999, flags: new Set(),
-    lifeStart: 0, killTimes: [], revenge: null, feastSeen: new Set(), maxMass: START_MASS, startT: performance.now() };
+    lifeStart: 0, killTimes: [], revenge: null, feastSeen: new Set(), unlocked: [], maxMass: START_MASS, startT: performance.now() };
 }
 // ---------- ввод ----------
 const isTouch = ('ontouchstart' in window) || (window.matchMedia && matchMedia('(pointer: coarse)').matches);
@@ -392,7 +393,7 @@ function onWelcome(m) {
   $('roomBox').hidden = false;
   closeDialog();
   showHome(false);
-  if (!run) { run = newRun(m.diff); playTime = 0; }
+  if (!run) { run = newRun(m.diff); playTime = 0; showHint(); }
   ui = 'play';
   hudT = 0;
 }
@@ -413,7 +414,7 @@ function onEvents(m) {
   for (const k of m.kill || []) {
     if (k.k === net.youId) {
       const v = net.snakes.get(k.v);
-      onMyKill(k.vn, k.v, k.vm, k.km, v ? v.segs[0] : null, v ? segColor(v.skin, 0) : GOLD);
+      onMyKill(k.v, k.vm, k.km, v ? v.segs[0] : null, v ? segColor(v.skin, 0) : GOLD);
     }
   }
 }
@@ -596,7 +597,7 @@ function startSolo(diff) {
   cam.x = me.x; cam.y = me.y;
   cam.z = baseZoom() * 1.3;
   playTime = 0; sessionBest = START_MASS; hudT = 0; lastSoloMass = me.mass;
-  run = newRun(diff); feast = null; effects = []; bannerQ = null;
+  run = newRun(diff); feast = null; effects = []; clearBanners();
   $('roomBox').hidden = true;
   showHome(false);
   closeDialog();
@@ -607,7 +608,7 @@ function soloEvents(events) {
   for (const e of events) {
     if (e.type === 'feast') { if (mode === 'solo') onFeast(e.x, e.y, e.life); continue; }
     if (mode !== 'solo') continue;
-    if (e.killer && e.killer === me) onMyKill(e.victim.name, e.victim.id, e.vm, e.km, e.victim.segs[0], segColor(e.victim.skin, 0));
+    if (e.killer && e.killer === me) onMyKill(e.victim.id, e.vm, e.km, e.victim.segs[0], segColor(e.victim.skin, 0));
     if (e.victim === me) onSoloDeath(e.killer);
   }
 }
@@ -658,7 +659,7 @@ function onFeast(x, y, life) {
   if (!run) return;
   sfx.feast();
 }
-function onMyKill(_name, id, vm, km, pos, color) {
+function onMyKill(id, vm, km, pos, color) {
   if (!run) return;
   run.kills++; save.stats.kills++;
   const now = playTime;
@@ -706,7 +707,7 @@ function runTick() {
     const ti = titleOf(me.mass);
     if (ti > run.maxTitle) {
       run.maxTitle = ti;
-      if (ti >= 2) { banner(TITLES[ti][1], 'новое звание'); sfx.title(); }
+      if (ti >= 2) banner(TITLES[ti][1], 'новое звание', sfx.title);
       addXp(ti * 10);
     }
     const rk = myRank();
@@ -716,7 +717,7 @@ function runTick() {
         if (rk.rank <= lim && !run.flags.has(lim)) {
           run.flags.add(lim);
           addXp(xp);
-          if (text) { banner(`Место ${rk.rank}`, text); sfx.title(); }
+          if (text) banner(`Место ${rk.rank}`, text, sfx.title);
         }
       }
     }
@@ -749,12 +750,13 @@ function revengeTarget() {
   return net.rv ? { x: net.rv[0], y: net.rv[1] } : null;
 }
 // звёзды за игру и сколько осталось до следующей раскраски
-function unlockHtml(xp) {
+function unlockHtml(xp, fresh) {
   const nx = nextSkin();
   const prev = nx ? Math.max(0, ...SKINS.filter(unlocked).map((x) => x.stars)) : 0;
   const bar = nx ? `<div class="bar"><i style="width:${(100 * clamp((save.xp - prev) / (nx.stars - prev), 0, 1)).toFixed(1)}%"></i></div>` +
     `<small>до раскраски «${esc(nx.name)}» ещё ${nx.stars - stars()} ★</small>` : '<small>открыты все раскраски!</small>';
-  return `<div class="unlock"><span class="xp">${icon('star')}+${xp}</span>${bar}</div>`;
+  const got = fresh.length ? `<p class="record">${icon('star')}Открыта раскраска «${fresh.map(esc).join('», «')}»</p>` : '';
+  return `<div class="unlock"><span class="xp">${icon('star')}+${xp}</span>${bar}</div>${got}`;
 }
 const oopsHtml = (who, mass) => `<p>${who}.</p><div class="big-num">${Math.floor(mass)}</div>` +
   `<p class="muted">Продолжишь с половиной длины.</p>`;
@@ -764,7 +766,7 @@ function finishRun() {
   const r = run;
   save.stats.games++;
   persist();
-  const html = `<div class="big-num">${Math.floor(r.maxMass)}</div><p class="title-line">${TITLES[r.maxTitle][1]}</p>${unlockHtml(r.xp)}`;
+  const html = `<div class="big-num">${Math.floor(r.maxMass)}</div><p class="title-line">${TITLES[r.maxTitle][1]}</p>${unlockHtml(r.xp, r.unlocked)}`;
   run = null;
   return html;
 }
@@ -800,11 +802,12 @@ window.addEventListener('pagehide', persist);
 function toHome() {
   if (mode === 'solo' && me) recordBest();
   if (run) finishRun();
-  mode = null; me = null; ui = 'home'; feast = null; effects = []; bannerQ = null;
+  mode = null; me = null; ui = 'home'; feast = null; effects = []; clearBanners();
   closeDialog();
   hideHint();
   world = new World({ diff: 'easy', bots: 45, foodN: 3500 }); // демо за меню — полегче для телефона
   demoFocus = null;
+  viewSkin = save.skin;
   cam.x = 0; cam.y = 0;
   showHome(true);
   renderHome();
@@ -827,7 +830,7 @@ function dialog(title, body, actions) {
     b.className = `btn ${a.kind || 'text'}`;
     b.innerHTML = (a.icon ? icon(a.icon) : '') + esc(a.label);
     if (a.aria) b.setAttribute('aria-label', a.aria);
-    b.addEventListener('click', (e) => a.onClick(e));
+    b.addEventListener('click', a.onClick);
     box.appendChild(b);
   }
   $('dlg').hidden = false;
@@ -840,25 +843,33 @@ function snack(text) {
   clearTimeout(snackTimer);
   snackTimer = setTimeout(() => s.classList.remove('show'), 2400);
 }
-// крупная надпись по центру: звания, места, новые раскраски. Одна за раз: следующая ждёт конца текущей,
-// а из ждущих остаётся только последняя — чтобы не было ленты надписей.
-let bannerUntil = 0, bannerQ = null, bannerTimer = 0;
-function banner(title, sub = '') {
+// крупная надпись по центру: звания, места, новые раскраски. Одна за раз, следующие ждут в очереди (не больше трёх:
+// лишние места и звания отбрасываются, новая раскраска — никогда). Звук играет вместе с надписью.
+let bannerUntil = 0, bannerQ = [], bannerTimer = 0;
+function banner(title, sub = '', sound = null, keep = false) {
   const now = performance.now();
   if (now < bannerUntil) {
-    bannerQ = [title, sub];
+    bannerQ.push({ title, sub, sound, keep });
+    while (bannerQ.length > 3) { const k = bannerQ.findIndex((q) => !q.keep); bannerQ.splice(k < 0 ? 0 : k, 1); }
     clearTimeout(bannerTimer);
-    bannerTimer = setTimeout(() => { const q = bannerQ; bannerQ = null; if (q && mode) banner(...q); }, bannerUntil - now + 200);
+    bannerTimer = setTimeout(nextBanner, bannerUntil - now + 200);
     return;
   }
   bannerUntil = now + 2600;
+  if (sound) sound();
   const b = $('banner');
   b.querySelector('b').textContent = title;
   b.querySelector('small').textContent = sub;
   b.classList.remove('show');
   void b.offsetWidth; // перезапуск анимации
   b.classList.add('show');
+  if (bannerQ.length) { clearTimeout(bannerTimer); bannerTimer = setTimeout(nextBanner, 2800); }
 }
+function nextBanner() {
+  const q = bannerQ.shift();
+  if (q && mode) banner(q.title, q.sub, q.sound, q.keep);
+}
+function clearBanners() { bannerQ = []; clearTimeout(bannerTimer); bannerUntil = 0; $('banner').classList.remove('show'); }
 
 // подсказка управления — только в первой игре на устройстве
 let hintTimer = 0;
@@ -868,8 +879,9 @@ function showHint() {
   h.textContent = inputKind === 'touch' ? 'Коснись экрана и веди пальцем — змейка ползёт следом. Молния — ускорение'
     : 'Змейка ползёт к курсору. Кнопка мыши или пробел — ускорение';
   h.hidden = false; h.classList.remove('fade');
+  save.hinted = true; persist();
   clearTimeout(hintTimer);
-  hintTimer = setTimeout(() => { h.classList.add('fade'); save.hinted = true; persist(); hintTimer = setTimeout(hideHint, 700); }, 6000);
+  hintTimer = setTimeout(() => { h.classList.add('fade'); hintTimer = setTimeout(hideHint, 700); }, 6000);
 }
 function hideHint() { clearTimeout(hintTimer); $('hint').hidden = true; }
 
@@ -899,7 +911,7 @@ $('btnPlay').addEventListener('click', () => startSolo(save.diff));
 
 function renderHome() {
   if (!unlocked(SKINS[save.skin])) save.skin = 0;
-  if (!SKINS[viewSkin]) viewSkin = save.skin;
+  if (viewSkin !== save.skin && unlocked(SKINS[viewSkin])) { save.skin = viewSkin; persist(); }
   $('stars').innerHTML = `${icon('star')}${stars()}`;
   const sk = SKINS[viewSkin], open = unlocked(sk);
   $('skinName').textContent = sk.name;
@@ -964,6 +976,7 @@ function openTogether() {
     '<label for="code">Код комнаты</label></div><button class="btn tonal big" id="dJoin">Войти</button></div>',
     [{ label: 'Закрыть', kind: 'text', onClick: closeDialog }]);
   const code = $('code');
+  code.value = inviteCode && /^\d{4}$/.test(inviteCode) ? inviteCode : '';
   code.addEventListener('input', () => { code.value = code.value.replace(/\D/g, '').slice(0, 4); });
   const join = () => {
     if (!/^\d{4}$/.test(code.value)) { code.focus(); return; }
@@ -1019,7 +1032,7 @@ $('btnInfo').addEventListener('click', () => {
   const ctl = isTouch
     ? 'Коснись экрана в любом месте и веди пальцем — это джойстик. Держи молнию, чтобы ускориться: это тратит немного длины.'
     : 'Змейка ползёт к курсору мыши. Левая кнопка или пробел — ускорение, тратит немного длины. Можно стрелками ← →. Пауза — Esc.';
-  const ih = offline.cls === 'ok' ? installHint() : '';
+  const ih = installHint();
   dialog('Как играть', `<p>${ctl}</p><p>Подрежь соперника — пусть врежется в тебя головой. Золотой пир и обидчик отмечены стрелками у края экрана.</p>` +
     `<p>Звёзды за еду, победы и места открывают новые раскраски.</p>` +
     `<div class="note ${offline.cls}">${icon(offline.ic)}<span>${offline.text}${ih ? ` ${ih}` : ''}</span></div>`,
@@ -1287,7 +1300,7 @@ function frame(now) {
     updateCamera(dt);
     draw();
     if (mode) updateHud(dt);
-    else if (!$('home').hidden) drawPreview();
+    else if (!$('home').hidden && $('dlg').hidden) drawPreview();
   }
   requestAnimationFrame(frame);
 }
