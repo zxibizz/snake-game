@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { World, Snake, countOf, spacingOf, SNAKES_N, DIFF, R, GOLD, SKINS, TITLES, titleOf } from '../public/core.js';
+import { World, Snake, countOf, spacingOf, SNAKES_N, DIFF, R, GOLD, SKINS, PAL, TITLES, titleOf } from '../public/core.js';
 
 // змейка B лежит поперёк пути головы змейки A
 function crossing(teamA, teamB) {
@@ -103,4 +103,12 @@ test('звания по длине', () => {
   assert.equal(titleOf(0), 0);
   assert.equal(TITLES[titleOf(400)][1], 'Ужик');
   assert.equal(titleOf(1e9), TITLES.length - 1);
+});
+
+test('палитра влезает в байт, у раскрасок есть цвета', () => {
+  assert.ok(PAL.length <= 256, `цветов ${PAL.length}: номер цвета еды уходит по сети одним байтом`);
+  for (const sk of SKINS) {
+    assert.ok(sk.p.length > 0 && sk.p.every((c) => PAL[c]), sk.name);
+    assert.ok(PAL[sk.head], sk.name);
+  }
 });

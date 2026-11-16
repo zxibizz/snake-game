@@ -1102,6 +1102,9 @@ function updateCamera(dt) {
 }
 
 // ---------- рисование ----------
+const camT = { k: 1, e: 0, f: 0 }; // матрица камеры текущего кадра: её задаёт draw(), по ней повёрнуты бусины
+// ускорение: по сегментам от головы к хвосту бежит волна, каждый светится своим цветом
+const boostWave = (i) => { const w = 0.5 + 0.5 * Math.sin(time * 16 - i * 0.22); return w * w; };
 const isMate = (s) => mode === 'net' && net.roomMode === 'team' && s.human && s.team && s.team === net.myTeam;
 function drawSnake(s, vx0, vy0, vx1, vy1) {
   const segs = s.segs, r = s.r, sk = SKINS[s.skin] || SKINS[0];
@@ -1113,38 +1116,37 @@ function drawSnake(s, vx0, vy0, vx1, vy1) {
   // рисуем бусины через сегмент: меньше перерисовки, а тело всё равно сплошное; мелкую на экране — реже
   const step = r * cam.z < 3 ? 4 : 2;
   const a0 = ctx.globalAlpha, boost = s.isBoosting;
-  // ускорение: по сегментам от головы к хвосту бежит волна, каждый светится своим цветом
-  const wave = (i) => { const w = 0.5 + 0.5 * Math.sin(time * 16 - i * 0.22); return w * w; };
   if (boost) {
     const g = r * 2;
     for (let i = (n - 1) & ~1; i >= 0; i -= 4) {
       const q = segs[i];
       if (q.x < x0 || q.x > x1 || q.y < y0 || q.y > y1) continue;
-      ctx.globalAlpha = a0 * (0.2 + 0.8 * wave(i));
+      ctx.globalAlpha = a0 * (0.2 + 0.8 * boostWave(i));
       ctx.drawImage(glowSprite(segColor(s.skin, i)), q.x - g, q.y - g, g * 2, g * 2);
     }
     ctx.globalAlpha = a0;
   }
   // бусина повёрнута по ходу тела: матрица — мировая камера × поворот × масштаб
-  const T = ctx.getTransform(), k = T.a, hb = BSPR / 2;
+  const k = camT.k, hb = BSPR / 2;
   const tail = Math.min(10, n >> 2);
   for (let i = (n - 1) & ~1; i >= 2; i -= step) {
     const q = segs[i];
     if (q.x < x0 || q.x > x1 || q.y < y0 || q.y > y1) continue;
     const rr = i > n - tail ? r * (0.55 + 0.45 * (n - i) / tail) : r; // хвост сужается
     const p = segs[i - 1], o = segs[i + 1] || q;
-    let dx = p.x - o.x, dy = p.y - o.y;
-    const sc = k * rr / hb / (Math.hypot(dx, dy) || 1);
+    let dx = p.x - o.x, dy = p.y - o.y, d = Math.hypot(dx, dy);
+    if (d < 1e-6) { dx = Math.cos(s.a); dy = Math.sin(s.a); d = 1; } // соседи совпали (хвост при росте) — смотрим по ходу головы
+    const sc = k * rr / hb / d;
     dx *= sc; dy *= sc;
-    ctx.setTransform(dx, dy, -dy, dx, k * q.x + T.e, k * q.y + T.f);
+    ctx.setTransform(dx, dy, -dy, dx, k * q.x + camT.e, k * q.y + camT.f);
     const c = segColor(s.skin, i);
     ctx.drawImage(beadSprite(c), -hb, -hb);
     if (boost) {
-      const w = wave(i);
-      if (w > 0.12) { ctx.globalAlpha = a0 * w; ctx.drawImage(beadLitSprite(c), -hb, -hb); ctx.globalAlpha = a0; }
+      const w = boostWave(i);
+      if (w > 0.25) { ctx.globalAlpha = a0 * w; ctx.drawImage(beadLitSprite(c), -hb, -hb); ctx.globalAlpha = a0; }
     }
   }
-  ctx.setTransform(T);
+  ctx.setTransform(k, 0, 0, k, camT.e, camT.f);
   const hr = r * 1.1;
   ctx.drawImage(headSprite(sk.head), h.x - hr, h.y - hr, hr * 2, hr * 2);
   const a = s.a, look = s.ta;
@@ -1221,7 +1223,8 @@ function draw() {
   ctx.fillStyle = OUTSIDE;
   ctx.fillRect(0, 0, canvas.width, canvas.height);
   const z = cam.z;
-  ctx.setTransform(DPR * z, 0, 0, DPR * z, DPR * (W / 2 - cam.x * z), DPR * (H / 2 - cam.y * z));
+  camT.k = DPR * z; camT.e = DPR * (W / 2 - cam.x * z); camT.f = DPR * (H / 2 - cam.y * z);
+  ctx.setTransform(camT.k, 0, 0, camT.k, camT.e, camT.f);
   ctx.beginPath(); ctx.arc(0, 0, R, 0, TAU);
   ctx.fillStyle = gridPattern; ctx.fill();
   ctx.lineWidth = 10; ctx.strokeStyle = EDGE; ctx.stroke();
