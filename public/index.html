@@ -231,9 +231,24 @@ svg.i{width:24px;height:24px;fill:currentColor;flex:none}
 .pz-list .fab-set:active{background:var(--surf-high)}
 .btn.pz-out{width:100%;height:56px;border-radius:28px;margin-top:12px;border:2px solid var(--outline);color:var(--on);font-size:17px;font-weight:600;gap:10px}
 .btn.pz-out svg.i{width:24px;height:24px}
+/* «Ой!»: в ряд — слева «В меню» по содержимому (решение владельца), справа большая жёлтая «Продолжить» на остальное */
+.dialog.oops .actions{flex-wrap:nowrap;gap:12px;margin-top:20px}
+.dialog.oops .btn{white-space:nowrap;height:60px;border-radius:30px;margin:0}
+.dialog.oops{padding:24px 20px}
+.scrim[data-kind=oops]{padding-left:16px;padding-right:16px}
+.dialog.oops .btn.pz-out{flex:0 0 auto;width:auto;padding:0 12px;gap:6px;font-size:16px} /* по содержимому, остальное — «Продолжить» */
+.dialog.oops .btn.pz-out svg.i{width:22px;height:22px}
+.dialog.oops .btn.pz-go{flex:1 1 0;min-width:0;width:auto;font-size:18px;gap:8px;padding:0 12px}
+.dialog.oops .btn.pz-go svg.i{width:24px;height:24px}
 /* узкий телефон (iPhone SE): поля меньше, надписи в одну строку */
 @media (max-width:360px){
   .dialog.pz{padding:20px 16px}
+  .scrim[data-kind=oops]{padding-left:12px;padding-right:12px}
+  .dialog.oops{padding:20px 14px}
+  .dialog.oops .actions{gap:6px}
+  .dialog.oops .btn.pz-out{font-size:15px;padding:0 8px;gap:4px}
+  .dialog.oops .btn.pz-out svg.i,.dialog.oops .btn.pz-go svg.i{width:20px;height:20px}
+  .dialog.oops .btn.pz-go{font-size:15px;padding:0 6px;gap:6px}
   .btn.pz-go{font-size:19px}
   .btn.pz-out,.pz-list .fab-set{font-size:15px;white-space:nowrap}
 }
@@ -245,8 +260,15 @@ svg.i{width:24px;height:24px;fill:currentColor;flex:none}
   .pz-list{grid-column:2;grid-row:1/span 6;margin:0;align-self:center}
   #pzSnake{height:64px;margin:-6px 0 0}
   .pz-chips{margin:6px 0 12px}
-  .btn.pz-go{height:56px}
-  .btn.pz-out{height:48px;margin-top:10px}
+  .pz .btn.pz-go{height:56px}
+  .pz .btn.pz-out{height:48px;margin-top:10px}
+  /* «Ой!» боком: окно плотнее, иначе не влезает по высоте */
+  .dialog.oops{max-width:560px;padding:16px 24px}
+  .dialog.oops h3{margin-bottom:8px}
+  .dialog.oops .body p{margin-bottom:6px}
+  .dialog.oops .big-num{font-size:44px;line-height:48px}
+  .dialog.oops .actions{margin-top:10px}
+  .dialog.oops .btn{height:52px}
 }
 .btn.sound{width:44px;padding:0;color:var(--on-var);flex:none}
 /* громкость: ползунок Material 3 — заполненная часть дорожки цвета primary (--p ставит скрипт) */

@@ -1262,7 +1262,7 @@ function onNetDeath(m, dead) {
   setTimeout(() => {
     if (ui !== 'dead' || mode !== 'net') return;
     dialog('Ой!', oopsHtml(who, m.mass, net.diff),
-      [{ label: 'Выйти', kind: 'text', onClick: leaveNet }, { label: 'Продолжить', kind: 'filled', icon: 'play', onClick: () => netSend({ t: 'respawn' }) }]);
+      goOutActions(() => netSend({ t: 'respawn' }), leaveNet), { cls: 'oops', wait: 600 });
   }, 700);
 }
 function startNet(firstMsg) {
@@ -1343,10 +1343,10 @@ function onSoloDeath(killer) {
   ui = 'dead';
   run.revenge = killer && killer.alive ? { id: killer.id, name: killer.name } : null;
   dialog('Ой!', oopsHtml(who, dead.mass, diffKey) + (isNew ? `<p class="record">${icon('trophy')}Новый рекорд!</p>` : ''),
-  [{ label: 'В меню', kind: 'text', onClick: toHome }, { label: 'Продолжить', kind: 'filled', icon: 'play', onClick: () => {
+  goOutActions(() => {
     me = world.addHuman({ name: soloName(), skin: save.skin, mass: keepMass(diffKey, dead.mass), inv: 3 });
     ui = 'play'; closeDialog(); onRespawn();
-  } }]);
+  }, toHome), { cls: 'oops', wait: 600 });
 }
 
 // ---------- ход игры: звания, места, серии, пир, месть ----------
@@ -1585,7 +1585,11 @@ function showHome(v) {
 }
 
 // ---------- диалоги и снекбар ----------
-function dialog(title, body, actions, { cls = '', top = '' } = {}) {
+let dialogWait = 0;
+// «Ой!»: в ряд — слева «В меню» (решение владельца: держится слева, как раньше), справа большая жёлтая «Продолжить»
+const goOutActions = (go, out) => [{ label: 'В меню', kind: 'pz-out', icon: 'home', onClick: out }, { label: 'Продолжить', kind: 'filled pz-go', icon: 'play', onClick: go }];
+// wait — сколько мс после появления кнопки не нажимаются (inert: ни касанием, ни с клавиатуры)
+function dialog(title, body, actions, { cls = '', top = '', wait = 0 } = {}) {
   endFabEdit(); // игра кончилась или выход, пока настраивал кнопку
   pzSnake = null; // новое окно поверх паузы — её змейка и плашки ушли
   $('dlgBox').className = `dialog ${cls}`;
@@ -1602,6 +1606,11 @@ function dialog(title, body, actions, { cls = '', top = '' } = {}) {
     b.addEventListener('click', a.onClick);
     box.appendChild(b);
   }
+  // «Ой!» появляется, пока палец ещё водит змейку: кнопки на время wait не нажимаются (хозяин комнаты закрыл бы её всем)
+  clearTimeout(dialogWait);
+  box.inert = wait > 0;
+  if (wait) dialogWait = setTimeout(() => { box.inert = false; }, wait);
+  $('dlg').dataset.kind = cls;
   $('dlg').hidden = false;
 }
 function closeDialog() { $('dlg').hidden = true; }
