@@ -13,9 +13,17 @@ const ASSETS = [
   'icons/apple-touch-icon.png',
 ];
 
+// Новая версия ставится в фоне и ждёт: страница показывает «Вышло обновление», и только по кнопке «Обновить»
+// (сообщение 'skip') новая версия берёт управление. Без кнопки она включится сама, когда игру закроют и откроют заново.
+// Версии до 6-й кнопки не знают и ждут, что новая версия включится сама, — для них включаемся сразу, как раньше.
+const PROMPT_SINCE = 6;
 self.addEventListener('install', (e) => {
-  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(ASSETS)).then(() => self.skipWaiting()));
+  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(ASSETS)).then(() => caches.keys()).then((keys) => {
+    const old = keys.some((k) => { const m = /^zmeigrad-v(\d+)$/.exec(k); return m && Number(m[1]) < PROMPT_SINCE; });
+    if (old) return self.skipWaiting();
+  }));
 });
+self.addEventListener('message', (e) => { if (e.data === 'skip') self.skipWaiting(); });
 
 self.addEventListener('activate', (e) => {
   e.waitUntil(

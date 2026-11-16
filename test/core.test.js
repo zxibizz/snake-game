@@ -142,7 +142,7 @@ test('рывок дорогой: длина уходит тем быстрее, 
   for (const m0 of [100, 1000, 4000]) {
     const w = new World({ diff: 'easy', foodN: 0, bots: 0 });
     const s = w.addHuman({ name: 'H', skin: 0, mass: m0, inv: 999 });
-    s.boost = true;
+    s.boost = true; // сразу после появления, пока тело свёрнуто в точку: свой сброс съесть нельзя
     for (let i = 0; i < 40; i++) w.step(1 / 40);
     const lost = m0 - s.mass;
     assert.ok(Math.abs(lost - boostCostOf(m0)) < boostCostOf(m0) * 0.05, `за секунду рывка ${lost.toFixed(1)} из ${m0}`);
@@ -159,4 +159,20 @@ test('малыш ускориться не может', () => {
   s.boost = true;
   w.step(1 / 40);
   assert.equal(s.isBoosting, false);
+});
+
+test('игрок и новые боты выползают из точки, а при создании мира тела лежат целиком', () => {
+  const w = new World({ diff: 'easy', foodN: 0 });
+  const span = (s) => Math.hypot(s.segs[0].x - s.segs[s.segs.length - 1].x, s.segs[0].y - s.segs[s.segs.length - 1].y);
+  assert.ok(w.snakes.filter((s) => s.mass > 500).every((s) => span(s) > 100), 'при создании мира тела уложены');
+  const h = w.addHuman({ name: 'H', skin: 0, mass: 400, inv: 3 });
+  assert.equal(h.segs.length, countOf(400));
+  assert.equal(span(h), 0);
+  for (let i = 0; i < 40; i++) w.step(1 / 40);
+  const s1 = span(h);
+  assert.ok(s1 > 100 && s1 < 300, `за секунду тело вытянулось на ${s1.toFixed(0)}`);
+  let bot = null;
+  for (let i = 0; i < 50 && !bot; i++) bot = w.spawnBot(false);
+  assert.ok(bot);
+  assert.equal(span(bot), 0);
 });

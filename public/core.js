@@ -170,6 +170,9 @@ export function layBody(x, y, a, mass, curl, wig, ph) {
   return segs;
 }
 
+// тело, свёрнутое в точку: змейка «выползает» из неё по мере движения, а не возникает на арене целиком
+export const coilBody = (x, y, mass) => Array.from({ length: countOf(mass) }, () => ({ x, y }));
+
 export class Snake {
   constructor(id, x, y, mass, skin, name, human, team, a, segs) {
     this.id = id;
@@ -366,11 +369,14 @@ export class World {
   }
   spawnBot(initial) {
     const mass = this.botMass(initial);
-    const place = this.placeBot(mass, initial);
+    // посреди игры бот выползает из точки — место ищем как для малыша, длинное тело укладывать негде и незачем
+    const place = this.placeBot(initial ? mass : START_MASS, initial);
     if (!place) return null;
     const { segs, a } = place;
+    // при создании мира тела лежат целиком; новички посреди игры выползают из точки —
+    // длинное тело не возникает поперёк чужого пути
     return this.addSnake(new Snake(this.nextSnakeId++, segs[0].x, segs[0].y, mass,
-      randi(0, SKINS.length - 1), this.pickName(), false, 0, a, segs));
+      randi(0, SKINS.length - 1), this.pickName(), false, 0, a, initial ? segs : coilBody(segs[0].x, segs[0].y, mass)));
   }
   addHuman({ name, skin, team = 0, mass = START_MASS, inv = 2 }) {
     let p = null;
@@ -383,7 +389,8 @@ export class World {
       }
     }
     if (!p) p = this.randomSpot(R * 0.7, 550, [], 0);
-    const s = new Snake(this.nextSnakeId++, p.x, p.y, mass, skin, name, true, team);
+    // игрок (и в начале, и после проигрыша) выползает из точки, а не появляется весь разом
+    const s = new Snake(this.nextSnakeId++, p.x, p.y, mass, skin, name, true, team, undefined, coilBody(p.x, p.y, mass));
     s.inv = inv;
     return this.addSnake(s);
   }
@@ -481,7 +488,7 @@ export class World {
       const lat = dx * ps - dy * pc;          // с какой стороны от цели бот
       const side = lat >= 0 ? 1 : -1;
       const canBoost = b.mass > 45 && Math.random() < D.boost;
-      if (D.encircle && b.mass > P.mass * 3 && dist < 320 && bodyLenOf(b.mass) > TAU * Math.max(dist, 80) * 1.15) {
+      if (D.encircle && b.age > 8 && b.mass > P.mass * 3 && dist < 320 && bodyLenOf(b.mass) > TAU * Math.max(dist, 80) * 1.15) {
         desired = Math.atan2(dy, dx) + b.side * (Math.PI / 2 - 0.35); // кружим и сжимаем кольцо
       } else if (along < 40) {
         // догоняем сбоку и обгоняем
@@ -569,7 +576,10 @@ export class World {
       s.mass -= loss; s.dropAcc += loss;
       if (s.dropAcc > 2) {
         const k = segs.length - 1, t = segs[k];
-        this.addFood(t.x + rand(-4, 4), t.y + rand(-4, 4), s.dropAcc * BOOST_DROP, segColor(s.skin, k), 30);
+        // пока хвост у самой головы (змейка ещё выползает из точки), сброс пропадает — иначе она тут же съест его сама
+        if ((t.x - h.x) ** 2 + (t.y - h.y) ** 2 > (s.r * 2 + 80) ** 2) {
+          this.addFood(t.x + rand(-4, 4), t.y + rand(-4, 4), s.dropAcc * BOOST_DROP, segColor(s.skin, k), 30);
+        }
         s.dropAcc = 0;
       }
     }

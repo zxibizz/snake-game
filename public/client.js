@@ -343,16 +343,59 @@ function netReconnect() {
     netOpen(hello({ t: 'join', code: net.code }), true);
   }, net.retry === 1 ? 300 : 2000);
 }
+// Обновление — только по кнопке: новая версия уже скачана и ждёт (см. sw.js), говорим ей взять управление и перезагружаемся.
+// Если её ещё нет (зашли в комнату раньше, чем браузер проверил обновление) — сначала скачиваем.
+let updating = false;
 async function updateApp() {
+  updating = true;
   try {
     const reg = await navigator.serviceWorker.getRegistration();
     if (reg) {
-      await reg.update();
-      await new Promise((res) => { navigator.serviceWorker.addEventListener('controllerchange', res); setTimeout(res, 2500); });
+      if (!reg.waiting) await reg.update();
+      const w = reg.waiting || reg.installing;
+      if (w) {
+        await new Promise((res) => {
+          navigator.serviceWorker.addEventListener('controllerchange', res, { once: true });
+          let asked = false;
+          const go = () => {
+            if (w.state === 'redundant' || w.state === 'activated') res();
+            else if (w.state === 'installed' && !asked) { asked = true; w.postMessage('skip'); setTimeout(res, 5000); }
+          };
+          w.addEventListener('statechange', go);
+          go();
+          setTimeout(res, 60000); // скачивание по медленной сети ждём долго, но не вечно
+        });
+      }
     }
   } catch { /* перезагрузим как есть */ }
   location.reload();
 }
+// Вышла новая версия: показываем на главной плашку с кнопкой. Сама игра не перезагружается — партию не обрываем.
+function watchUpdates(reg) {
+  // reg.active отличает обновление от первой установки (тогда предлагать нечего)
+  const offer = () => { if (reg.waiting && reg.active) $('update').hidden = false; };
+  const track = (w) => { if (w) w.addEventListener('statechange', offer); };
+  offer();
+  track(reg.installing);
+  reg.addEventListener('updatefound', () => track(reg.installing));
+  // открытая вкладка сама не узнает о выпуске: спрашиваем сервер при возврате в игру и раз в час —
+  // но не чаще раза в 10 минут и не во время партии, чтобы скачивание не мешало игре по сети
+  let lastCheck = performance.now();
+  const check = () => {
+    if (mode !== null || performance.now() - lastCheck < 10 * 60 * 1000) return;
+    lastCheck = performance.now();
+    reg.update().catch(() => { /* нет сети */ });
+  };
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') check(); });
+  setInterval(check, 60 * 60 * 1000);
+  // версию обновили в другой вкладке: эта осталась на старом коде — на главной перезагружаемся сразу, партию не обрываем
+  let controlled = !!navigator.serviceWorker.controller;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (controlled && !updating) { if (mode === null) location.reload(); else $('update').hidden = false; }
+    controlled = true;
+  });
+}
+$('btnUpdate').addEventListener('click', () => { $('btnUpdate').disabled = true; updateApp(); });
 function onNetError(code) {
   if (code === 'version') {
     net.leaving = true;
@@ -1044,11 +1087,13 @@ $('btnInfo').addEventListener('click', () => {
     `<div class="note ${offline.cls}">${icon(offline.ic)}<span>${offline.text}${ih ? ` ${ih}` : ''}</span></div>`,
   [{ label: 'Понятно', kind: 'filled', onClick: closeDialog }]);
 });
+let updatesWatched = false;
 async function checkOffline() {
   const set = (cls, ic, text) => { offline = { cls, ic, text }; renderFoot(); };
   if (!('serviceWorker' in navigator) || !window.caches) { set('warn', 'cloudOff', 'Этот браузер не умеет сохранять игру для офлайна.'); return; }
   try {
-    await navigator.serviceWorker.register('sw.js');
+    const reg = await navigator.serviceWorker.register('sw.js');
+    if (!updatesWatched) { updatesWatched = true; watchUpdates(reg); }
     await navigator.serviceWorker.ready;
     let ok = false;
     for (const k of await caches.keys()) {

@@ -138,6 +138,10 @@ svg.i{width:24px;height:24px;fill:currentColor;flex:none}
   opacity:0;transition:opacity .2s,transform .2s;white-space:nowrap;max-width:92vw;overflow:hidden;text-overflow:ellipsis}
 #snack.show{opacity:1;transform:translate(-50%,0)}
 
+#update{position:fixed;z-index:5;top:calc(68px + env(safe-area-inset-top));left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:4px;
+  width:max-content;max-width:calc(100vw - 24px);padding:4px 4px 4px 16px;border-radius:8px;background:#E1E3DE;color:#2E312D;font-size:14px;box-shadow:var(--elev3)}
+#update .btn{color:#1E6B3A;padding:0 12px}
+
 /* --- диалоги --- */
 .scrim{position:fixed;inset:0;background:rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;padding:24px;
   overflow:auto;touch-action:pan-y}
@@ -197,6 +201,7 @@ svg.i{width:24px;height:24px;fill:currentColor;flex:none}
 </div>
 
 <main id="home" class="screen">
+  <div id="update" role="status" hidden><span>Вышло обновление игры</span><button class="btn text" id="btnUpdate">Обновить</button></div>
   <div class="home">
     <header class="top">
       <h1>Змейград</h1>
