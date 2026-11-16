@@ -31,7 +31,7 @@
 
 ```bash
 node server/server.js        # http://localhost:8080
-node --test test/            # тесты мира и сервера
+node --test test/*.test.js   # тесты мира и сервера
 ```
 
 Node 22+, зависимостей нет.
