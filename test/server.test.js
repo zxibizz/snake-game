@@ -125,7 +125,7 @@ test('игрок видит только змей рядом, таблица —
   assert.ok(wa.snakes.length < 100, `в поле зрения ${wa.snakes.length} из 100`);
   assert.ok(wa.snakes.some((s) => s.id === wa.you), 'себя видно');
   const food = await a.next('food');
-  assert.ok(food.bytes > 5 + 13 * 300, 'еда вокруг пришла одним бинарным сообщением');
+  assert.ok(food.bytes > 5 + 13 * 600, `еда вокруг пришла одним бинарным сообщением: ${food.bytes} байт`);
   const lb = await a.next('lb');
   assert.equal(lb.n, 100);
   assert.equal(lb.top.length, 10);

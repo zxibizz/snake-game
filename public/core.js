@@ -342,8 +342,8 @@ export class World {
     }
     if (force && inside) return inside;
     if (!force) return null;
-    const a = rand(0, TAU); // крайний случай: дугой из центра
-    return { segs: layBody(0, 0, a, mass, curl, 0, 0), a };
+    const a = rand(0, TAU), d = rand(0, R * 0.3); // крайний случай: дугой недалеко от центра
+    return { segs: layBody(Math.cos(a) * d, Math.sin(a) * d, a, mass, curl, 0, 0), a };
   }
   spawnBot(initial) {
     const mass = this.botMass(initial);

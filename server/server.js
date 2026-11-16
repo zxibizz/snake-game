@@ -301,11 +301,11 @@ function stepRoom(room) {
     // победы копим, пока клиент отстаёт: иначе он не узнает о своей победе
     if (kills.length) { c.kq.push(...kills); if (c.kq.length > 200) c.kq.splice(0, c.kq.length - 200); }
     if (c.ws.buffered > 256 * 1024) { c.lagging = true; continue; }
+    if (c.lagging && c.ws.buffered > 32 * 1024) continue;
     const vis = visibleTo(c, w);
     const myKills = c.kq;
     c.kq = [];
     if (c.lagging) {
-      if (c.ws.buffered > 32 * 1024) continue;
       c.lagging = false;
       c.known = new Set(vis.map((s) => s.id));
       c.cells = cellsFor(c);
