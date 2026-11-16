@@ -508,3 +508,43 @@ test('сытый бот (длиннее giantMin) за едой не гоняе�
   assert.ok(!asked.has(full) && full.goalC === -1, 'сытый еду не ищет');
   assert.ok(asked.has(hungry) && hungry.goalC >= 0, 'голодный выбрал клетку с едой');
 });
+
+// ---------- автопилот на паузе в комнате ----------
+import { safeCourse, AUTO, Snake as SnakeA, layBody as layBodyA, angDiff as angDiffA, R as RA } from '../public/core.js';
+const wallAt = (x, y0, y1, mass = 300) => { // вертикальное тело от y0 до y1 на x
+  const s = new SnakeA(900, x, y0, mass, 0, 'стена', false, 0, Math.PI / 2);
+  const n = s.segs.length;
+  s.segs.forEach((q, i) => { q.x = x; q.y = y0 + (y1 - y0) * i / (n - 1); });
+  return s;
+};
+test('автопилот: тело поперёк пути — сворачивает, а не едет в него', () => {
+  const me = new SnakeA(1, 0, 0, 60, 0, 'я', true, 0, 0);
+  const wall = wallAt(180, -800, 800);
+  const ta = safeCourse(me, [wall], []);
+  assert.ok(Math.abs(angDiffA(ta, 0)) > 1.2, `курс ${ta.toFixed(2)}`);
+});
+test('автопилот: свободно — держит курс; свой по команде не мешает', () => {
+  const me = new SnakeA(1, 0, 0, 60, 0, 'я', true, 1, 0.3);
+  assert.ok(Math.abs(angDiffA(safeCourse(me, [], []), 0.3)) < 0.01);
+  const mate = wallAt(150, -800, 800); mate.team = 1;
+  assert.ok(Math.abs(angDiffA(safeCourse(me, [mate], []), 0.3)) < 0.01);
+});
+test('автопилот: край арены впереди — поворачивает внутрь', () => {
+  const me = new SnakeA(1, RA - 200, 0, 60, 0, 'я', true, 0, 0);
+  const ta = safeCourse(me, [], []);
+  assert.ok(Math.cos(ta) < 0.3, `курс ${ta.toFixed(2)}`);
+});
+test('автопилот: чужая голова идёт навстречу — уходит с её пути', () => {
+  const me = new SnakeA(1, 0, 0, 60, 0, 'я', true, 0, 0);
+  const o = new SnakeA(2, 500, 0, 60, 0, 'он', false, 0, Math.PI);
+  o.segs.forEach((q, i) => { q.x = 500 + i * 5; q.y = 0; });
+  const ta = safeCourse(me, [o], []);
+  assert.ok(Math.abs(Math.sin(ta)) > 0.5, `курс ${ta.toFixed(2)}`);
+});
+test('автопилот: в тесноте — путь не задевает тел, если выход есть', () => {
+  // коридор: стены сверху и снизу, впереди стена с проходом снизу
+  const me = new SnakeA(1, 0, 0, 60, 0, 'я', true, 0, 0);
+  const walls = [wallAt(260, -900, 60)];
+  const ta = safeCourse(me, walls, []);
+  assert.ok(Math.sin(ta) > 0.3, `уходит к проходу: ${ta.toFixed(2)}`);
+});

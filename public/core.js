@@ -280,6 +280,87 @@ export function layBody(x, y, a, mass, curl, wig, ph) {
 // тело, свёрнутое в точку: змейка «выползает» из неё по мере движения, а не возникает на арене целиком
 export const coilBody = (x, y, mass) => Array.from({ length: countOf(mass) }, () => ({ x, y }));
 
+// ---------- осторожный автопилот (пауза в комнате) ----------
+// Перебирает AUTO.N курсов от нынешнего (сначала ближние) и для каждого проигрывает путь дугой — с настоящей
+// поворотливостью и скоростью змейки — на AUTO.T секунд. Зазор считается так же, как смерть в мире
+// (своя голова r·0,55 + чужое тело R·0,85), до тел, до чужих голов с упреждением по их курсу и до края арены;
+// свои по команде не мешают. Лучший курс — с самым большим зазором на пути (если не уйти — тот, где разобьёмся
+// позже и неглубоко); резкие повороты — только если нужно, еда по пути — немного и только когда просторно.
+// Прошлого курса prev держимся, пока другой не заметно лучше. others — змеи с segs, r, mass, a, team.
+export const AUTO = { T: 1.6, DT: 0.06, N: 24, CELL: 160, SAFE: 160 };
+export function safeCourse(s, others, foods, prev = null) {
+  const h = s.segs[0], v = speedOf(s.mass, false), turn = turnOf(s.r), cap = AUTO.SAFE * 1.5;
+  const far = v * AUTO.T + 400, C = AUTO.CELL;
+  const grid = new Map(), heads = [];
+  let maxRR = 0;
+  for (const o of others) {
+    if (o === s || o.id === s.id || (s.team && o.team === s.team)) continue;
+    const reach = bodyLenOf(o.mass) + far + speedOf(o.mass, true) * AUTO.T; // голова на рывке успевает далеко
+    if (Math.abs(o.segs[0].x - h.x) > reach || Math.abs(o.segs[0].y - h.y) > reach) continue;
+    const rr = o.r * 0.85 + s.r * 0.55;
+    if (rr > maxRR) maxRR = rr;
+    for (const q of o.segs) {
+      if (Math.abs(q.x - h.x) > far || Math.abs(q.y - h.y) > far) continue;
+      const k = Math.floor(q.x / C) * 100003 + Math.floor(q.y / C);
+      let c = grid.get(k);
+      if (!c) grid.set(k, (c = []));
+      c.push(q.x, q.y, rr);
+    }
+    const sp = speedOf(o.mass, !!o.isBoosting);
+    heads.push(o.segs[0].x, o.segs[0].y, Math.cos(o.a) * sp, Math.sin(o.a) * sp, rr * 1.6 + 20);
+  }
+  const span = Math.ceil((maxRR + cap) / C);
+  const clearAt = (x, y, t) => {
+    let best = Math.min(cap, R - Math.hypot(x, y) - s.r); // дальше cap зазор уже не важен
+    const cx = Math.floor(x / C), cy = Math.floor(y / C);
+    for (let gx = cx - span; gx <= cx + span; gx++) {
+      for (let gy = cy - span; gy <= cy + span; gy++) {
+        const c = grid.get(gx * 100003 + gy);
+        if (!c) continue;
+        for (let i = 0; i < c.length; i += 3) {
+          const dx = c[i] - x, dy = c[i + 1] - y, lim = best + c[i + 2];
+          if (dx > lim || dx < -lim || dy > lim || dy < -lim) continue;
+          const d = Math.sqrt(dx * dx + dy * dy) - c[i + 2];
+          if (d < best) best = d;
+        }
+      }
+    }
+    for (let i = 0; i < heads.length; i += 5) {
+      const d = Math.hypot(heads[i] + heads[i + 2] * t - x, heads[i + 1] + heads[i + 3] * t - y) - heads[i + 4];
+      if (d < best) best = d;
+    }
+    return best;
+  };
+  const near = [];
+  for (const f of foods) if (Math.abs(f.x - h.x) < far && Math.abs(f.y - h.y) < far) near.push(f);
+  const step = TAU / AUTO.N;
+  let bestA = s.a, bestS = -Infinity, keepA = null, keepS = -Infinity, keepD = Infinity;
+  for (let i = 0; i < AUTO.N; i++) {
+    const off = (i % 2 ? 1 : -1) * Math.ceil(i / 2) * step; // 0, +15°, −15°, … до ±180°
+    const ta = s.a + off, bend = Math.abs(off) * 15;
+    let x = h.x, y = h.y, a = s.a, minC = Infinity, crash = -1, food = 0, n = 0, cut = false;
+    const eaten = new Set();
+    for (let t = AUTO.DT; t <= AUTO.T + 1e-9; t += AUTO.DT) {
+      const d = angDiff(ta, a), mt = turn * AUTO.DT;
+      a += d > mt ? mt : d < -mt ? -mt : d;
+      x += Math.cos(a) * v * AUTO.DT; y += Math.sin(a) * v * AUTO.DT;
+      const c = clearAt(x, y, t);
+      if (c < minC) minC = c;
+      if (c < 0) { crash = t; break; }
+      if (minC + 60 - bend < bestS) { cut = true; break; } // этот курс уже не лучший
+      if (++n % 4 === 0) for (const f of near) if (!eaten.has(f) && (f.x - x) ** 2 + (f.y - y) ** 2 < 4900) { eaten.add(f); food += f.v; }
+    }
+    let score;
+    if (cut) score = -Infinity; // недосчитан — ни выбрать, ни удержать
+    else if (crash >= 0) score = -1000 + crash * 300 + Math.max(minC, -100); // не уйти — хотя бы позже и неглубоко
+    else score = minC - bend + (minC > AUTO.SAFE ? Math.min(food, 40) * 1.5 : 0);
+    const dp = prev === null ? Infinity : Math.abs(angDiff(ta, prev));
+    if (dp < step / 2 + 1e-6 && dp < keepD) { keepD = dp; keepA = ta; keepS = score; }
+    if (score > bestS) { bestS = score; bestA = ta; }
+  }
+  return keepA !== null && bestS - keepS < 25 ? keepA : bestA;
+}
+
 export class Snake {
   constructor(id, x, y, mass, skin, name, human, team, a, segs) {
     this.id = id;
