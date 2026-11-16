@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { World, Snake, countOf, spacingOf, SNAKES_N, DIFF, R, GOLD, SKINS, PAL, TITLES, titleOf,
+import { World, Snake, rand, countOf, spacingOf, SNAKES_N, DIFF, R, GOLD, SKINS, PAL, TITLES, titleOf,
   speedOf, turnOf, remainsOf, radiusOf, boostCostOf, BASE_SPEED, BOOST_SPEED, MIN_BOOST_MASS, layBody, angDiff, keepMass, START_MASS,
   FLY_N, FLY_MAX, FLY_BASE, flyRadius, flyEase, flyGain, SKIN_NEAR, skinDist, TYPES, SKINS_OF } from '../public/core.js';
 
@@ -431,4 +431,61 @@ test('новый игрок не перекрашивает ботов, кото
   w.addHuman({ name: 'B', skin: 3, inv: 999, keep: new Set([b.id]) });
   assert.equal(b.skin, 3);
   assert.ok(w.snakes.filter((s) => !s.human && s !== b).every((s) => SKINS[s.skin].type !== SKINS[0].type));
+});
+
+// пустой мир, бот в (0, by) смотрит на восток; рядом — тело other (массой m), уложенное по точкам pts
+function rayWorld(m, pts, human = false, by = 50) {
+  const w = new World({ diff: 'easy', bots: 0, foodN: 0, flies: 0 });
+  w.snakes = []; w.byId.clear();
+  const b = w.addSnake(new Snake(1, 0, by, 15, 0, 'бот', false, 0, 0));
+  const o = w.addSnake(new Snake(2, pts[0].x, pts[0].y, m, 1, 'другой', human, 0, 0, pts.map((p) => ({ ...p }))));
+  w.buildGrids();
+  return { w, b, o, look: w.D.look * (1 + b.r / 50) };
+}
+const line = (x0, y0, dx, dy, n) => Array.from({ length: n }, (_, i) => ({ x: x0 + dx * i, y: y0 + dy * i }));
+
+test('луч бота видит толстое тело, которое лежит серединой в соседней клетке', () => {
+  // тело вдоль y = 130 (ряд клеток 100–200), путь бота — по y = 95 (ряд 0–100): голова врезалась бы
+  const { w, b, look } = rayWorld(3000, line(600, 130, -10, 0, 60), false, 95);
+  assert.ok(radiusOf(3000) * 0.85 + b.r * 0.55 > 35, 'тело достаёт до пути бота');
+  assert.ok(w.rayDanger(b, 0, 0, look) > 0);
+});
+
+test('путь к курсу проверяется дугой: резкий поворот не спасает от тела под носом', () => {
+  const { w, b, look } = rayWorld(60, line(45, -400, 0, 7, 120)); // стена поперёк, в 45 px перед головой
+  assert.ok(w.rayDanger(b, 0, 2.1, look) > 0, 'дуга к курсу 2,1 рад задевает стену');
+  const { w: w2, b: b2 } = rayWorld(60, line(45, 2000, 0, 7, 120)); // стены нет — путь свободен
+  assert.equal(w2.rayDanger(b2, 0, 2.1, look), 0);
+});
+
+test('свежий хвост игрока бот замечает с опозданием, хвост бота — сразу', () => {
+  // голова другого только что проползла поперёк пути бота в 150 px перед ним и ползёт на север
+  const pts = line(150, 70, 0, -spacingOf(60), countOf(60));
+  const human = rayWorld(60, pts, true), bot = rayWorld(60, pts, false);
+  assert.equal(human.w.rayDanger(human.b, 0, 0, human.look), 0);
+  assert.ok(bot.w.rayDanger(bot.b, 0, 0, bot.look) > 0);
+  // через D.fresh с этот кусок хвоста уже «старый»: игрок прополз дальше, и бот его видит
+  const far = line(150, 70 + DIFF.easy.fresh * BASE_SPEED + 40, 0, -spacingOf(60), countOf(60));
+  const later = rayWorld(60, far, true);
+  assert.ok(later.w.rayDanger(later.b, 0, 0, later.look) > 0);
+  // на рывке окно не растёт, и у малыша больше половины тела не прячется
+  later.o.isBoosting = true; later.w.buildGrids();
+  assert.ok(later.w.rayDanger(later.b, 0, 0, later.look) > 0);
+  const tiny = rayWorld(START_MASS, line(150, 70, 0, -spacingOf(START_MASS), countOf(START_MASS)), true);
+  assert.ok(tiny.o.fresh <= tiny.o.segs.length / 2);
+});
+
+test('сытый бот (длиннее giantMin) за едой не гоняется', () => {
+  const w = new World({ diff: 'easy', bots: 0, flies: 0, foodN: 0 });
+  w.snakes = []; w.byId.clear();
+  const full = w.addSnake(new Snake(1, 0, 0, DIFF.easy.giantMin + 100, 0, 'сытый', false, 0, 0));
+  const hungry = w.addSnake(new Snake(2, 0, 3000, 300, 0, 'голодный', false, 0, 0));
+  for (const s of [full, hungry]) for (let i = 0; i < 30; i++) w.addFood(s.x + rand(-20, 20), s.y + 400 + rand(-20, 20), 5, 0, 0);
+  full.huntCd = hungry.huntCd = 1e9;
+  w.buildGrids();
+  const asked = new Set(), F = w.forage.bind(w);
+  w.forage = (b, h) => { asked.add(b); return F(b, h); };
+  w.think(full, 0); w.think(hungry, 1);
+  assert.ok(!asked.has(full) && full.goalC === -1, 'сытый еду не ищет');
+  assert.ok(asked.has(hungry) && hungry.goalC >= 0, 'голодный выбрал клетку с едой');
 });
