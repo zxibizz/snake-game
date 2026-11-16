@@ -132,7 +132,7 @@ svg.i{width:24px;height:24px;fill:currentColor;flex:none}
 #hint{position:absolute;left:50%;bottom:calc(120px + env(safe-area-inset-bottom));transform:translateX(-50%);width:max-content;max-width:80vw;
   text-align:center;font-size:16px;line-height:22px;color:var(--on);transition:opacity .6s}
 #hint.fade{opacity:0}
-#snack{position:absolute;z-index:20;top:calc(68px + var(--hud-top));left:50%;transform:translate(-50%,-8px);
+#snack{position:fixed;z-index:20;pointer-events:none;top:calc(68px + var(--hud-top));left:50%;transform:translate(-50%,-8px);
   background:#E1E3DE;color:#2E312D;padding:12px 16px;border-radius:4px;font-size:14px;box-shadow:var(--elev3);
   opacity:0;transition:opacity .2s,transform .2s;white-space:nowrap;max-width:92vw;overflow:hidden;text-overflow:ellipsis}
 #snack.show{opacity:1;transform:translate(-50%,0)}
@@ -151,7 +151,15 @@ svg.i{width:24px;height:24px;fill:currentColor;flex:none}
 .dialog .body p{margin:0 0 12px}
 .dialog .body b{color:var(--on);font-weight:500}
 .dialog .actions{display:flex;justify-content:flex-end;gap:8px;margin-top:24px;flex-wrap:wrap}
-.btn.sound{margin-right:auto;width:44px;padding:0;color:var(--on-var)}
+.btn.sound{width:44px;padding:0;color:var(--on-var);flex:none}
+/* громкость: ползунок Material 3 — заполненная часть дорожки цвета primary (--p ставит скрипт) */
+.vol{display:flex;align-items:center;gap:8px;margin:4px 0 -8px}
+.vol input{flex:1;min-width:0;height:44px;margin:0;background:transparent;-webkit-appearance:none;appearance:none;--p:100%}
+.vol input::-webkit-slider-runnable-track{height:6px;border-radius:3px;background:linear-gradient(90deg,var(--primary) var(--p),var(--surf-highest) var(--p))}
+.vol input::-webkit-slider-thumb{-webkit-appearance:none;width:20px;height:20px;margin-top:-7px;border-radius:50%;background:var(--primary);border:none}
+.vol input::-moz-range-track{height:6px;border-radius:3px;background:var(--surf-highest)}
+.vol input::-moz-range-progress{height:6px;border-radius:3px;background:var(--primary)}
+.vol input::-moz-range-thumb{width:20px;height:20px;border-radius:50%;background:var(--primary);border:none}
 .btn.sound svg.i{width:24px;height:24px}
 .seg{display:flex;border:1px solid var(--outline);border-radius:20px;overflow:hidden;margin:4px 0 8px}
 .seg button{flex:1;height:40px;font-size:14px;font-weight:500;color:var(--on);display:flex;align-items:center;justify-content:center;gap:6px;padding:0 8px}
@@ -193,7 +201,6 @@ svg.i{width:24px;height:24px;fill:currentColor;flex:none}
   <div id="board" class="shadow"></div>
   <button id="fab" hidden aria-label="Ускорение" data-icon="bolt"></button>
   <div id="hint" class="shadow" hidden></div>
-  <div id="snack"></div>
 </div>
 
 <main id="home" class="screen">
@@ -226,6 +233,7 @@ svg.i{width:24px;height:24px;fill:currentColor;flex:none}
   </div>
 </main>
 
+<div id="snack"></div>
 <div class="scrim" id="dlg" hidden>
   <div class="dialog" role="dialog" aria-modal="true">
     <h3 id="dlgTitle"></h3>

@@ -39,12 +39,13 @@ const hexA = (hex, a) => {
 
 // ---------- сохранение ----------
 // xp — накопленные звёзды (имя ключа осталось от уровней)
-const save = { best: { easy: 0, medium: 0, hard: 0 }, name: '', skin: 0, sound: true, xp: 0, diff: 'easy', hinted: false,
+const save = { best: { easy: 0, medium: 0, hard: 0 }, name: '', skin: 0, sound: true, vol: 1, xp: 0, diff: 'easy', hinted: false,
   stats: { games: 0, kills: 0, eaten: 0, best: 0 } };
 try { Object.assign(save, JSON.parse(localStorage.getItem('zmeigrad') || '{}')); } catch { /* приватный режим */ }
 delete save.daily; // задания дня убраны
 if (!SKINS[save.skin]) save.skin = 0;
 if (!DIFF[save.diff]) save.diff = 'easy';
+if (!(save.vol >= 0 && save.vol <= 1)) save.vol = 1;
 const persist = () => { try { localStorage.setItem('zmeigrad', JSON.stringify(save)); } catch { /* ничего */ } };
 const myName = () => save.name || 'Игрок';
 const soloName = () => 'Ты'; // одному имя не нужно
@@ -88,7 +89,7 @@ function silentWav() { // 0,25 с тишины, 8 кГц, 8 бит
 }
 function unlockHtmlAudio() {
   if (!IOS_WEBVIEW || document.hidden) return;
-  if (!save.sound) { if (htmlAudio) htmlAudio.pause(); return; } // звук выключен — чужую музыку не глушим
+  if (!soundOn()) { if (htmlAudio) htmlAudio.pause(); return; } // звук выключен — чужую музыку не глушим
   if (!htmlAudio) {
     try {
       htmlAudio = document.createElement('audio');
@@ -120,8 +121,10 @@ function ensureAudio() { // только из жестов: pointerup / touchend
 }
 ['pointerup', 'touchend', 'click', 'keydown'].forEach((ev) => window.addEventListener(ev, ensureAudio, { capture: true, passive: true }));
 document.addEventListener('visibilitychange', () => { if (!document.hidden) wakeAudio(); }); // после звонка iOS часто будит и без жеста
+const soundOn = () => save.sound && save.vol > 0;
 function tone(f0, f1, dur, vol, type = 'sine', delay = 0) {
-  if (!save.sound || !actx || (actx.state !== 'running' && !resumeBusy)) return; // спящему контексту не копить звуки
+  if (!soundOn() || !actx || (actx.state !== 'running' && !resumeBusy)) return; // спящему контексту не копить звуки
+  vol *= save.vol * save.vol; // громкость из настройки — по квадрату, так ползунок ощущается ровнее
   const t = actx.currentTime + delay;
   const o = actx.createOscillator(), g = actx.createGain();
   o.type = type;
@@ -913,23 +916,41 @@ function finishRun() {
 }
 
 // ---------- меню, пауза ----------
-const soundAction = () => ({
-  label: '', kind: 'text sound', icon: save.sound ? 'vol' : 'volOff', aria: 'Звук',
-  onClick: (e) => {
-    save.sound = !save.sound; persist(); unlockHtmlAudio(); // общий слушатель жестов сработал ещё до переключения
-    if (save.sound) { sfx.title(); setTimeout(() => snack(audioStatus()), 500); } // сразу слышно, работает ли звук
-    e.currentTarget.innerHTML = icon(save.sound ? 'vol' : 'volOff');
-  },
-});
+// громкость на паузе: кнопка — выключить/включить, ползунок — громкость (0 — то же, что выключить)
+const volHtml = () => `<div class="vol"><button class="btn text sound" id="volMute" aria-label="Звук"></button>` +
+  `<input type="range" id="volRange" min="0" max="100" step="5" aria-label="Громкость"></div>`;
+function bindVol() {
+  const btn = $('volMute'), rng = $('volRange');
+  const show = () => {
+    const v = soundOn() ? Math.round(save.vol * 100) : 0;
+    rng.value = v; rng.style.setProperty('--p', `${v}%`);
+    btn.innerHTML = icon(soundOn() ? 'vol' : 'volOff');
+  };
+  const check = () => { unlockHtmlAudio(); sfx.title(); setTimeout(() => snack(audioStatus()), 500); }; // сразу слышно, работает ли звук
+  btn.addEventListener('click', () => {
+    if (soundOn()) save.sound = false;
+    else { save.sound = true; if (save.vol < 0.05) save.vol = 0.6; }
+    persist(); show();
+    if (soundOn()) check(); else unlockHtmlAudio(); // общий слушатель жестов сработал ещё до переключения
+  });
+  rng.addEventListener('input', () => {
+    save.vol = rng.value / 100; save.sound = save.vol > 0;
+    show();
+  });
+  rng.addEventListener('change', () => { persist(); unlockHtmlAudio(); if (soundOn()) sfx.win(); }); // отпустил — пробный звук
+  show();
+}
 function openMenu() {
   if (ui !== 'play') return;
   if (mode === 'solo') {
     ui = 'paused';
-    dialog('Пауза', '', [soundAction(), { label: 'В меню', kind: 'text', onClick: toHome }, { label: 'Продолжить', kind: 'filled', onClick: resume }]);
+    dialog('Пауза', volHtml(), [{ label: 'В меню', kind: 'text', onClick: toHome }, { label: 'Продолжить', kind: 'filled', onClick: resume }]);
+    bindVol();
   } else if (mode === 'net') {
     dialog(`Комната ${net.code}`, `<p>${net.roomMode === 'team' ? 'Команда против ботов' : 'Все против всех'} · боты: ${DIFF[net.diff].label.toLowerCase()}</p>` +
-      '<p>Игра продолжается, пока открыто меню.</p>',
-    [soundAction(), { label: 'Выйти', kind: 'text', onClick: leaveNet }, { label: 'Играть', kind: 'filled', onClick: closeDialog }]);
+      '<p>Игра продолжается, пока открыто меню.</p>' + volHtml(),
+    [{ label: 'Выйти', kind: 'text', onClick: leaveNet }, { label: 'Играть', kind: 'filled', onClick: closeDialog }]);
+    bindVol();
   }
 }
 function resume() { if (ui === 'paused') { ui = 'play'; closeDialog(); last = performance.now(); } }
