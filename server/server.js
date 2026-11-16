@@ -5,7 +5,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { acceptUpgrade } from './ws.js';
-import { World, R, DIFF, SKINS, SNAKES_N, TAU, VERSION, FOOD_CELL, FOOD_CELLS, keepMass } from '../public/core.js';
+import { World, R, DIFF, SKINS, SNAKES_N, TAU, VERSION, FOOD_CELL, FOOD_CELLS, FLY_MAX, keepMass } from '../public/core.js';
 
 const PORT = Number(process.env.PORT) || 8080;
 const PUBLIC = path.resolve(fileURLToPath(new URL('../public/', import.meta.url)));
@@ -71,7 +71,7 @@ function createRoom(mode, diff) {
   if (!code) return null;
   const world = new World({ diff });
   world.track = true;
-  const room = { code, mode, diff, world, clients: new Set(), tick: 0, emptySince: Date.now(), kills: [], feast: null, joined: 0 };
+  const room = { code, mode, diff, world, clients: new Set(), tick: 0, emptySince: Date.now(), kills: [], feast: null, flies: [], joined: 0 };
   rooms.set(code, room);
   log(`room ${code} created: ${mode}/${diff}, rooms=${rooms.size}`);
   return room;
@@ -137,7 +137,9 @@ function cellsFor(c) {
 // Вся еда вокруг (после входа и после догонялки): u8 тип=2 | u32 штук × FOOD_REC
 // Клетки еды сменились: u8 тип=3 | u8 ушло × u8 клетка | u8 пришло × u8 клетка | u32 штук × FOOD_REC
 // FOOD_REC (13 байт): u8 клетка, u32 id, i16 x·4, i16 y·4, u16 ценность·100, u8 цвет, u8 сколько секунд ещё лежит (0 — всегда)
-const FR = 13;
+// После еды в снимке — бабочки рядом: u8 штук × FLY_REC
+// FLY_REC (16 байт): u16 id, i16 x·4, i16 y·4, u16 курс, u16 собрано·100, u8 флаги (1 — увёртывается), 5 × u8 цвет крошек (255 — нет)
+const FR = 13, FLR = 16;
 const q4 = (v) => Math.max(-32768, Math.min(32767, Math.round(v * 4)));
 const qa = (a) => Math.round((((a % TAU) + TAU) % TAU) / TAU * 65535);
 function writeFood(buf, o, f) {
@@ -188,6 +190,23 @@ function foodPart(ch, cells) {
   for (const [f] of added) o = writeFood(buf, o, f);
   o = buf.writeUInt16LE(removed.length, o);
   for (const [id] of removed) o = buf.writeUInt32LE(id, o);
+  return buf;
+}
+// бабочки рядом с игроком
+function flyPart(w, c) {
+  const [cx, cy] = viewCenter(c), lim2 = (AOI + 300) ** 2;
+  const flies = w.flies.filter((f) => (f.x - cx) ** 2 + (f.y - cy) ** 2 < lim2).slice(0, 255);
+  const buf = Buffer.alloc(1 + flies.length * FLR);
+  let o = buf.writeUInt8(flies.length, 0);
+  for (const f of flies) {
+    o = buf.writeUInt16LE(f.id & 0xffff, o);
+    o = buf.writeInt16LE(q4(f.x), o);
+    o = buf.writeInt16LE(q4(f.y), o);
+    o = buf.writeUInt16LE(qa(f.dir), o);
+    o = buf.writeUInt16LE(Math.round(Math.min(f.n, FLY_MAX) * 100), o);
+    o = buf.writeUInt8(f.dart > 0 ? 1 : 0, o);
+    for (let i = 0; i < 5; i++) o = buf.writeUInt8(i < f.top.length ? f.top[i] : 255, o);
+  }
   return buf;
 }
 function snakePart(tick, snakes) {
@@ -275,6 +294,7 @@ function stepRoom(room) {
   room.tick++;
   for (const e of events) {
     if (e.type === 'feast') { room.feast = feastOf(w); continue; }
+    if (e.type === 'fly') { room.flies.push([Math.round(e.x), Math.round(e.y), e.c, e.by.id, Math.round(e.v)]); continue; }
     const v = e.victim, k = e.killer;
     if (v.human || (k && k.human)) {
       room.kills.push({ v: v.id, vn: v.name, vh: v.human, vm: Math.floor(e.vm), k: k ? k.id : 0, kn: k ? k.name : '', kh: !!(k && k.human), km: Math.floor(e.km) });
@@ -291,8 +311,8 @@ function stepRoom(room) {
     }
   }
   if (room.tick % SEND_EVERY) return;
-  const kills = room.kills, feast = room.feast;
-  room.kills = []; room.feast = null;
+  const kills = room.kills, feast = room.feast, flyCaught = room.flies;
+  room.kills = []; room.feast = null; room.flies = [];
   const food = foodChanges(w);
   const lb = room.tick % LB_EVERY === 0 ? JSON.stringify(leaderboard(room)) : null;
   for (const c of room.clients) {
@@ -320,15 +340,19 @@ function stepRoom(room) {
       const known = new Set();
       for (const s of vis) { known.add(s.id); if (!c.known.has(s.id)) enter.push(metaOf(s)); }
       c.known = known;
-      if (enter.length || myKills.length || feast) {
+      // пойманные бабочки — тем, кто рядом (вспышка), и тому, кто поймал (звёзды)
+      const [vx, vy] = viewCenter(c);
+      const fly = flyCaught.filter((e) => (e[0] - vx) ** 2 + (e[1] - vy) ** 2 < AOI * AOI || (c.snake && e[3] === c.snake.id));
+      if (enter.length || myKills.length || feast || fly.length) {
         const m = { t: 'ev' };
         if (enter.length) m.spawn = enter;
         if (myKills.length) m.kill = myKills;
         if (feast) m.feast = feast;
+        if (fly.length) m.fly = fly;
         c.send(m);
       }
     }
-    c.ws.sendBinary(Buffer.concat([snakePart(room.tick, vis), foodPart(food, c.cells)]));
+    c.ws.sendBinary(Buffer.concat([snakePart(room.tick, vis), foodPart(food, c.cells), flyPart(w, c)]));
     if (lb) {
       c.ws.sendText(lb);
       const st = { t: 'st', eaten: c.snake && c.snake.alive ? Math.floor(c.snake.eaten) : 0, kills: c.kills };

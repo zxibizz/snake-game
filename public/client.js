@@ -2,6 +2,7 @@
 import {
   World, SKINS, PAL, GOLD, DIFF, R, TAU, START_MASS, SNAKES_N, FOOD_N, VERSION, TITLES, titleOf, segColor,
   radiusOf, spacingOf, countOf, bodyLenOf, foodRadiusOf, followChain, fitLength, clamp, angDiff, keepMass,
+  FLY_MAX, flyK, flyScale,
 } from './core.js';
 
 const TICK_MS = 25;        // сервер: 40 шагов в секунду
@@ -82,6 +83,7 @@ const sfx = {
   title() { [523, 659, 784, 1047].forEach((f, i) => tone(f, f * 1.01, 0.18, 0.08, 'triangle', i * 0.09)); },
   level() { [392, 523, 659, 784, 1047, 1319].forEach((f, i) => tone(f, f, 0.22, 0.08, 'square', i * 0.08)); },
   feast() { tone(700, 900, 0.15, 0.06, 'triangle'); tone(900, 1200, 0.2, 0.06, 'triangle', 0.15); },
+  fly() { [880, 1175, 1568].forEach((f, i) => tone(f, f * 1.25, 0.09, 0.06, 'sine', i * 0.05)); },
 };
 
 // ---------- прогрессия: звёзды открывают раскраски ----------
@@ -284,13 +286,13 @@ const net = {
   ws: null, code: '', roomMode: 'team', diff: 'easy', youId: 0, myTeam: 0,
   snakes: new Map(), foods: new Map(), buf: [], offset: null, lastTick: -1,
   lastSent: 0, lastA: null, lastB: false, leaving: false, retry: 0, retryTimer: 0, pendingMsg: null,
-  kills: 0, myMass: 0, deadInfo: null, lb: null, eaten: 0,
+  kills: 0, myMass: 0, deadInfo: null, lb: null, eaten: 0, flies: [],
 };
 const wsUrl = () => `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`;
 function netSend(o) { if (net.ws && net.ws.readyState === 1) net.ws.send(JSON.stringify(o)); }
 
 function netReset() {
-  net.snakes.clear(); net.foods.clear(); net.buf = []; net.offset = null; net.lastTick = -1;
+  net.snakes.clear(); net.foods.clear(); net.buf = []; net.offset = null; net.lastTick = -1; net.flies = [];
   net.youId = 0; net.lastA = null; net.lastB = false; net.myMass = 0; net.lb = null;
 }
 function netOpen(firstMsg, isRetry) {
@@ -445,6 +447,7 @@ function addNetFood(id, x, y, v, c, life, cell) {
   net.foods.set(id, { id, x, y, v, c, r: foodRadiusOf(v), ph: Math.random() * TAU, life, age: 0, cell });
 }
 const FR = 13; // запись еды: u8 клетка, u32 id, i16 x·4, i16 y·4, u16 ценность·100, u8 цвет, u8 жизнь
+const FLR = 16; // бабочка: u16 id, i16 x·4, i16 y·4, u16 курс, u16 собрано·100, u8 флаги, 5 × u8 цвет крошек
 const readFood = (dv, o) => [dv.getUint32(o + 1, true), dv.getInt16(o + 5, true) / 4, dv.getInt16(o + 7, true) / 4,
   dv.getUint16(o + 9, true) / 100, dv.getUint8(o + 11), dv.getUint8(o + 12), dv.getUint8(o)];
 function onSync(m) { // догнали после пропущенных снимков: змеи рядом — заново, еда придёт следом целиком
@@ -455,6 +458,8 @@ function onSync(m) { // догнали после пропущенных сни�
 function onEvents(m) {
   for (const s of m.spawn || []) net.snakes.set(s.id, makeNetSnake(s)); // вошла в поле зрения — тело целиком
   if (m.feast) onFeast(m.feast.x, m.feast.y, m.feast.life);
+  // мир рисуем с задержкой INTERP_MS — вспышку и звук поимки тоже, иначе они опередят голову
+  for (const [x, y, c, by, v] of m.fly || []) setTimeout(() => onFlyCaught(x, y, c, by === net.youId, v), INTERP_MS);
   for (const k of m.kill || []) {
     if (k.k === net.youId) {
       const v = net.snakes.get(k.v);
@@ -513,10 +518,18 @@ function onBinary(buf) {
   const removed = [];
   const nr = dv.getUint16(o, true); o += 2;
   for (let i = 0; i < nr; i++) { removed.push(dv.getUint32(o, true)); o += 4; }
+  const flies = new Map();
+  const nf = o < dv.byteLength ? dv.getUint8(o++) : 0;
+  for (let i = 0; i < nf; i++, o += FLR) {
+    const top = [];
+    for (let k = 0; k < 5; k++) { const c = dv.getUint8(o + 11 + k); if (c !== 255) top.push(c); }
+    flies.set(dv.getUint16(o, true), { x: dv.getInt16(o + 2, true) / 4, y: dv.getInt16(o + 4, true) / 4,
+      dir: dv.getUint16(o + 6, true) / 65535 * TAU, n: dv.getUint16(o + 8, true) / 100, dart: dv.getUint8(o + 10) & 1, top });
+  }
 
   const sample = performance.now() - tick * TICK_MS;
   net.offset = net.offset === null ? sample : Math.min(sample, net.offset + 2);
-  net.buf.push({ tick, snakes, added, removed, applied: false });
+  net.buf.push({ tick, snakes, added, removed, flies, applied: false });
   // вкладка свёрнута — кадры не рисуются и буфер не разбирается; старое не копим
   while (net.buf.length > 40) { applyFood(net.buf[0]); net.buf.shift(); }
 
@@ -554,6 +567,12 @@ function netUpdate(now, dt) {
     h.x = a0.x + (b.x - a0.x) * t; h.y = a0.y + (b.y - a0.y) * t;
     followChain(sn.segs, spacingOf(sn.mass));
     fitLength(sn.segs, countOf(sn.mass));
+  }
+  net.flies = [];
+  for (const [id, b] of s1.flies) {
+    const a0 = s0.flies.get(id) || b;
+    net.flies.push({ id, x: a0.x + (b.x - a0.x) * t, y: a0.y + (b.y - a0.y) * t, dir: a0.dir + angDiff(b.dir, a0.dir) * t,
+      n: b.n, dart: b.dart, top: b.top, ph: (id * 2.39996) % TAU });
   }
   const last = buf[buf.length - 1];
   for (const [id, sn] of net.snakes) if (sn.seen && !sn.visible && !last.snakes.has(id)) net.snakes.delete(id);
@@ -651,6 +670,7 @@ function startSolo(diff) {
 function soloEvents(events) {
   for (const e of events) {
     if (e.type === 'feast') { if (mode === 'solo') onFeast(e.x, e.y, e.life); continue; }
+    if (e.type === 'fly') { onFlyCaught(e.x, e.y, e.c, mode === 'solo' && e.by === me, e.v); continue; }
     if (mode !== 'solo') continue;
     if (e.killer && e.killer === me) onMyKill(e.victim.id, e.vm, e.km, e.victim.segs[0], segColor(e.victim.skin, 0));
     if (e.victim === me) onSoloDeath(e.killer);
@@ -691,6 +711,13 @@ function onFeast(x, y, life) {
   setFeast({ x, y, life });
   if (!run) return;
   sfx.feast();
+}
+// бабочку поймали: вспышка в цвет крошек; если поймали мы — звук и звёзды (полная бабочка — щедрее)
+function onFlyCaught(x, y, c, mine, v) {
+  effects.push({ x, y, t: time, c: shade(PAL[c] || GOLD_C, 0.3), r: 12 });
+  if (!mine || !run) return;
+  sfx.fly();
+  addXp(3 + Math.floor(v / 10));
 }
 function onMyKill(id, vm, km, pos, color) {
   if (!run) return;
@@ -1234,6 +1261,40 @@ function sceneSnakes() {
   return world ? world.snakes : [];
 }
 function sceneFoods() { return mode === 'net' ? net.foods.values() : (world ? world.foods : []); }
+function sceneFlies() { return mode === 'net' ? net.flies : (world ? world.flies : []); }
+
+// бабочка: две скобки, внутри крошки съеденного (до пяти, крупнеют с сытостью); скобки переливаются цветами крошек
+const FLY_C = '#A8EBFF';
+const canConic = typeof CanvasRenderingContext2D !== 'undefined' && 'createConicGradient' in CanvasRenderingContext2D.prototype;
+function drawFly(f) {
+  const sc = flyScale(f.n), k = flyK(f.n);
+  const flap = 0.2 + 0.8 * Math.abs(Math.sin(time * (f.dart ? 24 : 11) + f.ph));
+  const cnt = f.n > 0.5 ? Math.min(5, Math.ceil(f.n / (FLY_MAX / 5))) : 0;
+  const cols = [];
+  for (let i = 0; i < cnt; i++) cols.push(f.top[i % Math.max(1, Math.min(f.top.length, cnt))] ?? GOLD);
+  ctx.save();
+  ctx.translate(f.x, f.y); ctx.scale(sc, sc);
+  if (!cnt) { ctx.beginPath(); ctx.arc(0, 0, 1.4, 0, TAU); ctx.fillStyle = hexA(FLY_C, 0.6); ctx.fill(); }
+  const r = 1.5 + 1.1 * k, rho = cnt <= 1 ? 0 : Math.min(7.2 - r, Math.max(r / Math.sin(Math.PI / cnt) * 1.08, 2.5));
+  for (let i = 0; i < cnt; i++) {
+    const a = i * TAU / cnt + time * 0.8 + f.ph, x = Math.cos(a) * rho, y = Math.sin(a) * rho, hex = PAL[cols[i]] || GOLD_C;
+    ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); ctx.fillStyle = hex; ctx.fill();
+    ctx.beginPath(); ctx.arc(x - r * 0.3, y - r * 0.3, r * 0.45, 0, TAU); ctx.fillStyle = 'rgba(255,255,255,0.45)'; ctx.fill(); // блик
+  }
+  ctx.rotate(f.dir);
+  let st = FLY_C;
+  if (cnt) {
+    const uniq = [...new Set(cols)].map((c) => shade(PAL[c] || GOLD_C, 0.3));
+    if (uniq.length > 1 && canConic) {
+      st = ctx.createConicGradient(time * 0.8 + f.ph, 0, 0);
+      uniq.concat([uniq[0]]).forEach((c, i, arr) => st.addColorStop(i / (arr.length - 1), c));
+    } else st = uniq[0];
+  }
+  ctx.strokeStyle = st; ctx.lineWidth = 2.4; ctx.lineCap = 'round';
+  const span = 1.2 + 1.2 * flap;
+  for (const sd of [-1, 1]) { ctx.beginPath(); ctx.arc(0, 0, 9.5, sd * Math.PI / 2 - span / 2, sd * Math.PI / 2 + span / 2); ctx.stroke(); }
+  ctx.restore();
+}
 
 function draw() {
   ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -1266,6 +1327,7 @@ function draw() {
   const order = snakes.filter((s) => s !== me).sort((a, b) => b.mass - a.mass);
   for (const s of order) drawSnake(s, vx0, vy0, vx1, vy1);
   if (me && (mode === 'net' || me.alive)) drawSnake(me, vx0, vy0, vx1, vy1);
+  for (const f of sceneFlies()) if (f.x > vx0 - 40 && f.x < vx1 + 40 && f.y > vy0 - 40 && f.y < vy1 + 40) drawFly(f);
 
   // вспышки побед
   effects = effects.filter((e) => time - e.t < 0.8);

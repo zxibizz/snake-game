@@ -2,7 +2,7 @@
 // Здесь нет DOM и сети — только мир, змейки, еда, боты и столкновения.
 
 // Версия протокола и файлов: при изменении любого файла в public/ поднять и здесь, и в sw.js (тест сверяет).
-export const VERSION = '8';
+export const VERSION = '9';
 export const TAU = Math.PI * 2;
 export const R = 7000;                  // радиус арены (координаты по сети — Int16 / 4, предел 8191)
 export const BASE_SPEED = 210;          // пикс/с — у «Малыша»; с каждым званием змейка быстрее, см. speedOf
@@ -19,6 +19,18 @@ export const START_MASS = 15;
 export const SNAKES_N = 60;             // змей на арене вместе с игроками
 export const FOOD_N = 4200;
 export const FEAST_LIFE = 45;           // сколько секунд лежит пир
+// Бабочки сами летают по арене и собирают еду в себя, растут от съеденного. Съесть бабочку может любая змея головой,
+// но бабочка вёрткая: от головы, которая на неё смотрит, уходит вбок. Сквозь змей не летает — её прижимают телом
+// или к краю. Толстая медленнее и хуже увёртывается. Пойманная высыпает всё собранное едой.
+export const FLY_N = 40;                // бабочек на арене
+export const FLY_MAX = 100;             // сколько еды вмещает бабочка
+export const FLY_BASE = 3;              // столько стоит пустая бабочка
+export const FLY_SPEED = 150;           // пикс/с — порхает (у полной на 30 % медленнее)
+export const FLY_DART = 600;            // пикс/с — увёртка у пустой (у полной на 35 % медленнее)
+export const FLY_SEE = 300;             // с какого расстояния до головы бабочка начинает увёртываться
+export const flyK = (n) => Math.sqrt(clamp(n, 0, FLY_MAX) / FLY_MAX);
+export const flyScale = (n) => 1.9 + 1.5 * flyK(n);   // рисунок: скобки радиусом 9,5 × масштаб
+export const flyRadius = (n) => 8 * flyScale(n);      // для столкновений и еды
 const CELL = 100;
 // еда по сети раздаётся крупными клетками: игроку — только клетки вокруг него
 export const FOOD_CELL = 1000;
@@ -225,7 +237,7 @@ function crossing(bx, by, bvx, bvy, ox, oy, ovx, ovy) {
 
 export class World {
   // teams: змейки с одинаковым ненулевым team проходят друг сквозь друга (режим «семья против ботов»)
-  constructor({ diff = 'easy', foodN = FOOD_N, bots = SNAKES_N - 1 } = {}) {
+  constructor({ diff = 'easy', foodN = FOOD_N, bots = SNAKES_N - 1, flies = FLY_N } = {}) {
     this.diffKey = diff;
     this.D = DIFF[diff];
     this.targetBots = bots;
@@ -245,6 +257,9 @@ export class World {
     this.deaths = [];            // недавние проигрыши: туда сползаются за останками
     this.feast = null;           // { x, y, until }
     this.feastT = rand(20, 30);
+    this.flies = [];             // бабочки
+    this.flyQueue = [];          // через сколько секунд прилетят новые бабочки взамен пойманных
+    this.nextFlyId = 1;
     // для сервера: что изменилось с прошлой отправки
     this.track = false;
     this.foodAdded = [];
@@ -260,6 +275,7 @@ export class World {
 
     for (let i = 0; i < foodN; i++) this.spawnNatural();
     for (let i = 0; i < this.targetBots; i++) this.spawnBot(true);
+    for (let i = 0; i < flies; i++) this.spawnFly(true);
   }
 
   humans() { return this.snakes.filter((s) => s.human && s.alive); }
@@ -292,6 +308,172 @@ export class World {
       if (!s.human) s.goFeast = Math.hypot(s.x - p.x, s.y - p.y) < 3200 && Math.random() < 0.4 * s.pers;
     }
     this.events.push({ type: 'feast', x: p.x, y: p.y, life: FEAST_LIFE });
+  }
+
+  // ---------- бабочки ----------
+  spawnFly(initial) {
+    const p = this.randomSpot(R * 0.92, 150, this.humans(), initial ? 0 : 900);
+    const f = { id: this.nextFlyId++, x: p.x, y: p.y, vx: 0, vy: 0, dir: rand(0, TAU), n: 0, cnt: new Map(), top: [],
+      dart: 0, cool: 0, gx: p.x, gy: p.y, gT: 0, ph: rand(0, TAU) };
+    if (initial) { // в начале игры бабочки уже успели поесть — кто сколько
+      const n = Math.round(Math.random() ** 2 * FLY_MAX * 0.8);
+      const fav = [0, 1, 2].map(() => FOOD_COLORS[randi(0, FOOD_COLORS.length - 1)]);
+      for (let i = 0; i < n; i++) this.flyEat(f, 1, fav[Math.random() < 0.6 ? 0 : Math.random() < 0.7 ? 1 : 2]);
+    }
+    this.flies.push(f);
+    return f;
+  }
+  flyEat(f, v, c) {
+    f.n = Math.min(FLY_MAX, f.n + v);
+    f.cnt.set(c, (f.cnt.get(c) || 0) + v);
+    f.top = [...f.cnt.keys()].sort((a, b) => f.cnt.get(b) - f.cnt.get(a)).slice(0, 5); // цвета крошек — что ела больше всего
+  }
+  // сколько места от точки до ближайшего тела (не дальше lim)
+  segFree(x, y, lim) {
+    const { segHead, segNext, segS, segK, snakes } = this;
+    const c0 = this.cellOf(x, y), cx0 = c0 % GRID_N, cy0 = (c0 / GRID_N) | 0, cr = Math.ceil(lim / CELL);
+    let best = lim;
+    for (let cy = Math.max(0, cy0 - cr); cy <= Math.min(GRID_N - 1, cy0 + cr); cy++) {
+      for (let cx = Math.max(0, cx0 - cr); cx <= Math.min(GRID_N - 1, cx0 + cr); cx++) {
+        for (let it = segHead[cy * GRID_N + cx]; it >= 0; it = segNext[it]) {
+          const o = snakes[segS[it]], q = o.segs[segK[it]];
+          const d = Math.hypot(q.x - x, q.y - y) - o.r;
+          if (d < best) best = d;
+        }
+      }
+    }
+    return best;
+  }
+  // увёртка: рывок поперёк хода змеи — в ту сторону, где свободнее
+  flyDart(f, s) {
+    const k = flyK(f.n), L = 160;
+    let best = 0, bestFree = -1e9;
+    for (const side of [-1, 1]) {
+      for (const tilt of [0.25, 0.7]) {
+        const a = s.a + side * (Math.PI / 2 - tilt * 0.6 + 0.1);
+        const tx = f.x + Math.cos(a) * L, ty = f.y + Math.sin(a) * L;
+        const free = Math.min(this.segFree(tx, ty, 200), R - 30 - Math.hypot(tx, ty)) + rand(0, 20);
+        if (free > bestFree) { bestFree = free; best = a; }
+      }
+    }
+    const v = FLY_DART * (1 - 0.35 * k);
+    f.vx = Math.cos(best) * v; f.vy = Math.sin(best) * v;
+    f.dart = 0.35; f.cool = rand(0.35, 0.5) * (1 + 0.5 * k);
+  }
+  // куда лететь: к богатой еде поблизости, а полной — просто порхать
+  flyGoal(f) {
+    f.gT = rand(1, 2);
+    if (f.n < FLY_MAX) {
+      const c0 = this.cellOf(f.x, f.y), cx0 = c0 % GRID_N, cy0 = (c0 / GRID_N) | 0, cr = 4;
+      let best = 0;
+      for (let cy = Math.max(0, cy0 - cr); cy <= Math.min(GRID_N - 1, cy0 + cr); cy++) {
+        for (let cx = Math.max(0, cx0 - cr); cx <= Math.min(GRID_N - 1, cx0 + cr); cx++) {
+          let v = 0, sx = 0, sy = 0;
+          for (let i = this.foodHead[cy * GRID_N + cx]; i >= 0; i = this.foodNext[i]) {
+            const q = this.foods[i];
+            if (!q || q.dead) continue;
+            v += q.v; sx += q.x * q.v; sy += q.y * q.v;
+          }
+          if (!v) continue;
+          const x = sx / v, y = sy / v, sc = v / (Math.hypot(x - f.x, y - f.y) + 80);
+          if (sc > best) { best = sc; f.gx = x; f.gy = y; }
+        }
+      }
+      if (best > 0) return;
+    }
+    const a = rand(0, TAU), d = rand(200, 700);
+    f.gx = f.x + Math.cos(a) * d; f.gy = f.y + Math.sin(a) * d;
+    const g = Math.hypot(f.gx, f.gy), lim = R * 0.9;
+    if (g > lim) { f.gx *= lim / g; f.gy *= lim / g; }
+  }
+  stepFlies(dt) {
+    const { segHead, segNext, segS, segK, snakes } = this;
+    let maxR = 0;
+    for (const s of snakes) if (s.alive && s.r > maxR) maxR = s.r;
+    const dying = new Set(this.pending.map((p) => p[0]));
+    for (let fi = this.flies.length - 1; fi >= 0; fi--) {
+      const f = this.flies[fi], k = flyK(f.n), fr = flyRadius(f.n);
+      f.cool -= dt;
+      // голова близко и смотрит на бабочку (или совсем рядом) — увернуться от самой близкой такой
+      if (f.cool <= 0) {
+        let hs = null, hd = FLY_SEE + fr;
+        for (const s of snakes) {
+          if (!s.alive) continue;
+          const d = Math.hypot(s.x - f.x, s.y - f.y) - s.r;
+          if (d >= hd) continue;
+          if (d < fr * 2.5 || Math.abs(angDiff(s.a, Math.atan2(f.y - s.y, f.x - s.x))) < 1.3) { hd = d; hs = s; }
+        }
+        if (hs) this.flyDart(f, hs);
+      }
+      if (f.dart > 0) f.dart -= dt;
+      else {
+        f.gT -= dt;
+        if (f.gT <= 0 || (f.gx - f.x) ** 2 + (f.gy - f.y) ** 2 < 1600) this.flyGoal(f);
+        const sp = FLY_SPEED * (1 - 0.3 * k), a = Math.atan2(f.gy - f.y, f.gx - f.x) + Math.sin(this.time * 5 + f.ph) * 0.6;
+        const kk = Math.min(1, dt * 4);
+        f.vx += (Math.cos(a) * sp - f.vx) * kk; f.vy += (Math.sin(a) * sp - f.vy) * kk;
+      }
+      f.x += f.vx * dt; f.y += f.vy * dt;
+      // сквозь змей не летает: отскакивает от тел (голову не считаем — ею ловят)
+      const c0 = this.cellOf(f.x, f.y), cx0 = c0 % GRID_N, cy0 = (c0 / GRID_N) | 0;
+      const cr = Math.ceil((fr + maxR) / CELL);
+      for (let cy = Math.max(0, cy0 - cr); cy <= Math.min(GRID_N - 1, cy0 + cr); cy++) {
+        for (let cx = Math.max(0, cx0 - cr); cx <= Math.min(GRID_N - 1, cx0 + cr); cx++) {
+          for (let it = segHead[cy * GRID_N + cx]; it >= 0; it = segNext[it]) {
+            if (segK[it] < 2) continue;
+            const o = snakes[segS[it]], q = o.segs[segK[it]];
+            const dx = f.x - q.x, dy = f.y - q.y, rr = o.r + fr * 0.8, d2 = dx * dx + dy * dy;
+            if (d2 >= rr * rr || d2 < 1e-6) continue;
+            const dd = Math.sqrt(d2), nx = dx / dd, ny = dy / dd, vn = f.vx * nx + f.vy * ny;
+            f.x = q.x + nx * rr; f.y = q.y + ny * rr;
+            if (vn < 0) { f.vx -= 1.6 * vn * nx; f.vy -= 1.6 * vn * ny; }
+          }
+        }
+      }
+      // край арены (после тел: прижатую к краю тело не выталкивает наружу)
+      const d = Math.hypot(f.x, f.y), lim = R - fr - 10;
+      if (d > lim) {
+        const nx = f.x / d, ny = f.y / d, vn = f.vx * nx + f.vy * ny;
+        f.x = nx * lim; f.y = ny * lim;
+        if (vn > 0) { f.vx -= 1.6 * vn * nx; f.vy -= 1.6 * vn * ny; }
+      }
+      if (Math.abs(f.vx) + Math.abs(f.vy) > 10) f.dir = Math.atan2(f.vy, f.vx);
+      // голова поймала (кто в этом шаге проиграл, тот уже не ловит)
+      let by = null;
+      for (const s of snakes) {
+        if (!s.alive || s.inv > 0 || dying.has(s)) continue;
+        const rr = s.r * 0.8 + fr * 0.5;
+        if ((s.x - f.x) ** 2 + (s.y - f.y) ** 2 < rr * rr) { by = s; break; }
+      }
+      if (by) { this.catchFly(f, by); this.flies.splice(fi, 1); continue; }
+      // ест еду
+      if (f.n >= FLY_MAX) continue;
+      const fc = this.cellOf(f.x, f.y), fx0 = fc % GRID_N, fy0 = (fc / GRID_N) | 0;
+      for (let cy = Math.max(0, fy0 - 1); cy <= Math.min(GRID_N - 1, fy0 + 1); cy++) {
+        for (let cx = Math.max(0, fx0 - 1); cx <= Math.min(GRID_N - 1, fx0 + 1); cx++) {
+          for (let i = this.foodHead[cy * GRID_N + cx]; i >= 0; i = this.foodNext[i]) {
+            const q = this.foods[i];
+            if (!q || q.dead || f.n >= FLY_MAX) continue;
+            const er = fr * 0.9 + q.r;
+            if ((q.x - f.x) ** 2 + (q.y - f.y) ** 2 > er * er) continue;
+            q.dead = true;
+            if (q.life === 0) this.naturalCount--;
+            this.flyEat(f, q.v, q.c);
+          }
+        }
+      }
+    }
+  }
+  // поймали: всё собранное высыпается едой в цветах крошек
+  catchFly(f, s) {
+    const total = FLY_BASE + f.n, m = clamp(Math.ceil(total / 6), 1, 16), v = total / m;
+    const cols = f.top.length ? f.top : [GOLD], spread = 20 + total * 0.4;
+    for (let i = 0; i < m; i++) {
+      const a = Math.random() * TAU, d = Math.sqrt(Math.random()) * spread;
+      this.addFood(f.x + Math.cos(a) * d, f.y + Math.sin(a) * d, v, cols[i % cols.length], 40);
+    }
+    this.flyQueue.push(rand(4, 10));
+    this.events.push({ type: 'fly', x: f.x, y: f.y, by: s, v: total, c: cols[0] });
   }
 
   // ---------- сетка ----------
@@ -602,6 +784,16 @@ export class World {
         if (sc > best) { best = sc; bc = c; bx = fx; by = fy; bv = v; }
       }
     }
+    // наевшаяся бабочка рядом — погоняться; поймать трудно, поэтому ценим её дешевле еды
+    let fly = null, fs = keep > best ? keep : best;
+    for (const f of this.flies) {
+      if (f.n < 15) continue;
+      const dx = f.x - hx, dy = f.y - hy, d2 = dx * dx + dy * dy;
+      if (d2 > view2 || big.some((o) => (o.x - f.x) ** 2 + (o.y - f.y) ** 2 < (220 + o.r) ** 2)) continue;
+      const d = Math.sqrt(d2) + 1, sc = Math.pow(FLY_BASE + f.n, 0.8) / (d + 60) * (1.25 + (dx * ca + dy * sa) / d) * 0.5 * b.pers;
+      if (sc > fs) { fs = sc; fly = f; }
+    }
+    if (fly) { b.goalC = -1; b.goalV = 0; return Math.atan2(fly.y + fly.vy * 0.3 - hy, fly.x + fly.vx * 0.3 - hx); }
     if (keep > 0 && keep >= best && this.time < b.goalT) { bx = kx; by = ky; bv = kv; }
     else if (bc >= 0) { b.goalC = bc; b.goalT = this.time + rand(1.5, 2.5); }
     else { b.goalC = -1; b.goalV = 0; return null; }
@@ -868,6 +1060,8 @@ export class World {
       }
     }
 
+    this.stepFlies(dt);
+
     for (const [s, k] of this.pending) this.kill(s, k);
     this.pending = [];
 
@@ -886,6 +1080,10 @@ export class World {
     this.feastT -= dt;
     if (this.feastT <= 0) { this.spawnFeast(); this.feastT = rand(50, 70); }
     if (this.feast && this.time > this.feast.until) this.feast = null;
+    for (let i = this.flyQueue.length - 1; i >= 0; i--) {
+      this.flyQueue[i] -= dt;
+      if (this.flyQueue[i] <= 0) { this.flyQueue.splice(i, 1); this.spawnFly(false); }
+    }
 
     if (this.snakes.some((s) => !s.alive)) {
       for (const s of this.snakes) if (!s.alive) this.byId.delete(s.id);

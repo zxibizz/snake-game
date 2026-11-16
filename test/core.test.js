@@ -1,7 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { World, Snake, countOf, spacingOf, SNAKES_N, DIFF, R, GOLD, SKINS, PAL, TITLES, titleOf,
-  speedOf, turnOf, remainsOf, radiusOf, boostCostOf, BASE_SPEED, BOOST_SPEED, MIN_BOOST_MASS, layBody, angDiff, keepMass, START_MASS } from '../public/core.js';
+  speedOf, turnOf, remainsOf, radiusOf, boostCostOf, BASE_SPEED, BOOST_SPEED, MIN_BOOST_MASS, layBody, angDiff, keepMass, START_MASS,
+  FLY_N, FLY_MAX, FLY_BASE, flyRadius } from '../public/core.js';
 
 // змейка B лежит поперёк пути головы змейки A
 function crossing(teamA, teamB) {
@@ -179,7 +180,7 @@ test('игрок и новые боты выползают из точки, а �
 
 // пустая арена: бот и игрок с телами, уложенными прямо назад от головы
 function duel(diff, bot, human) {
-  const w = new World({ diff, foodN: 0, bots: 0 });
+  const w = new World({ diff, foodN: 0, bots: 0, flies: 0 }); // бабочки отвлекали бы бота от того, что проверяем
   w.D = { ...DIFF[diff], ...(bot.D || {}) };
   const mk = (o, isHuman) => {
     const s = new Snake(w.nextSnakeId++, o.x, o.y, o.mass, 0, isHuman ? 'H' : 'B', isHuman, 0, o.a, layBody(o.x, o.y, o.a, o.mass, 0, 0, 0));
@@ -275,3 +276,89 @@ test('на свежие останки бот сползается издале�
   w.think(b, w.snakes.indexOf(b));
   assert.ok(Math.abs(angDiff(b.ta, 0)) < 1, `к останкам не повернул: ${b.ta.toFixed(2)}`);
 });
+
+// пустой мир с одной бабочкой: без ботов и без других бабочек
+function flyWorld() {
+  const w = new World({ diff: 'easy', foodN: 0, bots: 0, flies: 0 });
+  const f = w.spawnFly(false);
+  f.x = 0; f.y = 0; f.vx = f.vy = 0; f.n = 0; f.cnt = new Map(); f.top = [];
+  return { w, f };
+}
+
+test('бабочки: в начале их FLY_N, кто-то уже наелся; собранное не больше FLY_MAX', () => {
+  const w = new World({ diff: 'easy' });
+  assert.equal(w.flies.length, FLY_N);
+  assert.ok(w.flies.some((f) => f.n > 10));
+  assert.ok(w.flies.every((f) => f.n <= FLY_MAX && f.top.length <= 5));
+});
+
+test('бабочка сама находит еду, съедает её и растёт; крошки — цвета съеденного', () => {
+  const { w, f } = flyWorld();
+  for (let i = 0; i < 12; i++) w.addFood(150 + i * 12, 40, 2, 4, 0);
+  for (let i = 0; i < 6; i++) w.addFood(150, 60 + i * 12, 2, 8, 0);
+  for (let i = 0; i < 40 * 8; i++) w.step(1 / 40);
+  assert.ok(f.n >= 20, `собрано ${f.n}`);
+  assert.equal(f.top[0], 4);
+  assert.ok(flyRadius(f.n) > flyRadius(0));
+});
+
+test('бабочка не пролетает сквозь тело змеи', () => {
+  const { w, f } = flyWorld();
+  const s = w.addHuman({ name: 'H', skin: 0, mass: 400, inv: 0 });
+  const lay = () => s.segs.forEach((p, k) => { p.x = 600 - k * 14; p.y = 200; }); // тело поперёк, от x=600 далеко влево
+  lay();
+  assert.ok(s.segs[s.segs.length - 1].x < -300);
+  s.a = s.ta = 0;
+  f.x = -100; f.y = 0; f.gx = -100; f.gy = 400; f.gT = 99; // бабочка хочет вниз, сквозь тело
+  for (let i = 0; i < 40 * 3; i++) {
+    lay();                  // тело лежит на месте
+    w.step(1 / 40);
+    f.gx = f.x; f.gy = 400; f.gT = 99;
+  }
+  assert.ok(f.y < 200, `бабочка оказалась по ту сторону тела: y=${f.y.toFixed(0)}`);
+});
+
+test('от головы, которая на неё смотрит, бабочка увёртывается вбок', () => {
+  const { w, f } = flyWorld();
+  const s = w.addHuman({ name: 'H', skin: 0, mass: 100, inv: 0 });
+  s.segs.forEach((p, i) => { p.x = -200 - i * 5; p.y = 0; });
+  s.a = s.ta = 0;
+  w.step(1 / 40);
+  assert.ok(f.dart > 0, 'не увернулась');
+  assert.ok(Math.abs(f.vy) > Math.abs(f.vx) * 1.5, 'увёртка должна быть поперёк хода змеи');
+});
+
+test('голова ловит бабочку: собранное высыпается едой в цветах крошек, прилетает новая', () => {
+  const { w, f } = flyWorld();
+  for (let i = 0; i < 40; i++) w.flyEat(f, 1, 6);
+  f.cool = 99; // не увернётся
+  const s = w.addHuman({ name: 'H', skin: 0, mass: 100, inv: 0 });
+  s.segs.forEach((p, i) => { p.x = -i * 5; p.y = 0; });
+  s.ta = s.a = 0;
+  const n0 = w.foods.length;
+  const ev = w.step(1 / 40);
+  assert.equal(w.flies.length, 0);
+  const e = ev.find((x) => x.type === 'fly');
+  assert.ok(e && e.by === s && Math.abs(e.v - (FLY_BASE + 40)) < 1e-6);
+  const drop = w.foods.slice(n0);
+  assert.ok(drop.every((q) => q.c === 6));
+  assert.ok(Math.abs(drop.reduce((a, q) => a + q.v, 0) - (FLY_BASE + 40)) < 1e-6);
+  for (let i = 0; i < 40 * 11; i++) w.step(1 / 40);
+  assert.equal(w.flies.length, 1);
+});
+
+test('почти полная бабочка не съедает сверх вместимости, а проигравшая в этом шаге змея её не ловит', () => {
+  const { w, f } = flyWorld();
+  for (let i = 0; i < FLY_MAX - 2; i++) w.flyEat(f, 1, 3);
+  for (let i = 0; i < 4; i++) w.addFood(rand0(i), 0, 5, 3, 0);
+  w.buildGrids(); w.stepFlies(1 / 40);
+  assert.equal(f.n, FLY_MAX);
+  assert.ok(w.foods.filter((q) => !q.dead).length >= 2, 'лишняя еда должна остаться на поле');
+  // змея уже в списке проигравших — бабочку не ловит
+  const s = w.addHuman({ name: 'H', skin: 0, mass: 100, inv: 0 });
+  s.segs.forEach((p, i) => { p.x = -i * 5; p.y = 0; });
+  f.cool = 99; w.pending.push([s, null]);
+  w.buildGrids(); w.stepFlies(1 / 40);
+  assert.equal(w.flies.length, 1);
+});
+function rand0(i) { return [0, 3, -3, 6][i]; }
