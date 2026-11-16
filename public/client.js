@@ -109,8 +109,7 @@ function wakeAudio() {
   resumeBusy = true;
   Promise.resolve(actx.resume()).catch(() => {}).finally(() => { resumeBusy = false; });
 }
-function ensureAudio(e) { // только из жестов: pointerup / touchend / click / keydown
-  if (e && e.isTrusted === false) return; // щелчок вибрации на iPhone — не жест
+function ensureAudio() { // только из жестов: pointerup / touchend / click / keydown
   unlockHtmlAudio();
   if (!actx) { newAudio(); audioStuck = 0; }
   if (!actx || actx.state === 'running') { audioStuck = 0; return; }
@@ -127,7 +126,22 @@ function ensureAudio(e) { // только из жестов: pointerup / touchen
 document.addEventListener('visibilitychange', () => { if (!document.hidden) wakeAudio(); }); // после звонка iOS часто будит и без жеста
 const soundOn = () => save.sound && save.vol > 0;
 const EAT_STEPS = [0, 2, 4, 7, 9, 12, 14, 16]; // полутоны от ре второй октавы
-function tone(f0, f1, dur, vol, type = 'sine', delay = 0) {
+// голос вида своей змейки: тот же лад, свой тембр (еда и щелчок молнии)
+const VOICES = {
+  beads: { eat: (f) => tone(f, f * 1.6, 0.07, 0.12, 'triangle'), boost: () => tone(260, 700, 0.07, 0.14, 'triangle') },
+  fish: { eat: (f) => tone(f * 0.7, f * 1.9, 0.06, 0.14, 'sine'), boost: () => tone(300, 1100, 0.09, 0.14, 'sine') }, // «буль»
+  caterpillar: { eat: (f) => tone(f, f * 1.25, 0.09, 0.13, 'sine'), boost: () => tone(240, 520, 0.09, 0.13, 'sine') }, // мягко
+  dots: { eat: (f) => { tone(f, f * 1.5, 0.06, 0.1, 'triangle'); tone(f * 2, f * 3, 0.04, 0.04, 'sine', 0.02); }, // звонко
+    boost: () => tone(300, 800, 0.07, 0.14, 'triangle') },
+  dragon: { eat: (f) => tone(f * 0.5, f * 0.9, 0.08, 0.06, 'sawtooth'), boost: () => tone(200, 520, 0.11, 0.08, 'sawtooth') }, // с рыком
+  tiger: { eat: (f) => tone(f, f * 1.4, 0.06, 0.12, 'triangle'), boost: () => tone(220, 640, 0.08, 0.15, 'triangle') },
+  robot: { eat: (f) => tone(f, f, 0.05, 0.05, 'square'), boost: () => { tone(330, 330, 0.04, 0.06, 'square'); tone(660, 660, 0.05, 0.06, 'square', 0.05); } }, // бип
+  neon: { eat: (f) => { tone(f, f * 1.5, 0.07, 0.1, 'sine'); tone(f, f * 1.5, 0.07, 0.04, 'sine', 0.11); }, // с эхом
+    boost: () => { tone(280, 900, 0.08, 0.12, 'sine'); tone(280, 900, 0.08, 0.05, 'sine', 0.12); } },
+};
+const voiceOf = (skin) => VOICES[typeId(skin)] || VOICES.beads;
+// pan — где звучит: −1 слева … 1 справа (события на арене — с той стороны экрана, где случились)
+function tone(f0, f1, dur, vol, type = 'sine', delay = 0, pan = 0) {
   if (!soundOn() || !actx || (actx.state !== 'running' && !resumeBusy)) return; // спящему контексту не копить звуки
   vol *= save.vol * save.vol; // громкость из настройки — по квадрату, так ползунок ощущается ровнее
   const t = actx.currentTime + delay;
@@ -137,7 +151,10 @@ function tone(f0, f1, dur, vol, type = 'sine', delay = 0) {
   o.frequency.exponentialRampToValueAtTime(f1, t + dur);
   g.gain.setValueAtTime(vol, t);
   g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-  o.connect(g); g.connect(bus || actx.destination);
+  o.connect(g);
+  let out = g;
+  if (pan && actx.createStereoPanner) { const p = actx.createStereoPanner(); p.pan.value = clamp(pan, -1, 1); g.connect(p); out = p; }
+  out.connect(bus || actx.destination);
   o.start(t); o.stop(t + dur + 0.02);
 }
 const sfx = {
@@ -148,10 +165,16 @@ const sfx = {
     eatStep = now - lastEatSound < 500 ? Math.min(eatStep + 1, EAT_STEPS.length - 1) : 0;
     lastEatSound = now;
     const f = 587 * Math.pow(2, EAT_STEPS[eatStep] / 12);
-    tone(f, f * 1.6, 0.07, 0.12, 'triangle');
+    voiceOf(save.skin).eat(f);
     haptic('eat');
   },
-  boost() { tone(260, 700, 0.07, 0.14, 'triangle'); },
+  boost() { voiceOf(save.skin).boost(); },
+  // проскочил впритирку мимо чужого тела — короткий свист с той стороны
+  near(pan) { tone(1500, 2700, 0.11, 0.07, 'sine', 0, pan); tone(1900, 3200, 0.08, 0.035, 'sine', 0.05, pan); haptic('near'); },
+  // чужая змейка погибла на экране — глухой хлопок с её стороны, издалека тише
+  pop(pan, k) { tone(420, 160, 0.16, 0.12 * k, 'triangle', 0, pan); tone(900, 300, 0.07, 0.05 * k, 'sine', 0.02, pan); },
+  // чужую бабочку поймали на экране — тихий перезвон с той стороны
+  chime(pan, k) { [1175, 1568].forEach((f, i) => tone(f, f * 1.2, 0.08, 0.06 * k, 'sine', i * 0.05, pan)); },
   // громкости — до компрессора; частоты не ниже ~150 Гц: ниже динамик телефона почти не играет
   die() { tone(640, 150, 0.6, 0.3, 'sawtooth'); haptic('die'); },
   win() { tone(520, 1040, 0.14, 0.25, 'triangle'); tone(780, 1560, 0.18, 0.22, 'triangle', 0.12); haptic('kill'); },
@@ -197,40 +220,27 @@ function setWhoosh(on) {
 }
 
 // ---------- вибрация ----------
-// Android — navigator.vibrate. На iPhone его нет: с iOS 18 щелчок Taptic Engine даёт переключатель <input switch>,
-// если нажать его подпись из кода. Длины и силы там нет — только одинаковые тики, поэтому у каждого события — число тиков.
+// Только Android (navigator.vibrate). На iPhone веб вибрировать не может: vibrate там нет, а лазейку через щелчок
+// переключателя <input switch> Apple закрыла в iOS 26.5 — у владельца не сработала ни в Chrome, ни по нажатию.
 const IOS = /iPhone|iPad|iPod/.test(UA) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 const CAN_VIBRATE = !IOS && typeof navigator.vibrate === 'function';
-const hasHaptic = () => isTouch && (CAN_VIBRATE || IOS); // isTouch объявлен ниже — спрашиваем при вызове
-let tapLabel = null;
-function iosTap() {
-  if (!tapLabel) {
-    tapLabel = document.createElement('label');
-    tapLabel.setAttribute('aria-hidden', 'true'); tapLabel.style.display = 'none';
-    const inp = document.createElement('input'); inp.type = 'checkbox'; inp.setAttribute('switch', '');
-    tapLabel.appendChild(inp); document.head.appendChild(tapLabel);
-  }
-  tapLabel.click();
-}
-// v — паттерн Android (мс: вибрация, пауза, …); n — тиков на iPhone, gap — пауза между ними
+const hasHaptic = () => isTouch && CAN_VIBRATE; // isTouch объявлен ниже — спрашиваем при вызове
+// паттерн: мс вибрации, паузы, вибрации…
 const HAPTIC = {
-  eat: { v: 8, n: 1 },
-  boost: { v: 14, n: 1 },
-  fly: { v: [8, 35, 8, 35, 8], n: 3, gap: 45 },
-  kill: { v: [20, 60, 30], n: 2, gap: 80 },
-  combo: { v: [16, 45, 16, 45, 40], n: 3, gap: 70 },
-  title: { v: [12, 50, 12, 50, 12, 50, 50], n: 4, gap: 60 },
-  die: { v: [70, 50, 140], n: 4, gap: 55 },
+  eat: 8, boost: 14, near: 10,
+  fly: [8, 35, 8, 35, 8],
+  kill: [20, 60, 30],
+  combo: [16, 45, 16, 45, 40],
+  title: [12, 50, 12, 50, 12, 50, 50],
+  die: [70, 50, 140],
 };
-let lastHap = 0;
+const lastHap = {};
 function haptic(kind) {
   if (!hasHaptic() || !save.haptic || document.hidden) return;
-  const p = HAPTIC[kind], now = performance.now();
-  if (kind === 'eat' && now - lastHap < 110) return; // крошки подряд — не жужжать
-  lastHap = now;
-  if (CAN_VIBRATE) { try { navigator.vibrate(p.v); } catch { /* */ } return; }
-  try { iosTap(); } catch { return; }
-  for (let i = 1; i < p.n; i++) setTimeout(() => { try { iosTap(); } catch { /* */ } }, i * (p.gap || 70));
+  const now = performance.now();
+  if (now - (lastHap[kind] || 0) < 110) return; // одно и то же подряд — не жужжать
+  lastHap[kind] = now;
+  try { navigator.vibrate(HAPTIC[kind]); } catch { /* */ }
 }
 
 // проверка звука: что с ним на этом устройстве — показываем после включения звука на паузе
@@ -617,7 +627,7 @@ fab.addEventListener('pointerdown', (e) => {
   e.preventDefault();
   if (fabEdit) { fabDragStart(e, false); return; }
   fabDown = true; fab.classList.add('on');
-  if (me && me.mass > MIN_BOOST_MASS) haptic('boost'); // в жесте: на iPhone так надёжнее, чем при старте ускорения
+  if (me && me.mass > MIN_BOOST_MASS) haptic('boost'); // сразу в касании, не ждём ответа сервера
   try { fab.setPointerCapture(e.pointerId); } catch { /* */ }
 });
 const fabUp = () => { fabDown = false; fab.classList.remove('on'); };
@@ -916,7 +926,7 @@ function onEvents(m) {
   for (const [x, y, c, by, v] of m.fly || []) setTimeout(() => onFlyCaught(x, y, c, by === net.youId, v), INTERP_MS);
   for (const k of m.kill || []) {
     const vs = k.v !== net.youId && net.snakes.get(k.v);
-    if (vs) setTimeout(() => burst(vs), INTERP_MS);
+    if (vs) setTimeout(() => burst(vs, k.k !== net.youId), INTERP_MS);
     if (k.k === net.youId) {
       const v = net.snakes.get(k.v);
       onMyKill(k.v, k.vm, k.km, v ? v.segs[0] : null, v ? segColor(v.skin, 0) : GOLD);
@@ -1077,7 +1087,7 @@ function netInput() {
 function onNetDeath(m) {
   sfx.die();
   const mine = me;
-  if (mine) setTimeout(() => { burst(mine); camKick(0, 9); }, INTERP_MS);
+  if (mine) setTimeout(() => { burst(mine, false); camKick(0, 9); }, INTERP_MS);
   net.deadInfo = m;
   ui = 'dead';
   onLifeEnd(Math.max(m.eaten || 0, net.eaten), m.max);
@@ -1137,7 +1147,7 @@ function soloEvents(events) {
   for (const e of events) {
     if (e.type === 'feast') { if (mode === 'solo') onFeast(e.x, e.y, e.life); continue; }
     if (e.type === 'fly') { onFlyCaught(e.x, e.y, e.c, mode === 'solo' && e.by === me, e.v); continue; }
-    if (e.type === 'kill' && e.victim !== me) burst(e.victim);
+    if (e.type === 'kill' && e.victim !== me) burst(e.victim, !(e.killer && e.killer === me && mode === 'solo'));
     if (mode !== 'solo') continue;
     if (e.killer && e.killer === me) onMyKill(e.victim.id, e.vm, e.km, e.victim.segs[0], segColor(e.victim.skin, 0));
     if (e.victim === me) onSoloDeath(e.killer);
@@ -1150,7 +1160,7 @@ function recordBest() {
 }
 function onSoloDeath(killer) {
   sfx.die();
-  burst(me); camKick(0, 9);
+  burst(me, false); camKick(0, 9);
   const who = killer ? `На пути была змейка «${esc(killer.name)}»` : 'Это край арены';
   const dead = me;
   onLifeEnd(dead.eaten, dead.maxMass);
@@ -1182,6 +1192,7 @@ function onFeast(x, y, life) {
 function onFlyCaught(x, y, c, mine, v) {
   effects.push({ x, y, t: time, c: shade(PAL[c] || GOLD_C, 0.3), r: 12 });
   pollen(x, y, PAL[c] ? c : GOLD);
+  if (!mine && inView(x, y)) placed(x, y, sfx.chime);
   if (!mine || !run) return;
   sfx.fly();
   addXp(3 + Math.floor(v / 10));
@@ -1443,15 +1454,52 @@ function addSpark(x, y, vx, vy, c, r, life) {
   sparks.push({ x, y, vx, vy, c, r, t: time, life });
 }
 // змейка погибла — её бусины разлетаются искрами её цветов
-function burst(sn) {
+function burst(sn, sound = true) {
   const segs = sn && sn.segs, n = segs ? segs.length : 0;
   if (!n || !inView(segs[0].x, segs[0].y, bodyLenOf(sn.mass))) return;
+  if (sound) placed(segs[0].x, segs[0].y, sfx.pop);
   const cnt = Math.min(30, 8 + (n >> 3)), sp = 70 + sn.r * 5;
   for (let j = 0; j < cnt; j++) {
     const i = Math.floor(j / cnt * n), q = segs[i];
     if (!inView(q.x, q.y, 60)) continue;
     const a = Math.random() * TAU, v = sp * (0.35 + Math.random());
     addSpark(q.x, q.y, Math.cos(a) * v, Math.sin(a) * v, segColor(sn.skin, i), sn.r * (0.45 + Math.random() * 0.4), 0.45 + Math.random() * 0.4);
+  }
+}
+// звук события на арене: с той стороны экрана, где оно, к краю тише; в демо за меню — молча
+const lastPlaced = new Map();
+function placed(x, y, play) {
+  if (!mode) return;
+  const now = performance.now();
+  if (now - (lastPlaced.get(play) || 0) < 100) return; // несколько одинаковых разом — один звук
+  lastPlaced.set(play, now);
+  const px = (x - cam.x) * cam.z / (W / 2), py = (y - cam.y) * cam.z / (H / 2);
+  play(clamp(px, -1, 1) * 0.8, clamp(1 - 0.45 * Math.hypot(px, py), 0.35, 1));
+}
+// проскочил впритирку: голова прошла рядом с чужим телом — свист с той стороны (и тик на Android).
+// Срабатывает при входе в зазор; снова — когда отошёл и прошло полсекунды
+let nearArmed = true, nearT = 0, nearOdd = false;
+function checkNear() {
+  if (!mode || ui !== 'play' || !me || me.alive === false || me.inv > 0) { nearArmed = true; return; }
+  if ((nearOdd = !nearOdd)) return; // через кадр: звук не требует точности до кадра
+  const h = me.segs[0], close = Math.max(6, me.r * 0.6);
+  let gap = Infinity, gx = 0, gy = 0;
+  for (const o of sceneSnakes()) {
+    if (o === me || (o.alive === false) || (o.team && o.team === me.team)) continue;
+    const reach = bodyLenOf(o.mass) + o.r + me.r + close + 40;
+    if (Math.abs(o.segs[0].x - h.x) > reach || Math.abs(o.segs[0].y - h.y) > reach) continue;
+    const segs = o.segs, lim = o.r + me.r + close * 2.5;
+    for (let i = 0; i < segs.length; i += 2) {
+      const dx = segs[i].x - h.x, dy = segs[i].y - h.y;
+      if (dx > lim || dx < -lim || dy > lim || dy < -lim) continue;
+      const g = Math.hypot(dx, dy) - o.r - me.r;
+      if (g < gap) { gap = g; gx = dx; gy = dy; }
+    }
+  }
+  if (gap > close * 2.5) { nearArmed = true; return; }
+  if (gap < close && nearArmed && time - nearT > 0.5) {
+    nearArmed = false; nearT = time;
+    sfx.near(Math.abs(gx) > 2 ? Math.sign(gx) * 0.6 : 0); // тело левее головы на экране — свист слева
   }
 }
 // пыльца пойманной бабочки
@@ -1654,10 +1702,9 @@ function openCreate() {
 // ---------- как играть и офлайн ----------
 const isStandalone = (window.matchMedia && matchMedia('(display-mode: standalone)').matches) ||
   (window.matchMedia && matchMedia('(display-mode: fullscreen)').matches) || navigator.standalone === true;
-const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 function installHint() {
   if (isStandalone) return '';
-  if (isIOS) return 'Чтобы играть в самолёте: Safari → «Поделиться» → «На экран „Домой“», затем один раз открой игру с иконки, пока есть интернет.';
+  if (IOS) return 'Чтобы играть в самолёте: Safari → «Поделиться» → «На экран „Домой“», затем один раз открой игру с иконки, пока есть интернет.';
   if (/Android/.test(navigator.userAgent)) return 'Чтобы играть в самолёте: Chrome → ⋮ → «Добавить на главный экран», затем один раз открой игру с иконки при интернете.';
   return '';
 }
@@ -2054,6 +2101,7 @@ function frame(now) {
   if (boosting && !wasBoost) sfx.boost();
   wasBoost = boosting;
   setWhoosh(boosting);
+  checkNear();
   if (ui !== 'paused') {
     updateCamera(dt);
     draw();
