@@ -434,11 +434,11 @@ test('новый игрок не перекрашивает ботов, кото
 });
 
 // пустой мир, бот в (0, by) смотрит на восток; рядом — тело other (массой m), уложенное по точкам pts
-function rayWorld(m, pts, human = false, by = 50) {
+function rayWorld(m, pts, human = false, by = 50, oa = 0) {
   const w = new World({ diff: 'easy', bots: 0, foodN: 0, flies: 0 });
   w.snakes = []; w.byId.clear();
   const b = w.addSnake(new Snake(1, 0, by, 15, 0, 'бот', false, 0, 0));
-  const o = w.addSnake(new Snake(2, pts[0].x, pts[0].y, m, 1, 'другой', human, 0, 0, pts.map((p) => ({ ...p }))));
+  const o = w.addSnake(new Snake(2, pts[0].x, pts[0].y, m, 1, 'другой', human, 0, oa, pts.map((p) => ({ ...p }))));
   w.buildGrids();
   return { w, b, o, look: w.D.look * (1 + b.r / 50) };
 }
@@ -458,21 +458,36 @@ test('путь к курсу проверяется дугой: резкий п�
   assert.equal(w2.rayDanger(b2, 0, 2.1, look), 0);
 });
 
-test('свежий хвост игрока бот замечает с опозданием, хвост бота — сразу', () => {
-  // голова другого только что проползла поперёк пути бота в 150 px перед ним и ползёт на север
-  const pts = line(150, 70, 0, -spacingOf(60), countOf(60));
-  const human = rayWorld(60, pts, true), bot = rayWorld(60, pts, false);
-  assert.equal(human.w.rayDanger(human.b, 0, 0, human.look), 0);
-  assert.ok(bot.w.rayDanger(bot.b, 0, 0, bot.look) > 0);
-  // через D.fresh с этот кусок хвоста уже «старый»: игрок прополз дальше, и бот его видит
-  const far = line(150, 70 + DIFF.easy.fresh * BASE_SPEED + 40, 0, -spacingOf(60), countOf(60));
-  const later = rayWorld(60, far, true);
-  assert.ok(later.w.rayDanger(later.b, 0, 0, later.look) > 0);
-  // на рывке окно не растёт, и у малыша больше половины тела не прячется
-  later.o.isBoosting = true; later.w.buildGrids();
-  assert.ok(later.w.rayDanger(later.b, 0, 0, later.look) > 0);
-  const tiny = rayWorld(START_MASS, line(150, 70, 0, -spacingOf(START_MASS), countOf(START_MASS)), true);
-  assert.ok(tiny.o.fresh <= tiny.o.segs.length / 2);
+test('тело игрока бот видит целиком, а на хвост, только что перерезавший путь, реагирует с опозданием', () => {
+  // danger — упирается ли выбранный ботом курс в тело (полным зрением); straight — путь прямо
+  const run = (pts, human) => {
+    const r = rayWorld(60, pts, human, 50, Math.PI / 2); // игрок ползёт на север
+    r.b.huntCd = 1e9;
+    r.danger = () => r.w.rayDanger(r.b, 0, r.b.ta, r.look);
+    r.straight = r.w.rayDanger(r.b, 0, 0, r.look);
+    r.w.think(r.b, 0);
+    return r;
+  };
+  // голова игрока только что проползла поперёк пути бота под самым его носом (80 px) и ползёт на север
+  const pts = line(80, 110, 0, -spacingOf(60), countOf(60));
+  const cut = run(pts, true);
+  assert.ok(cut.straight > 0, 'свежий хвост виден — «дыры» за головой нет');
+  assert.ok(cut.danger() > 0, 'сразу бот не замечает и ползёт в хвост');
+  cut.w.time += cut.w.D.fresh * 1.31;
+  cut.w.think(cut.b, 0);
+  assert.ok(cut.danger() < cut.straight, 'через D.fresh — отворачивает');
+  // свежий хвост, легший далеко впереди (250 px), хвост, который лежит давно, и хвост бота — объезжает сразу
+  for (const [name, r] of [['далеко', run(line(250, 110, 0, -spacingOf(60), countOf(60)), true)],
+    ['давно', run(line(80, 50 + countOf(60) * spacingOf(60) - 40, 0, -spacingOf(60), countOf(60)), true)],
+    ['бот', run(pts, false)]]) {
+    assert.ok(r.straight > 0 && r.danger() < r.straight, name);
+  }
+  // «только что легло» — не больше половины тела малыша и на рывке не длиннее
+  const tiny = rayWorld(START_MASS, line(80, 70, 0, -spacingOf(START_MASS), countOf(START_MASS)), true);
+  assert.ok(tiny.o.newK > 0 && tiny.o.newK <= tiny.o.segs.length / 2);
+  const k0 = cut.o.newK;
+  cut.o.isBoosting = true; cut.w.buildGrids();
+  assert.equal(cut.o.newK, k0);
 });
 
 test('сытый бот (длиннее giantMin) за едой не гоняется', () => {

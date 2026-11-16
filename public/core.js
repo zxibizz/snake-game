@@ -2,7 +2,7 @@
 // Здесь нет DOM и сети — только мир, змейки, еда, боты и столкновения.
 
 // Версия протокола и файлов: при изменении любого файла в public/ поднять и здесь, и в sw.js (тест сверяет).
-export const VERSION = '26';
+export const VERSION = '27';
 export const TAU = Math.PI * 2;
 export const R = 7000;                  // радиус арены (координаты по сети — Int16 / 4, предел 8191)
 export const BASE_SPEED = 210;          // пикс/с — у «Малыша»; с каждым званием змейка быстрее, см. speedOf
@@ -51,6 +51,11 @@ export const PREY_GAP = 1.3;
 export const preyFor = (b, s) => b.mass <= s.mass * PREY_GAP;
 // с какого места в таблице боты охотятся на игрока всерьёз (см. heatOf)
 export const RANK_HOT = 20;
+// Подрезка: хвост игрока, проложенный за последние CUT_NEW с, — «только что лёг». Если он лёг поперёк пути бота
+// ближе CUT_NEAR пикселей от его носа (от края до края), бот замечает его с опозданием D.fresh. Дальше — видит сразу
+export const CUT_NEW = 1;
+export const CUT_NEAR = 110;
+const HEAD_K = Math.ceil(2 / 0.42); // голова с шеей — столько сегментов от головы (два радиуса при шаге 0,42 радиуса); их бот видит всегда
 
 // mass — разброс масс ботов при создании мира; giants — сколько ботов не меньше giantMin держать на арене.
 // aggr — как часто бот ищет, кого подрезать; grace — секунд после появления игрока без охоты.
@@ -61,24 +66,24 @@ export const RANK_HOT = 20;
 // (0 — только базовые 0,45 с): чем больше, тем труднее подрезать гиганта;
 // wary — как часто бот замечает, что ему перерезают путь, и уходит вдоль чужого пути;
 // keep — какая доля длины остаётся после «Продолжить» (0 — с самого начала);
-// fresh — через сколько секунд бот замечает свежий хвост игрока перед носом: больше — легче подрезать.
+// fresh — через сколько секунд бот замечает, что игрок только что перерезал ему путь своим хвостом: больше — легче подрезать.
 export const DIFF = {
   easy: {
     label: 'Лёгкий', mass: [15, 2500], giants: 4, giantMin: 800,
     speed: 0.97, turn: 0.95, react: 0.2, look: 275,
-    aggr: 0.3, humanAggr: [0, 0.7, 1], maxHunters: [1, 1, 2], grace: 10, huntRange: 480, boost: 0.55, rest: 6, foresee: 0, wary: 0.35, fresh: 0.45,
+    aggr: 0.3, humanAggr: [0, 0.7, 1], maxHunters: [1, 1, 2], grace: 10, huntRange: 480, boost: 0.55, rest: 6, foresee: 0, wary: 0.35, fresh: 0.3,
     edgeKills: false, keep: 0.8,
   },
   medium: {
     label: 'Средний', mass: [15, 3500], giants: 5, giantMin: 1100,
     speed: 1, turn: 1, react: 0.13, look: 335,
-    aggr: 0.55, humanAggr: [0.4, 0.85, 1.2], maxHunters: [1, 2, 3], grace: 6, huntRange: 640, boost: 0.8, rest: 4, foresee: 0.4, wary: 0.6, fresh: 0.4,
+    aggr: 0.55, humanAggr: [0.4, 0.85, 1.2], maxHunters: [1, 2, 3], grace: 6, huntRange: 640, boost: 0.8, rest: 4, foresee: 0.4, wary: 0.6, fresh: 0.25,
     edgeKills: true, keep: 0.4,
   },
   hard: {
     label: 'Сложный', mass: [20, 6000], giants: 6, giantMin: 1800,
     speed: 1.03, turn: 1.08, react: 0.08, look: 410,
-    aggr: 0.9, humanAggr: [0.9, 1.3, 1.7], maxHunters: [2, 4, 5], grace: 3, huntRange: 820, boost: 0.95, rest: 2, foresee: 0.9, wary: 0.85, fresh: 0.4,
+    aggr: 0.9, humanAggr: [0.9, 1.3, 1.7], maxHunters: [2, 4, 5], grace: 3, huntRange: 820, boost: 0.95, rest: 2, foresee: 0.9, wary: 0.85, fresh: 0.18,
     edgeKills: true, keep: 0,
   },
 };
@@ -279,6 +284,7 @@ export class Snake {
     this.cau = rand(0.6, 1.3);       // осторожность: как часто замечает, что его подрезают
     this.hside = 0; this.huntT0 = 0;
     this.goalC = -1; this.goalT = 0; this.goalV = 0; this.ambTarget = 0; this.ambUntil = 0;
+    this.surpId = 0; this.surpT = 0; this.surpLast = -9; // чей хвост перерезал путь и когда бот это заметит
     this.mem = new Map();           // что бот решил о встрече (заметил угрозу, устроит засаду, пойдёт на останки) — на несколько секунд
     this.r = radiusOf(mass);
     this.segs = segs || layBody(x, y, this.a, mass, 0, 0, 0);
@@ -566,16 +572,13 @@ export class World {
   buildGrids() {
     this.segHead.fill(-1);
     let m = 0, maxR = 0;
-    const D = this.D;
     for (let si = 0; si < this.snakes.length; si++) {
       const s = this.snakes[si];
       if (!s.alive || s.inv > 0) continue; // неуязвимый — «призрак»
       const segs = s.segs;
       if (s.r > maxR) maxR = s.r;
-      // сколько сегментов от головы игрока боты ещё не заметили: тело, проложенное за последние D.fresh с
-      // (по обычной скорости — на рывке окно короче, давно лежащий хвост не пропадает), но не больше половины тела.
-      // Хвосты ботов видны сразу — иначе боты то и дело врезались бы друг в друга
-      s.fresh = s.human ? Math.min(segs.length >> 1, Math.ceil(D.fresh * speedOf(s.mass, false) / spacingOf(s.mass))) : 0;
+      // «только что легло»: столько сегментов от головы игрок проложил за последние CUT_NEW с (см. think — подрезка)
+      s.newK = s.human ? Math.min(segs.length >> 1, Math.ceil(CUT_NEW * speedOf(s.mass, false) / spacingOf(s.mass))) : 0;
       if (m + segs.length > this.segS.length) this.growSeg(m + segs.length);
       for (let k = 0; k < segs.length; k++) {
         const c = this.cellOf(segs[k].x, segs[k].y);
@@ -737,9 +740,11 @@ export class World {
   // Путь к курсу a проверяется дугой — так, как змея поползёт на самом деле, поворачивая с её поворотливостью,
   // а не прямым лучом: иначе резкий поворот к «свободному» лучу вёл прямо в тело перед носом.
   // Тела ищутся во всех клетках, куда дотягивается самое толстое тело, а не в одной: толстые тела лежат
-  // серединой в соседней клетке, и одна клетка их пропускала. Свежий хвост (s.fresh сегментов у головы) бот
-  // замечает с опозданием, если это хвост игрока, — так бота можно подрезать, а в давно лежащие тела он не въезжает.
-  rayDanger(b, bi, a, look) {
+  // серединой в соседней клетке, и одна клетка их пропускала. Чьё тело на пути — в this.hitO / this.hitK
+  // (читать сразу после вызова; deep — самый глубоко задетый сегмент шага, иначе первый попавшийся).
+  // blind — игрок, чей «только что легший» хвост бот ещё не заметил (см. think).
+  rayDanger(b, bi, a, look, blind = null, deep = false) {
+    this.hitO = null; this.hitK = -1;
     const D = this.D, step = Math.max(16, b.r * 0.9);
     const turn = turnOf(b.r) * D.turn * step / (speedOf(b.mass, b.boost) * D.speed); // на сколько успеет повернуть за шаг луча
     const edge = R - b.r - 30, edge2 = edge * edge;
@@ -753,17 +758,20 @@ export class World {
       if (px * px + py * py > edge2) return 1.1 - d / look;
       const cx0 = clamp(((px - lim + GRID_OFF) / CELL) | 0, 0, GRID_N - 1), cx1 = clamp(((px + lim + GRID_OFF) / CELL) | 0, 0, GRID_N - 1);
       const cy0 = clamp(((py - lim + GRID_OFF) / CELL) | 0, 0, GRID_N - 1), cy1 = clamp(((py + lim + GRID_OFF) / CELL) | 0, 0, GRID_N - 1);
+      let best = 2; // на шаге, где луч упёрся, запоминаем самый глубоко задетый сегмент — порядок клеток не важен
       for (let cy = cy0; cy <= cy1; cy++) {
         for (let cx = cx0; cx <= cx1; cx++) {
           for (let it = segHead[cy * GRID_N + cx]; it >= 0; it = segNext[it]) {
             if (segS[it] === bi) continue;
             const o = snakes[segS[it]], k = segK[it];
-            if (k < o.fresh) continue;
-            const q = o.segs[k], dx = q.x - px, dy = q.y - py, rr = o.r + b.r + 8;
-            if (dx * dx + dy * dy < rr * rr) return 1.1 - d / look;
+            if (o === blind && k < o.newK && k >= HEAD_K) continue;
+            const q = o.segs[k], dx = q.x - px, dy = q.y - py, rr = o.r + b.r + 8, f = (dx * dx + dy * dy) / (rr * rr);
+            if (f < best) { best = f; this.hitO = o; this.hitK = k; if (!deep && f < 1) return 1.1 - d / look; }
           }
         }
       }
+      if (best < 1) return 1.1 - d / look;
+      this.hitO = null; this.hitK = -1;
     }
     return 0;
   }
@@ -928,9 +936,9 @@ export class World {
   think(b, bi) {
     const D = this.D;
     const hx = b.x, hy = b.y;
+    const look0 = D.look * (1 + b.r / 50);
     let desired = null;
     b.boost = false;
-    const look0 = D.look * (1 + b.r / 50);
     const heads = this.nearHeads(b, Math.max(look0 * 1.4, 600));
     const vb = speedOf(b.mass, false) * D.speed;
 
@@ -947,6 +955,27 @@ export class World {
       if (!P) this.stopHunt(b);
     }
 
+    // 0) подрезка: если поперёк намеченного пути под самым носом только что лёг хвост игрока, бот замечает это
+    //    не сразу — D.fresh с (и до следующего раздумья) свежий хвост для него как пустое место. Голову с шеей,
+    //    старое тело и других змей он видит всегда. Не бывает, если бот сам охотится на этого игрока или тот ползёт навстречу
+    let blind = null;
+    // Решение — по первому взгляду: свежий хвост этого игрока, замеченный раньше (издалека), бот уже не «прозёвывает»
+    const dg0 = D.fresh > 0 && heads.some((o) => o.s.human) ? this.rayDanger(b, bi, b.ta, look0, null, true) : 0;
+    const o0 = dg0 > 0 ? this.hitO : null;
+    const busy = b.surpT > this.time && b.surpId !== (o0 && o0.id); // ещё не заметил подрезку другого игрока
+    if (o0 && o0.human && this.hitK < o0.newK && this.hitK >= HEAD_K && !busy) { // голова не в счёт — смотрим на хвост
+      const q = o0.segs[this.hitK], gap = Math.hypot(q.x - hx, q.y - hy) - o0.r - b.r;
+      // «уже видел»: окно длиннее самой долгой слепоты с запасом на раздумье — иначе слепота продлевалась бы сама
+      const seen = b.surpId === o0.id && this.time - b.surpLast < 1.3 * (D.fresh + D.react) + 0.2;
+      if (!seen) {
+        const sudden = gap < CUT_NEAR && o0 !== P &&
+          Math.cos(angDiff(o0.a, Math.atan2(hy - o0.y, hx - o0.x))) < 0.7;
+        b.surpId = o0.id; b.surpT = sudden ? this.time + D.fresh * rand(0.7, 1.3) : 0;
+      }
+      b.surpLast = this.time;
+    }
+    if (b.surpId && this.time < b.surpT) blind = this.byId.get(b.surpId) || null;
+
     // 1) угроза — важнее всего, кроме своей цели: к ней бот идёт наперерез намеренно
     const th = this.threatOf(b, heads, vb);
     if (th && (!P || th.id !== P.id)) {
@@ -962,6 +991,7 @@ export class World {
       else b.huntCd = rand(0.5, 1.5);
     }
 
+    if (blind && P === blind) blind = null; // на свою цель охотник смотрит во все глаза
     if (desired === null && P) {
       // 2) охота
       const dx = P.x - hx, dy = P.y - hy, dist = Math.hypot(dx, dy);
@@ -1036,7 +1066,7 @@ export class World {
       const a = b.a + off;
       const ub = Math.cos(angDiff(desired, a)) - Math.abs(off) * 0.05; // лучше этого курс не будет даже без опасностей
       if (ub <= bestScore) continue;                                   // — и лучи можно не считать
-      const dg = this.rayDanger(b, bi, a, look);
+      const dg = this.rayDanger(b, bi, a, look, blind);
       // чужие головы: где окажемся мы и они через 0,15–0,45 с (крупный бот на среднем и сложном — до 1,35 с)
       let hd = 0;
       for (const o of near) {
