@@ -1781,7 +1781,7 @@ function renderHome() {
     return `<button data-k="${k}" class="${k === viewSkin ? 'on' : ''}${op ? '' : ' locked'}" aria-pressed="${k === viewSkin}" style="background:${swatchBg(k)}" aria-label="${esc(SKINS[k].name)}${op ? '' : ' (закрыта)'}">${op ? '' : icon('lock')}</button>`;
   }).join('');
   if (focusK !== undefined) $('swatches').querySelector(`[data-k="${focusK}"]`)?.focus();
-  $('skinLock').innerHTML = open ? '' : `${icon('lock')}откроется за ${sk.stars - stars()} ★`;
+  $('skinLock').innerHTML = open ? '' : `${icon('lock')}ещё ${sk.stars - stars()} ★`;
   document.querySelectorAll('#diff button').forEach((b) => b.classList.toggle('on', b.dataset.d === save.diff));
   const v = save.best[save.diff] || 0;
   $('best').innerHTML = v ? `${icon('trophy')}рекорд ${v}` : '';
