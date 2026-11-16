@@ -46,6 +46,7 @@ if (!SKINS[save.skin]) save.skin = 0;
 if (!DIFF[save.diff]) save.diff = 'easy';
 const persist = () => { try { localStorage.setItem('zmeigrad', JSON.stringify(save)); } catch { /* ничего */ } };
 const myName = () => save.name || 'Игрок';
+const soloName = () => save.name || 'Ты';
 // токен сессии: при переподключении сервер отдаёт ту же змейку, а не создаёт вторую
 const TOKEN = (crypto.randomUUID ? crypto.randomUUID() : String(Math.random()).slice(2) + Date.now()).slice(0, 40);
 const hello = (o) => ({ ...o, name: myName(), skin: save.skin, token: TOKEN, v: VERSION });
@@ -593,7 +594,7 @@ function startSolo(diff) {
   ensureAudio();
   mode = 'solo'; diffKey = diff;
   world = new World({ diff });
-  me = world.addHuman({ name: myName(), skin: save.skin, inv: 2 });
+  me = world.addHuman({ name: soloName(), skin: save.skin, inv: 2 });
   cam.x = me.x; cam.y = me.y;
   cam.z = baseZoom() * 1.3;
   playTime = 0; sessionBest = START_MASS; hudT = 0; lastSoloMass = me.mass;
@@ -628,7 +629,7 @@ function onSoloDeath(killer) {
     run.revenge = killer && killer.alive ? { id: killer.id, name: killer.name } : null;
     dialog('Ой!', oopsHtml(who, dead.mass),
     [{ label: 'В меню', kind: 'text', onClick: toHome }, { label: 'Продолжить', kind: 'filled', icon: 'play', onClick: () => {
-      me = world.addHuman({ name: myName(), skin: save.skin, mass: Math.max(START_MASS, dead.mass * 0.5), inv: 3 });
+      me = world.addHuman({ name: soloName(), skin: save.skin, mass: Math.max(START_MASS, dead.mass * 0.5), inv: 3 });
       ui = 'play'; closeDialog(); onRespawn();
     } }]);
   } else {
@@ -815,7 +816,6 @@ function toHome() {
 function showHome(v) {
   $('home').hidden = !v;
   $('hud').hidden = v;
-  if (!v) $('name').blur();
   $('btnMenu').innerHTML = icon(mode === 'net' ? 'menu' : 'pause');
 }
 
@@ -886,10 +886,6 @@ function showHint() {
 function hideHint() { clearTimeout(hintTimer); $('hint').hidden = true; }
 
 // ---------- главный экран ----------
-const nameInput = $('name');
-nameInput.value = save.name;
-nameInput.addEventListener('input', () => { save.name = nameInput.value.trim().slice(0, 12); persist(); });
-nameInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') nameInput.blur(); });
 
 // раскраска: стрелками листаются все, играть можно только открытыми
 let viewSkin = save.skin;
@@ -958,6 +954,15 @@ function drawPreview() {
   g.globalAlpha = 1;
 }
 
+// имя нужно только в совместной игре: его видят остальные в комнате
+const nameFieldHtml = () => '<div class="field name-field"><input id="nick" maxlength="12" autocomplete="off" placeholder=" ">' +
+  '<label for="nick">Твоё имя</label></div>';
+function bindName() {
+  const el = $('nick');
+  el.value = save.name;
+  el.addEventListener('input', () => { save.name = el.value.trim().slice(0, 12); persist(); });
+  el.addEventListener('keydown', (e) => { if (e.key === 'Enter') el.blur(); });
+}
 // играть вместе: создать комнату или войти по коду
 let createOpts = { mode: 'team', diff: 'easy' };
 function segHtml(name, opts) {
@@ -969,12 +974,13 @@ function openTogether() {
     dialog('Нужен интернет', '<p>Играть вместе можно только через интернет. Одному — и без сети.</p>', [{ label: 'Понятно', kind: 'filled', onClick: closeDialog }]);
     return;
   }
-  dialog('Играть вместе',
+  dialog('Играть вместе', nameFieldHtml() +
     `<button class="btn filled big wide" id="dCreate">${icon('group')}Создать комнату</button>` +
     '<div class="or">или войди по коду</div>' +
     '<div class="join"><div class="field"><input id="code" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="off" placeholder=" ">' +
     '<label for="code">Код комнаты</label></div><button class="btn tonal big" id="dJoin">Войти</button></div>',
     [{ label: 'Закрыть', kind: 'text', onClick: closeDialog }]);
+  bindName();
   const code = $('code');
   code.value = inviteCode && /^\d{4}$/.test(inviteCode) ? inviteCode : '';
   code.addEventListener('input', () => { code.value = code.value.replace(/\D/g, '').slice(0, 4); });
@@ -1311,8 +1317,9 @@ requestAnimationFrame(frame);
 // приглашение по ссылке ?room=1234
 const inviteCode = new URLSearchParams(location.search).get('room');
 if (inviteCode && /^\d{4}$/.test(inviteCode)) {
-  dialog(`Комната ${inviteCode}`, '<p>Тебя зовут играть вместе. Проверь имя и раскраску на главном экране или заходи сразу.</p>',
+  dialog(`Комната ${inviteCode}`, `<p>Тебя зовут играть вместе.</p>${nameFieldHtml()}`,
     [{ label: 'Позже', kind: 'text', onClick: closeDialog }, { label: 'Войти', kind: 'filled', onClick: () => startNet(hello({ t: 'join', code: inviteCode })) }]);
+  bindName();
 }
 
 // для автотестов

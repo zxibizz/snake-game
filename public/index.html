@@ -66,10 +66,6 @@ svg.i{width:24px;height:24px;fill:currentColor;flex:none}
 .skin-info small svg.i{width:14px;height:14px}
 .icon-btn.flat{background:none;box-shadow:none;color:var(--on)}
 .icon-btn.flat:disabled{opacity:.25}
-.name{width:220px;max-width:100%;height:44px;border:0;border-bottom:1px solid var(--outline);background:transparent;color:var(--on);
-  font:inherit;font-size:18px;text-align:center;outline:none;-webkit-user-select:text;user-select:text;border-radius:0}
-.name:focus{border-bottom:2px solid var(--primary)}
-.name::placeholder{color:var(--outline)}
 .go{display:flex;flex-direction:column;gap:12px}
 .go .seg{margin:0}
 .best{text-align:center;font-size:13px;color:var(--on-var);min-height:18px;display:flex;align-items:center;justify-content:center;gap:4px}
@@ -84,6 +80,7 @@ svg.i{width:24px;height:24px;fill:currentColor;flex:none}
 .field input:focus{border:2px solid var(--primary);padding:0 15px}
 .field label{position:absolute;left:12px;top:-8px;padding:0 4px;background:var(--surf-high);font-size:12px;color:var(--on-var)}
 .field input:focus + label{color:var(--primary)}
+.name-field{margin:8px 0 16px}
 .join{display:flex;gap:8px;align-items:center}
 .join .field{flex:1}
 .or{text-align:center;font-size:13px;color:var(--on-var);margin:16px 0 12px}
@@ -213,7 +210,6 @@ svg.i{width:24px;height:24px;fill:currentColor;flex:none}
         <div class="skin-info"><b id="skinName"></b><small id="skinLock"></small></div>
         <button class="icon-btn flat" id="skinNext" aria-label="Следующая раскраска" data-icon="right"></button>
       </div>
-      <input id="name" class="name" maxlength="12" autocomplete="off" placeholder="Твоё имя" aria-label="Имя">
     </section>
 
     <section class="go">
