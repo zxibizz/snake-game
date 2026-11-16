@@ -2,7 +2,7 @@
 import {
   World, SKINS, TYPES, SKINS_OF, PAL, GOLD, DIFF, R, TAU, START_MASS, SNAKES_N, FOOD_N, VERSION, TITLES, titleOf, segColor,
   radiusOf, spacingOf, countOf, bodyLenOf, foodRadiusOf, followChain, fitLength, clamp, angDiff, keepMass,
-  FLY_MAX, flyK, flyScale,
+  FLY_MAX, flyK, flyScale, MIN_BOOST_MASS,
 } from './core.js';
 
 const TICK_MS = 25;        // сервер: 40 шагов в секунду
@@ -25,6 +25,7 @@ const ICONS = {
   lock: '<path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z"/>',
   left: '<path d="M15.41 7.41 14 6l-6 6 6 6 1.41-1.41L10.83 12z"/>',
   right: '<path d="M10 6 8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/>',
+  vibration: '<path d="M0 15h2V9H0v6zm3 2h2V7H3v10zm19-8v6h2V9h-2zm-3 8h2V7h-2v10zM16.5 3h-9C6.67 3 6 3.67 6 4.5v15c0 .83.67 1.5 1.5 1.5h9c.83 0 1.5-.67 1.5-1.5v-15c0-.83-.67-1.5-1.5-1.5zM16 19H8V5h8v14z"/>',
   star: '<path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/>',
   cloudDone: '<path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM10 17l-3.5-3.5 1.41-1.41L10 14.17 15.18 9l1.41 1.41L10 17z"/>',
 };
@@ -39,7 +40,7 @@ const hexA = (hex, a) => {
 
 // ---------- сохранение ----------
 // xp — накопленные звёзды (имя ключа осталось от уровней)
-const save = { best: { easy: 0, medium: 0, hard: 0 }, name: '', skin: 0, sound: true, vol: 1, xp: 0, diff: 'easy', hinted: false,
+const save = { best: { easy: 0, medium: 0, hard: 0 }, name: '', skin: 0, sound: true, vol: 1, haptic: true, xp: 0, diff: 'easy', hinted: false,
   stats: { games: 0, kills: 0, eaten: 0, best: 0 } };
 try { Object.assign(save, JSON.parse(localStorage.getItem('zmeigrad') || '{}')); } catch { /* приватный режим */ }
 delete save.daily; // задания дня убраны
@@ -59,7 +60,7 @@ const hello = (o) => ({ ...o, name: myName(), skin: save.skin, token: TOKEN, v: 
 // iPhone: звук включается только из «настоящего» жеста (касание отпущено, клик, клавиша), а не из pointerdown;
 // после сворачивания или звонка контекст становится 'interrupted' и сам не просыпается. Беззвучный режим
 // (переключатель сбоку) Web Audio слушается — так решил владелец.
-let actx = null, bus = null, lastEatSound = 0; // bus — общий вход звуков: громкость и компрессор
+let actx = null, bus = null, lastEatSound = 0, eatStep = 0; // bus — общий вход звуков: громкость и компрессор
 let audioStuck = 0, resumeBusy = false; // с какого момента жесты не будят контекст; ждём ли ответа resume()
 function newAudio() {
   try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch { actx = null; return; }
@@ -108,7 +109,8 @@ function wakeAudio() {
   resumeBusy = true;
   Promise.resolve(actx.resume()).catch(() => {}).finally(() => { resumeBusy = false; });
 }
-function ensureAudio() { // только из жестов: pointerup / touchend / click / keydown
+function ensureAudio(e) { // только из жестов: pointerup / touchend / click / keydown
+  if (e && e.isTrusted === false) return; // щелчок вибрации на iPhone — не жест
   unlockHtmlAudio();
   if (!actx) { newAudio(); audioStuck = 0; }
   if (!actx || actx.state === 'running') { audioStuck = 0; return; }
@@ -124,6 +126,7 @@ function ensureAudio() { // только из жестов: pointerup / touchend
 ['pointerup', 'touchend', 'click', 'keydown'].forEach((ev) => window.addEventListener(ev, ensureAudio, { capture: true, passive: true }));
 document.addEventListener('visibilitychange', () => { if (!document.hidden) wakeAudio(); }); // после звонка iOS часто будит и без жеста
 const soundOn = () => save.sound && save.vol > 0;
+const EAT_STEPS = [0, 2, 4, 7, 9, 12, 14, 16]; // полутоны от ре второй октавы
 function tone(f0, f1, dur, vol, type = 'sine', delay = 0) {
   if (!soundOn() || !actx || (actx.state !== 'running' && !resumeBusy)) return; // спящему контексту не копить звуки
   vol *= save.vol * save.vol; // громкость из настройки — по квадрату, так ползунок ощущается ровнее
@@ -138,20 +141,98 @@ function tone(f0, f1, dur, vol, type = 'sine', delay = 0) {
   o.start(t); o.stop(t + dur + 0.02);
 }
 const sfx = {
+  // еда подряд — каждая крошка на ступень выше (пентатоника), пауза полсекунды — снова снизу
   eat() {
     const now = performance.now();
     if (now - lastEatSound < 70) return;
+    eatStep = now - lastEatSound < 500 ? Math.min(eatStep + 1, EAT_STEPS.length - 1) : 0;
     lastEatSound = now;
-    tone(620 + Math.random() * 220, 1150, 0.07, 0.12, 'triangle');
+    const f = 587 * Math.pow(2, EAT_STEPS[eatStep] / 12);
+    tone(f, f * 1.6, 0.07, 0.12, 'triangle');
+    haptic('eat');
   },
+  boost() { tone(260, 700, 0.07, 0.14, 'triangle'); },
   // громкости — до компрессора; частоты не ниже ~150 Гц: ниже динамик телефона почти не играет
-  die() { tone(640, 150, 0.6, 0.3, 'sawtooth'); },
-  win() { tone(520, 1040, 0.14, 0.25, 'triangle'); tone(780, 1560, 0.18, 0.22, 'triangle', 0.12); },
-  combo(n) { for (let i = 0; i < n + 1; i++) tone(600 + i * 150, 1200 + i * 200, 0.12, 0.22, 'triangle', i * 0.08); },
-  title() { [523, 659, 784, 1047].forEach((f, i) => tone(f, f * 1.01, 0.18, 0.22, 'triangle', i * 0.09)); },
-  level() { [392, 523, 659, 784, 1047, 1319].forEach((f, i) => tone(f, f, 0.22, 0.12, 'square', i * 0.08)); },
-  fly() { [880, 1175, 1568].forEach((f, i) => tone(f, f * 1.25, 0.09, 0.18, 'sine', i * 0.05)); },
+  die() { tone(640, 150, 0.6, 0.3, 'sawtooth'); haptic('die'); },
+  win() { tone(520, 1040, 0.14, 0.25, 'triangle'); tone(780, 1560, 0.18, 0.22, 'triangle', 0.12); haptic('kill'); },
+  combo(n) { for (let i = 0; i < n + 1; i++) tone(600 + i * 150, 1200 + i * 200, 0.12, 0.22, 'triangle', i * 0.08); haptic('combo'); },
+  title() { [523, 659, 784, 1047].forEach((f, i) => tone(f, f * 1.01, 0.18, 0.22, 'triangle', i * 0.09)); haptic('title'); },
+  level() { [392, 523, 659, 784, 1047, 1319].forEach((f, i) => tone(f, f, 0.22, 0.12, 'square', i * 0.08)); haptic('title'); },
+  fly() { [880, 1175, 1568].forEach((f, i) => tone(f, f * 1.25, 0.09, 0.18, 'sine', i * 0.05)); haptic('fly'); },
 };
+// шум ускорения: пока держишь молнию — шорох, с каждой секундой выше и ярче
+let whoosh = null, noiseBuf = null; // { src, flt, g, ctx, vol }
+function setWhoosh(on) {
+  if (on && (!soundOn() || !actx || actx.state !== 'running')) on = false;
+  if (!on) {
+    if (whoosh) {
+      const w = whoosh, t = w.ctx.currentTime;
+      w.g.gain.cancelScheduledValues(t); w.g.gain.setValueAtTime(w.g.gain.value, t); w.g.gain.linearRampToValueAtTime(0, t + 0.12);
+      try { w.src.stop(t + 0.15); } catch { /* */ }
+      whoosh = null;
+    }
+    return;
+  }
+  const vol = 0.05 * save.vol * save.vol;
+  if (whoosh && whoosh.ctx !== actx) whoosh = null; // контекст пересоздали (iOS) — старые узлы молчат
+  if (whoosh) {
+    if (whoosh.vol !== vol) { whoosh.g.gain.setTargetAtTime(vol, actx.currentTime, 0.05); whoosh.vol = vol; } // громкость поменяли на паузе
+    return;
+  }
+  try {
+    if (!noiseBuf || noiseBuf.sampleRate !== actx.sampleRate) {
+      const n = actx.sampleRate; noiseBuf = actx.createBuffer(1, n, n);
+      const d = noiseBuf.getChannelData(0);
+      for (let i = 0; i < n; i++) d[i] = Math.random() * 2 - 1;
+    }
+    const t = actx.currentTime;
+    const src = actx.createBufferSource(); src.buffer = noiseBuf; src.loop = true;
+    const flt = actx.createBiquadFilter(); flt.type = 'bandpass'; flt.Q.value = 1.4;
+    flt.frequency.setValueAtTime(500, t); flt.frequency.exponentialRampToValueAtTime(2400, t + 1.5);
+    const g = actx.createGain(); g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(vol, t + 0.06);
+    src.connect(flt); flt.connect(g); g.connect(bus || actx.destination);
+    src.start(t);
+    whoosh = { src, flt, g, ctx: actx, vol };
+  } catch { whoosh = null; }
+}
+
+// ---------- вибрация ----------
+// Android — navigator.vibrate. На iPhone его нет: с iOS 18 щелчок Taptic Engine даёт переключатель <input switch>,
+// если нажать его подпись из кода. Длины и силы там нет — только одинаковые тики, поэтому у каждого события — число тиков.
+const IOS = /iPhone|iPad|iPod/.test(UA) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const CAN_VIBRATE = !IOS && typeof navigator.vibrate === 'function';
+const hasHaptic = () => isTouch && (CAN_VIBRATE || IOS); // isTouch объявлен ниже — спрашиваем при вызове
+let tapLabel = null;
+function iosTap() {
+  if (!tapLabel) {
+    tapLabel = document.createElement('label');
+    tapLabel.setAttribute('aria-hidden', 'true'); tapLabel.style.display = 'none';
+    const inp = document.createElement('input'); inp.type = 'checkbox'; inp.setAttribute('switch', '');
+    tapLabel.appendChild(inp); document.head.appendChild(tapLabel);
+  }
+  tapLabel.click();
+}
+// v — паттерн Android (мс: вибрация, пауза, …); n — тиков на iPhone, gap — пауза между ними
+const HAPTIC = {
+  eat: { v: 8, n: 1 },
+  boost: { v: 14, n: 1 },
+  fly: { v: [8, 35, 8, 35, 8], n: 3, gap: 45 },
+  kill: { v: [20, 60, 30], n: 2, gap: 80 },
+  combo: { v: [16, 45, 16, 45, 40], n: 3, gap: 70 },
+  title: { v: [12, 50, 12, 50, 12, 50, 50], n: 4, gap: 60 },
+  die: { v: [70, 50, 140], n: 4, gap: 55 },
+};
+let lastHap = 0;
+function haptic(kind) {
+  if (!hasHaptic() || !save.haptic || document.hidden) return;
+  const p = HAPTIC[kind], now = performance.now();
+  if (kind === 'eat' && now - lastHap < 110) return; // крошки подряд — не жужжать
+  lastHap = now;
+  if (CAN_VIBRATE) { try { navigator.vibrate(p.v); } catch { /* */ } return; }
+  try { iosTap(); } catch { return; }
+  for (let i = 1; i < p.n; i++) setTimeout(() => { try { iosTap(); } catch { /* */ } }, i * (p.gap || 70));
+}
+
 // проверка звука: что с ним на этом устройстве — показываем после включения звука на паузе
 function audioStatus() {
   if (!actx) return 'Звук не запустился: браузер не дал его включить';
@@ -474,6 +555,14 @@ let demoFocus = null;
 let run = null;          // текущая игра: звёзды, победы, рекорды мест — для итогов и заданий
 let feast = null;        // { x, y, until } — золотой пир на арене
 let effects = [];        // кольца-вспышки на месте побед
+let gulps = [];          // крошки, которые своя змейка втягивает в рот
+let gulpT = -9;          // когда своя змейка глотнула последний раз — голова на миг раздувается
+let lumps = [];          // когда глотала: по телу от головы к хвосту катится комок
+let sparks = [];         // искры: бусины погибших змеек, пыльца бабочек
+const kick = { t: -9, z: 0, shake: 0 }; // толчок камеры: z — приближение, shake — тряска в точках экрана
+let slowUntil = 0;       // одиночная игра: миг замедления после своей победы
+let wasBoost = false;
+const REDUCED = !!(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches);
 let leaderId = 0;        // у кого корона
 const cam = { x: 0, y: 0, z: 1 };
 
@@ -528,6 +617,7 @@ fab.addEventListener('pointerdown', (e) => {
   e.preventDefault();
   if (fabEdit) { fabDragStart(e, false); return; }
   fabDown = true; fab.classList.add('on');
+  if (me && me.mass > MIN_BOOST_MASS) haptic('boost'); // в жесте: на iPhone так надёжнее, чем при старте ускорения
   try { fab.setPointerCapture(e.pointerId); } catch { /* */ }
 });
 const fabUp = () => { fabDown = false; fab.classList.remove('on'); };
@@ -650,7 +740,7 @@ const net = {
   ws: null, code: '', roomMode: 'team', diff: 'easy', youId: 0, myTeam: 0,
   snakes: new Map(), foods: new Map(), buf: [], offset: null, lastTick: -1,
   lastSent: 0, lastA: null, lastB: false, leaving: false, retry: 0, retryTimer: 0, pendingMsg: null,
-  kills: 0, myMass: 0, deadInfo: null, lb: null, eaten: 0, flies: [],
+  kills: 0, myMass: 0, grewAt: 0, deadInfo: null, lb: null, eaten: 0, flies: [],
 };
 const wsUrl = () => `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`;
 function netSend(o) { if (net.ws && net.ws.readyState === 1) net.ws.send(JSON.stringify(o)); }
@@ -825,6 +915,8 @@ function onEvents(m) {
   // мир рисуем с задержкой INTERP_MS — вспышку и звук поимки тоже, иначе они опередят голову
   for (const [x, y, c, by, v] of m.fly || []) setTimeout(() => onFlyCaught(x, y, c, by === net.youId, v), INTERP_MS);
   for (const k of m.kill || []) {
+    const vs = k.v !== net.youId && net.snakes.get(k.v);
+    if (vs) setTimeout(() => burst(vs), INTERP_MS);
     if (k.k === net.youId) {
       const v = net.snakes.get(k.v);
       onMyKill(k.v, k.vm, k.km, v ? v.segs[0] : null, v ? segColor(v.skin, 0) : GOLD);
@@ -898,13 +990,22 @@ function onBinary(buf) {
   while (net.buf.length > 40) { applyFood(net.buf[0]); net.buf.shift(); }
 
   const mine = snakes.get(net.youId);
-  if (mine) { if (mine.mass > net.myMass + 0.5 && !mine.boost && net.myMass > 0) sfx.eat(); net.myMass = mine.mass; }
+  if (mine) {
+    if (mine.mass > net.myMass + 0.5 && net.myMass > 0) { net.grewAt = performance.now(); if (!mine.boost) sfx.eat(); }
+    net.myMass = mine.mass;
+  }
 }
 function applyFood(s) {
   if (s.applied) return;
   s.applied = true;
   for (const f of s.added) addNetFood(...f);
-  for (const id of s.removed) net.foods.delete(id);
+  // крошку съела своя змейка, если она рядом с головой и змейка в этом снимке подросла (иначе её съел сосед или она растаяла)
+  const h = me && me.segs.length && performance.now() - net.grewAt < INTERP_MS + 250 ? me.segs[0] : null;
+  for (const id of s.removed) {
+    const f = h && net.foods.get(id);
+    if (f) { const d = (me.r + f.r) * 1.6 + 10; if ((f.x - h.x) ** 2 + (f.y - h.y) ** 2 < d * d) onGulp(f); }
+    net.foods.delete(id);
+  }
 }
 function netUpdate(now, dt) {
   const buf = net.buf;
@@ -975,6 +1076,8 @@ function netInput() {
 }
 function onNetDeath(m) {
   sfx.die();
+  const mine = me;
+  if (mine) setTimeout(() => { burst(mine); camKick(0, 9); }, INTERP_MS);
   net.deadInfo = m;
   ui = 'dead';
   onLifeEnd(Math.max(m.eaten || 0, net.eaten), m.max);
@@ -990,7 +1093,7 @@ function onNetDeath(m) {
 }
 function startNet(firstMsg) {
   mode = 'net'; ui = 'conn'; me = null; world = null; net.kills = 0; net.retry = 0; net.eaten = 0;
-  run = null; feast = null; effects = [];
+  run = null; feast = null; clearFx();
   netReset();
   dialog('Подключаюсь…', '<p>Соединяюсь с сервером игры.</p>', [{ label: 'Отмена', kind: 'text', onClick: leaveNet }]);
   netOpen(firstMsg, false);
@@ -1022,7 +1125,8 @@ function startSolo(diff) {
   cam.x = me.x; cam.y = me.y;
   cam.z = baseZoom() * 1.3;
   playTime = 0; sessionBest = START_MASS; hudT = 0; lastSoloMass = me.mass;
-  run = newRun(diff); feast = null; effects = []; clearGlow();
+  run = newRun(diff); feast = null; clearFx(); clearGlow();
+  world.track = true; // съеденная еда — для крошек, летящих в рот
   $('roomBox').hidden = true;
   showHome(false);
   closeDialog();
@@ -1033,6 +1137,7 @@ function soloEvents(events) {
   for (const e of events) {
     if (e.type === 'feast') { if (mode === 'solo') onFeast(e.x, e.y, e.life); continue; }
     if (e.type === 'fly') { onFlyCaught(e.x, e.y, e.c, mode === 'solo' && e.by === me, e.v); continue; }
+    if (e.type === 'kill' && e.victim !== me) burst(e.victim);
     if (mode !== 'solo') continue;
     if (e.killer && e.killer === me) onMyKill(e.victim.id, e.vm, e.km, e.victim.segs[0], segColor(e.victim.skin, 0));
     if (e.victim === me) onSoloDeath(e.killer);
@@ -1045,6 +1150,7 @@ function recordBest() {
 }
 function onSoloDeath(killer) {
   sfx.die();
+  burst(me); camKick(0, 9);
   const who = killer ? `На пути была змейка «${esc(killer.name)}»` : 'Это край арены';
   const dead = me;
   onLifeEnd(dead.eaten, dead.maxMass);
@@ -1075,6 +1181,7 @@ function onFeast(x, y, life) {
 // бабочку поймали: вспышка в цвет крошек; если поймали мы — звук и звёзды (полная бабочка — щедрее)
 function onFlyCaught(x, y, c, mine, v) {
   effects.push({ x, y, t: time, c: shade(PAL[c] || GOLD_C, 0.3), r: 12 });
+  pollen(x, y, PAL[c] ? c : GOLD);
   if (!mine || !run) return;
   sfx.fly();
   addXp(3 + Math.floor(v / 10));
@@ -1088,6 +1195,8 @@ function onMyKill(id, vm, km, pos, color) {
   const n = run.killTimes.length;
   let xp = 10 + (vm > km ? 20 : 0) + (n >= 2 ? 10 * n : 0);
   if (pos) effects.push({ x: pos.x, y: pos.y, t: time, c: PAL[color] || GOLD_C, r: radiusOf(vm) });
+  camKick(n >= 2 || vm > km ? 0.06 : 0.035, 0);
+  if (mode === 'solo') slowUntil = time + 0.07; // миг замедления — победа ощущается весомее
   // о победах не пишем: вспышка на месте змейки и звук, серия — звонче
   if (run.revenge && run.revenge.id === id) { run.revenge = null; xp += 40; sfx.combo(3); }
   else if (n >= 2) sfx.combo(n);
@@ -1205,7 +1314,8 @@ function bindVol() {
     rng.value = v; rng.style.setProperty('--p', `${v}%`);
     btn.innerHTML = icon(soundOn() ? 'vol' : 'volOff');
   };
-  const check = () => { unlockHtmlAudio(); sfx.title(); setTimeout(() => snack(audioStatus()), 500); }; // сразу слышно, работает ли звук
+  const quiet = (f) => { const h = save.haptic; save.haptic = false; f(); save.haptic = h; }; // проба звука — без вибрации
+  const check = () => { unlockHtmlAudio(); quiet(sfx.title); setTimeout(() => snack(audioStatus()), 500); }; // сразу слышно, работает ли звук
   btn.addEventListener('click', () => {
     if (soundOn()) save.sound = false;
     else { save.sound = true; if (save.vol < 0.05) save.vol = 0.6; }
@@ -1216,8 +1326,16 @@ function bindVol() {
     save.vol = rng.value / 100; save.sound = save.vol > 0;
     show();
   });
-  rng.addEventListener('change', () => { persist(); unlockHtmlAudio(); if (soundOn()) sfx.win(); }); // отпустил — пробный звук
+  rng.addEventListener('change', () => { persist(); unlockHtmlAudio(); if (soundOn()) quiet(sfx.win); }); // отпустил — пробный звук
   show();
+}
+// вибрация — только где она есть (телефон, планшет); включил — сразу чувствуешь, какая она
+const hapHtml = () => (hasHaptic() ? `<label class="sw-row">${icon('vibration')}<span>Вибрация</span>` +
+  `<input type="checkbox" class="m3-switch" id="hapSw"${save.haptic ? ' checked' : ''}></label>` : '');
+function bindHap() {
+  const sw = $('hapSw');
+  if (!sw) return;
+  sw.addEventListener('change', () => { save.haptic = sw.checked; persist(); if (save.haptic) haptic('kill'); });
 }
 // на сенсорном экране — ещё настройка кнопки ускорения
 const fabBtnHtml = () => (isTouch ? `<button class="btn tonal wide fab-set" id="btnFabSet">${icon('bolt')}Кнопка ускорения</button>` : '');
@@ -1229,13 +1347,13 @@ function openMenu() {
 }
 function menuDialog() {
   if (mode === 'solo' && ui === 'paused') {
-    dialog('Пауза', volHtml() + fabBtnHtml(), [{ label: 'В меню', kind: 'text', onClick: toHome }, { label: 'Продолжить', kind: 'filled', onClick: resume }]);
+    dialog('Пауза', volHtml() + hapHtml() + fabBtnHtml(), [{ label: 'В меню', kind: 'text', onClick: toHome }, { label: 'Продолжить', kind: 'filled', onClick: resume }]);
   } else if (mode === 'net' && ui === 'play') {
     dialog(`Комната ${net.code}`, `<p>${net.roomMode === 'team' ? 'Команда против ботов' : 'Все против всех'} · боты: ${DIFF[net.diff].label.toLowerCase()}</p>` +
-      '<p>Игра продолжается, пока открыто меню.</p>' + volHtml() + fabBtnHtml(),
+      '<p>Игра продолжается, пока открыто меню.</p>' + volHtml() + hapHtml() + fabBtnHtml(),
     [{ label: 'Выйти', kind: 'text', onClick: leaveNet }, { label: 'Играть', kind: 'filled', onClick: closeDialog }]);
   } else return;
-  bindVol(); bindFabBtn();
+  bindVol(); bindHap(); bindFabBtn();
 }
 function resume() { if (ui === 'paused') { ui = 'play'; closeDialog(); last = performance.now(); } }
 $('btnMenu').addEventListener('click', openMenu);
@@ -1249,7 +1367,7 @@ window.addEventListener('pagehide', persist);
 function toHome() {
   if (mode === 'solo' && me) recordBest();
   if (run) finishRun();
-  mode = null; me = null; ui = 'home'; feast = null; effects = []; clearGlow();
+  mode = null; me = null; ui = 'home'; feast = null; clearFx(); clearGlow();
   closeDialog();
   endFabEdit();
   hideHint();
@@ -1311,6 +1429,56 @@ function glowOf(n) {
   const p = (t % 1) * (n + 24) - 12, w = 5 + n * 0.08;
   return (i) => { const d = (i - p) / w; return d * d > 9 ? 0 : Math.exp(-d * d); };
 }
+
+// ---------- эффекты: глоток, искры, толчок камеры ----------
+function clearFx() { effects = []; gulps = []; lumps = []; sparks = []; kick.t = -9; slowUntil = 0; gulpT = -9; }
+const inView = (x, y, m = 0) => Math.abs(x - cam.x) < W / 2 / cam.z + m && Math.abs(y - cam.y) < H / 2 / cam.z + m;
+function onGulp(f) { // крошка f ({ x, y, r, c }) съедена своей змейкой
+  if (gulps.length < 40) gulps.push({ x: f.x, y: f.y, r: f.r, c: f.c, t: time });
+  gulpT = time;
+  if (!lumps.length || time - lumps[lumps.length - 1] > 0.12) { lumps.push(time); if (lumps.length > 5) lumps.shift(); }
+}
+function addSpark(x, y, vx, vy, c, r, life) {
+  if (sparks.length >= 260) sparks.shift();
+  sparks.push({ x, y, vx, vy, c, r, t: time, life });
+}
+// змейка погибла — её бусины разлетаются искрами её цветов
+function burst(sn) {
+  const segs = sn && sn.segs, n = segs ? segs.length : 0;
+  if (!n || !inView(segs[0].x, segs[0].y, bodyLenOf(sn.mass))) return;
+  const cnt = Math.min(30, 8 + (n >> 3)), sp = 70 + sn.r * 5;
+  for (let j = 0; j < cnt; j++) {
+    const i = Math.floor(j / cnt * n), q = segs[i];
+    if (!inView(q.x, q.y, 60)) continue;
+    const a = Math.random() * TAU, v = sp * (0.35 + Math.random());
+    addSpark(q.x, q.y, Math.cos(a) * v, Math.sin(a) * v, segColor(sn.skin, i), sn.r * (0.45 + Math.random() * 0.4), 0.45 + Math.random() * 0.4);
+  }
+}
+// пыльца пойманной бабочки
+function pollen(x, y, c) {
+  if (!inView(x, y, 60)) return;
+  for (let j = 0; j < 12; j++) {
+    const a = Math.random() * TAU, v = 40 + Math.random() * 110;
+    addSpark(x, y, Math.cos(a) * v, Math.sin(a) * v - 30, j % 3 ? c : GOLD, 3 + Math.random() * 4, 0.5 + Math.random() * 0.5);
+  }
+}
+// толчок камеры: z — насколько приблизить, shake — тряска (точки экрана). При «Уменьшить движение» — без толчков
+function camKick(z, shake) {
+  if (REDUCED) return;
+  const left = Math.exp(-(time - kick.t) * 9);
+  kick.z = Math.max(z, kick.z * left); kick.shake = Math.max(shake, kick.shake * left); kick.t = time;
+}
+// своя змейка: голова раздувается после глотка, комок катится по телу
+const LUMP_V = 45; // бусин в секунду
+function lumpAt(i) {
+  let a = 0;
+  for (const t of lumps) {
+    const age = time - t, d = (i - age * LUMP_V) / 3;
+    if (d * d < 9) a += Math.exp(-d * d - age * 1.2);
+  }
+  return a > 1 ? 1 : a;
+}
+const headBump = () => { const k = (time - gulpT) / 0.18; return k < 1 ? 1 - k : 0; };
 
 // подсказка управления — только в первой игре на устройстве
 let hintTimer = 0;
@@ -1554,6 +1722,8 @@ function updateCamera(dt) {
 }
 
 // ---------- рисование ----------
+const GULP_DUR = 0.12;
+let lastDt = 0; // шаг кадра — для искр (на паузе кадры не рисуются)
 const camT = { k: 1, e: 0, f: 0 }; // матрица камеры текущего кадра: её задаёт draw(), по ней повёрнуты бусины
 // ускорение: по сегментам от головы к хвосту бежит волна, каждый светится своим цветом
 const boostWave = (i) => { const w = 0.5 + 0.5 * Math.sin(time * 16 - i * 0.22); return w * w; };
@@ -1592,7 +1762,8 @@ function drawSnake(s, vx0, vy0, vx1, vy1) {
   const k = camT.k;
   const tail = Math.min(10, n >> 2);
   // радиус бусины: хвост сужается; на гребне волны успеха — шире
-  const radAt = (i, gwi) => (i > n - tail ? r * (0.55 + 0.45 * (n - i) / tail) : r) * (1 + 0.22 * gwi);
+  const mine = s === me && lumps.length > 0;
+  const radAt = (i, gwi) => (i > n - tail ? r * (0.55 + 0.45 * (n - i) / tail) : r) * (1 + 0.22 * gwi + (mine ? 0.16 * lumpAt(i) : 0));
   // edge > 0 — проход обводки: силуэты бусин шире на edge; иначе сами бусины
   const beads = (edge) => {
     for (let i = (n - 1) & ~1; i >= 2; i -= step) {
@@ -1615,7 +1786,7 @@ function drawSnake(s, vx0, vy0, vx1, vy1) {
       if (lit > 0.25) { const sl = beadSprite(s.skin, c, v, 1); ctx.globalAlpha = a0 * lit; ctx.drawImage(sl, -sl.e, -sl.e); ctx.globalAlpha = a0; }
     }
     ctx.setTransform(k, 0, 0, k, camT.e, camT.f);
-    drawHead(ctx, s.skin, h.x, h.y, s.a, s.ta, r, 1 + 0.22 * (gw ? gw(0) : 0), edge);
+    drawHead(ctx, s.skin, h.x, h.y, s.a, s.ta, r, (1 + 0.22 * (gw ? gw(0) : 0)) * (s === me ? 1 + 0.13 * headBump() : 1), edge);
   };
   // своя змейка — в светлой обводке: под бусинами их силуэты чуть шире (по форме вида — с гребнем, лапками, ушками)
   if (s === me) beads(1 / cam.z);
@@ -1729,8 +1900,11 @@ function draw() {
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.fillStyle = OUTSIDE;
   ctx.fillRect(0, 0, canvas.width, canvas.height);
-  const z = cam.z;
-  camT.k = DPR * z; camT.e = DPR * (W / 2 - cam.x * z); camT.f = DPR * (H / 2 - cam.y * z);
+  // толчок камеры: приближение и тряска быстро гаснут
+  const kt = time - kick.t, kf = kt < 0.5 ? Math.exp(-kt * 9) : 0;
+  const z = cam.z * (1 + kick.z * kf), sh = kick.shake * kf;
+  const ox = sh ? sh * Math.sin(kt * 71) : 0, oy = sh ? sh * Math.cos(kt * 53) : 0;
+  camT.k = DPR * z; camT.e = DPR * (W / 2 + ox - cam.x * z); camT.f = DPR * (H / 2 + oy - cam.y * z);
   ctx.setTransform(camT.k, 0, 0, camT.k, camT.e, camT.f);
   ctx.beginPath(); ctx.arc(0, 0, R, 0, TAU);
   ctx.fillStyle = gridPattern; ctx.fill();
@@ -1757,6 +1931,35 @@ function draw() {
   for (const s of order) drawSnake(s, vx0, vy0, vx1, vy1);
   if (me && (mode === 'net' || me.alive)) drawSnake(me, vx0, vy0, vx1, vy1);
   for (const f of sceneFlies()) if (f.x > vx0 - 40 && f.x < vx1 + 40 && f.y > vy0 - 40 && f.y < vy1 + 40) drawFly(f);
+
+  if (lumps.length && time - lumps[0] > 3) lumps.shift();
+  // крошки летят в рот своей змейке
+  if (gulps.length) {
+    const h = me && me.segs.length ? me.segs[0] : null;
+    gulps = gulps.filter((g) => time - g.t < GULP_DUR);
+    if (h) {
+      for (const g of gulps) {
+        const k = (time - g.t) / GULP_DUR, e = k * k, rr = g.r * 1.9 * (1 - 0.75 * k);
+        const x = g.x + (h.x - g.x) * e, y = g.y + (h.y - g.y) * e;
+        ctx.globalAlpha = 1 - k * 0.5;
+        ctx.drawImage(foodSprite(g.c), x - rr, y - rr, rr * 2, rr * 2);
+      }
+    }
+    ctx.globalAlpha = 1;
+  }
+  // искры: летят, тормозят, гаснут
+  if (sparks.length) {
+    sparks = sparks.filter((p) => time - p.t < p.life);
+    const drag = Math.exp(-3.2 * lastDt);
+    for (const p of sparks) {
+      p.vx *= drag; p.vy *= drag; p.x += p.vx * lastDt; p.y += p.vy * lastDt;
+      const k = (time - p.t) / p.life, rr = p.r * (1 - 0.5 * k) * 2.2;
+      if (p.x < vx0 || p.x > vx1 || p.y < vy0 || p.y > vy1) continue;
+      ctx.globalAlpha = (1 - k) * (1 - k);
+      ctx.drawImage(foodSprite(p.c), p.x - rr, p.y - rr, rr * 2, rr * 2);
+    }
+    ctx.globalAlpha = 1;
+  }
 
   // вспышки побед
   effects = effects.filter((e) => time - e.t < 0.8);
@@ -1805,13 +2008,26 @@ function updateHud(dt) {
   hudBottom = Math.max($('board').getBoundingClientRect().bottom, document.querySelector('.hud-tl').getBoundingClientRect().bottom);
 }
 
+// одиночная игра: что съела своя змейка (мир копит удалённую еду, когда track)
+function soloGulps(grew) {
+  const rem = world.foodRemoved, h = grew ? me.segs[0] : null; // не подросла — рядом ел сосед
+  if (h) {
+    for (const f of rem) {
+      if (f.life > 0 && f.age > f.life) continue; // растаяла сама
+      const d = (me.r + f.r) * 1.6 + 10;
+      if ((f.x - h.x) ** 2 + (f.y - h.y) ** 2 < d * d) onGulp(f);
+    }
+  }
+  world.foodRemoved = []; world.foodAdded = [];
+}
+
 // ---------- главный цикл ----------
 let last = performance.now();
 let lastSoloMass = 0;
 function frame(now) {
   const dt = Math.min(0.05, Math.max(0, (now - last) / 1000));
   last = now;
-  time += dt;
+  time += dt; lastDt = dt;
   if (feast && time > feast.until) feast = null;
   if (mode === 'net') {
     netInput();
@@ -1823,7 +2039,9 @@ function frame(now) {
       if (a !== null) me.ta = a;
       me.boost = b;
     }
-    if (world) soloEvents(world.step(dt));
+    const m0 = me && me.alive ? me.mass : 0;
+    if (world) soloEvents(world.step(mode === 'solo' && time < slowUntil ? dt * 0.25 : dt));
+    if (mode === 'solo' && world.track) soloGulps(me && me.alive && me.mass > m0);
     if (mode === 'solo' && me && me.alive) {
       if (ui === 'play') playTime += dt;
       if (me.mass > lastSoloMass + 0.5 && !me.isBoosting) sfx.eat();
@@ -1831,6 +2049,11 @@ function frame(now) {
       if (me.maxMass > sessionBest) sessionBest = me.maxMass;
     }
   }
+  // ускорение: щелчок при старте и шорох, пока держишь
+  const boosting = !!(me && ui === 'play' && (mode === 'net' ? net.lastB && me.mass > MIN_BOOST_MASS : me.alive && me.isBoosting));
+  if (boosting && !wasBoost) sfx.boost();
+  wasBoost = boosting;
+  setWhoosh(boosting);
   if (ui !== 'paused') {
     updateCamera(dt);
     draw();
@@ -1855,4 +2078,5 @@ if (inviteCode && /^\d{4}$/.test(inviteCode)) {
 window.__snake = {
   get mode() { return mode; }, get ui() { return ui; }, get me() { return me; }, get world() { return world; },
   get net() { return net; }, get joy() { return joy; }, get run() { return run; }, get save() { return save; }, startSolo,
+  get fx() { return { gulps: gulps.length, sparks: sparks.length, lumps: lumps.length, kick: kick.t, whoosh: !!whoosh, time }; },
 };

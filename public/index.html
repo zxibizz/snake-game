@@ -190,6 +190,16 @@ svg.i{width:24px;height:24px;fill:currentColor;flex:none}
 .vol input::-moz-range-progress{height:6px;border-radius:3px;background:var(--primary)}
 .vol input::-moz-range-thumb{width:20px;height:20px;border-radius:50%;background:var(--primary);border:none}
 .btn.sound svg.i{width:24px;height:24px}
+/* вибрация: строка с переключателем Material 3 */
+.sw-row{display:flex;align-items:center;gap:12px;min-height:48px;margin:8px 0 -4px 10px;color:var(--on);font-size:14px;cursor:pointer}
+.sw-row svg.i{width:24px;height:24px;color:var(--on-var);flex:none}
+.sw-row span{flex:1}
+.m3-switch{-webkit-appearance:none;appearance:none;position:relative;width:52px;height:32px;margin:0;flex:none;border-radius:16px;
+  border:2px solid var(--outline);background:var(--surf-highest);cursor:pointer;transition:background .2s,border-color .2s}
+.m3-switch::before{content:'';position:absolute;top:50%;left:6px;width:16px;height:16px;border-radius:50%;background:var(--outline);
+  transform:translateY(-50%);transition:left .2s,width .2s,height .2s,background .2s}
+.m3-switch:checked{background:var(--primary);border-color:var(--primary)}
+.m3-switch:checked::before{left:22px;width:24px;height:24px;background:var(--on-primary,#fff)}
 .seg{display:flex;border:1px solid var(--outline);border-radius:20px;overflow:hidden;margin:4px 0 8px}
 .seg button{flex:1;height:40px;font-size:14px;font-weight:500;color:var(--on);display:flex;align-items:center;justify-content:center;gap:6px;padding:0 8px}
 .seg button+button{border-left:1px solid var(--outline)}
