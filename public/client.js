@@ -271,7 +271,7 @@ function addXp(n) {
 
 // ---------- холст ----------
 const canvas = $('c'), ctx = canvas.getContext('2d');
-let W = 0, H = 0, DPR = 1;
+let W = 0, H = 0, DPR = 1, laidIH = 0; // laidIH — высота окна, по которой разложено (см. checkSize)
 // Установленная игра на iPhone (статус-бар поверх страницы): окно короче экрана примерно на высоту статус-бара,
 // и снизу остаётся пустая полоса. Там холст тянем на всю высоту экрана (screen у iOS — всегда в портретной ориентации).
 const IS_PWA = navigator.standalone === true ||
@@ -292,19 +292,43 @@ function screenInfo() {
   const vv = window.visualViewport;
   return `экран ${screen.width}×${screen.height} · окно ${innerWidth}×${innerHeight} · vv ${vv ? Math.round(vv.height) : '-'} · ` +
     `doc ${document.documentElement.clientHeight} · поле ${H} · 100vh ${m('height:100vh')} · lvh ${m('height:100lvh')} · ` +
-    `safe ${m('height:env(safe-area-inset-top)')}/${m('height:env(safe-area-inset-bottom)')} · ${document.documentElement.className}`;
+    `safe ${m('height:env(safe-area-inset-top)')}/${m('height:env(safe-area-inset-bottom)')} · прокр ${Math.round(scrollY)} · ${document.documentElement.className}`;
+}
+// страница выше окна (класс tall) — не дать ей уехать; но пока открыта клавиатура над полем ввода (ник, код комнаты),
+// не мешать iOS держать это поле на виду
+function unscroll() {
+  if (!window.scrollY) return;
+  const typing = document.activeElement?.matches('textarea, input:not([type=range], [type=checkbox], [type=radio], [type=button])');
+  const vv = window.visualViewport;
+  if (typing && (!vv || vv.height < window.innerHeight - 80)) return;
+  window.scrollTo(0, 0);
 }
 function resize() {
   DPR = Math.min(window.devicePixelRatio || 1, 2);
-  W = window.innerWidth; H = fullHeight();
+  W = window.innerWidth; H = fullHeight(); laidIH = window.innerHeight;
   // холст, интерфейс, затемнение диалогов и экраны меню — одной высоты (CSS: var(--app-h))
   document.documentElement.style.setProperty('--app-h', H !== window.innerHeight ? `${H}px` : '');
   document.documentElement.classList.toggle('tall', H !== window.innerHeight);
-  window.scrollTo(0, 0); // страница выше окна — не дать ей уехать
+  unscroll();
   canvas.width = Math.round(W * DPR); canvas.height = Math.round(H * DPR);
 }
 window.addEventListener('resize', resize);
 resize();
+// iOS в установленной игре не всегда присылает resize: на старте окно бывает ещё высотой с экран, а потом молча
+// укорачивается на статус-бар — и поле с меню так и остаются по короткому окну (пустая полоса снизу).
+// Поэтому размеры ещё и сверяем сами (из главного цикла и при возврате в игру): если окно или нужная высота
+// не те, по которым разложено, — раскладываем заново.
+let sizeCheckT = -Infinity;
+function checkSize(now, force = false) {
+  if (!force && now - sizeCheckT < 500) return;
+  sizeCheckT = now;
+  if (window.innerWidth !== W || window.innerHeight !== laidIH || fullHeight() !== H) { resize(); applyFab(); }
+  else if (H !== laidIH) unscroll();
+}
+const relayout = () => checkSize(performance.now(), true);
+if (window.visualViewport) visualViewport.addEventListener('resize', relayout);
+window.addEventListener('pageshow', relayout);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) setTimeout(relayout, 300); });
 
 const FIELD = '#161A16', GRID = '#202620', OUTSIDE = '#2B1715', EDGE = '#FFB4AB';
 // обводка своей змейки: белая 60 % поверх поля; силуэты бусин накладываются друг на друга, поэтому цвет — уже смешанный с полем, плотный
@@ -2108,6 +2132,7 @@ function frame(now) {
     if (mode) updateHud(dt);
     else if (!$('home').hidden && $('dlg').hidden) drawPreview();
   }
+  checkSize(now);
   requestAnimationFrame(frame);
 }
 
