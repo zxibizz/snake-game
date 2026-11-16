@@ -305,7 +305,7 @@ function stepRoom(room) {
       if (c) {
         c.snake = null;
         c.lastMass = v.mass;
-        c.rvId = k ? k.id : 0; // обидчик: клиент показывает стрелку к нему
+        c.rvId = k ? k.id : 0; // обидчик: клиент обводит его красным и ждёт rv = 0, когда его не станет
         c.send({ t: 'dead', by: k ? k.name : null, byId: k ? k.id : 0, mass: Math.floor(v.mass), max: Math.floor(v.maxMass), kills: c.kills, eaten: Math.floor(v.eaten) });
       }
     }

@@ -109,7 +109,6 @@ const sfx = {
   combo(n) { for (let i = 0; i < n + 1; i++) tone(600 + i * 150, 1200 + i * 200, 0.12, 0.08, 'triangle', i * 0.08); },
   title() { [523, 659, 784, 1047].forEach((f, i) => tone(f, f * 1.01, 0.18, 0.08, 'triangle', i * 0.09)); },
   level() { [392, 523, 659, 784, 1047, 1319].forEach((f, i) => tone(f, f, 0.22, 0.08, 'square', i * 0.08)); },
-  feast() { tone(700, 900, 0.15, 0.06, 'triangle'); tone(900, 1200, 0.2, 0.06, 'triangle', 0.15); },
   fly() { [880, 1175, 1568].forEach((f, i) => tone(f, f * 1.25, 0.09, 0.06, 'sine', i * 0.05)); },
 };
 
@@ -732,9 +731,7 @@ function onLifeEnd(eaten, maxMass) {
 }
 function onRespawn() { if (run) run.lifeStart = playTime; }
 function onFeast(x, y, life) {
-  setFeast({ x, y, life });
-  if (!run) return;
-  sfx.feast();
+  setFeast({ x, y, life }); // ни стрелки, ни звука — пир находят сами (решение владельца)
 }
 // бабочку поймали: вспышка в цвет крошек; если поймали мы — звук и звёзды (полная бабочка — щедрее)
 function onFlyCaught(x, y, c, mine, v) {
@@ -1125,7 +1122,7 @@ $('btnInfo').addEventListener('click', () => {
     ? 'Коснись экрана в любом месте и веди пальцем — это джойстик. Держи молнию, чтобы ускориться: каждая секунда сжигает 5 % длины, но не меньше 10.'
     : 'Змейка ползёт к курсору мыши. Левая кнопка или пробел — ускорение: каждая секунда сжигает 5 % длины, но не меньше 10. Можно стрелками ← →. Пауза — Esc.';
   const ih = installHint();
-  dialog('Как играть', `<p>${ctl}</p><p>Подрежь соперника — пусть врежется в тебя головой. Золотой пир и обидчик отмечены стрелками у края экрана.</p>` +
+  dialog('Как играть', `<p>${ctl}</p><p>Подрежь соперника — пусть врежется в тебя головой. У края экрана зелёная метка показывает, куда ты ползёшь, а золотая стрелка с короной — где лидер.</p>` +
     `<p>Звёзды за еду, победы и места открывают новые раскраски.</p>` +
     `<div class="note ${offline.cls}">${icon(offline.ic)}<span>${offline.text}${ih ? ` ${ih}` : ''}</span></div>`,
   [{ label: 'Понятно', kind: 'filled', onClick: closeDialog }]);
@@ -1244,12 +1241,12 @@ function drawSnake(s, vx0, vy0, vx1, vy1) {
     ctx.fillText(s.name, h.x, h.y - r - 10 / cam.z);
   }
 }
-function drawCrown(x, y, w) {
+function drawCrown(x, y, w, lw = 2 / cam.z) {
   ctx.beginPath();
   ctx.moveTo(x - w, y); ctx.lineTo(x - w, y - w * 0.9); ctx.lineTo(x - w * 0.5, y - w * 0.45); ctx.lineTo(x, y - w * 1.1);
   ctx.lineTo(x + w * 0.5, y - w * 0.45); ctx.lineTo(x + w, y - w * 0.9); ctx.lineTo(x + w, y); ctx.closePath();
   ctx.fillStyle = GOLD_C; ctx.fill();
-  ctx.lineWidth = 2 / cam.z; ctx.strokeStyle = '#8a5a00'; ctx.stroke();
+  ctx.lineWidth = lw; ctx.strokeStyle = '#8a5a00'; ctx.stroke();
 }
 function drawJoystick() {
   if (!joy.active || mode === null) return;
@@ -1264,12 +1261,43 @@ function drawJoystick() {
   ctx.fillStyle = hexA(PRIMARY, 0.85); ctx.fill();
 }
 // стрелка у края экрана к цели за его пределами
-function drawPointer(tx, ty, color) {
+const meLive = () => me && (mode === 'net' || me.alive) && ui !== 'dead';
+// где лидер таблицы, если это не я: в комнате — его голова, если видна, иначе позиция из таблицы (раз в секунду)
+function leaderTarget() {
+  if (!leaderId || !meLive() || leaderId === (mode === 'net' ? net.youId : me.id)) return null;
+  if (mode === 'solo') { const s = world.byId.get(leaderId); return s && s.alive ? s.segs[0] : null; }
+  const s = net.snakes.get(leaderId);
+  if (s && s.visible) return s.segs[0];
+  const mm = net.lb && net.lb.mm;
+  return mm && mm.length >= 2 && net.lb.top[0] && net.lb.top[0][0] === leaderId ? { x: mm[0] * 25, y: mm[1] * 25 } : null;
+}
+// метка у края экрана по курсу своей змейки — видно, куда она ползёт прямо сейчас
+// lp — где стоит стрелка лидера: рядом с ней метку не рисуем, она и так показывает туда же
+function drawHeading(lp) {
+  if (!meLive() || !me.segs || !me.segs.length) return;
+  const h = me.segs[0], a = me.a;
+  const hx = W / 2 + (h.x - cam.x) * cam.z, hy = H / 2 + (h.y - cam.y) * cam.z;
+  const side = 30, top = 100, bottom = 30, c = Math.cos(a), sn = Math.sin(a); // сверху — счёт и таблица
+  const kx = c > 0 ? (W - side - hx) / c : c < 0 ? (side - hx) / c : Infinity;
+  const ky = sn > 0 ? (H - bottom - hy) / sn : sn < 0 ? (top - hy) / sn : Infinity;
+  const k = Math.min(kx, ky);
+  if (!(k > 0) || !isFinite(k)) return;
+  const mx = hx + c * k, my = hy + sn * k;
+  if (lp && Math.hypot(mx - lp.x, my - lp.y) < 48) return;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  ctx.save();
+  ctx.translate(mx, my); ctx.rotate(a);
+  ctx.beginPath(); ctx.moveTo(9, 0); ctx.lineTo(-6, -9); ctx.lineTo(-6, 9); ctx.closePath();
+  ctx.globalAlpha = 0.85; ctx.fillStyle = PRIMARY; ctx.fill();
+  ctx.lineWidth = 1.5; ctx.strokeStyle = 'rgba(0,0,0,.45)'; ctx.stroke();
+  ctx.restore();
+}
+function drawPointer(tx, ty, color, crown = false) {
   const sx = W / 2 + (tx - cam.x) * cam.z, sy = H / 2 + (ty - cam.y) * cam.z;
   const pad = 54;
-  if (sx > pad && sx < W - pad && sy > pad && sy < H - pad) return;
+  if (sx > pad && sx < W - pad && sy > pad && sy < H - pad) return null;
   const dx = sx - W / 2, dy = sy - H / 2;
-  const k = Math.min((W / 2 - pad) / Math.abs(dx || 1e-6), (H / 2 - pad) / Math.abs(dy || 1e-6));
+  const k = Math.min((W / 2 - pad) / Math.abs(dx || 1e-6), (H / 2 - (dy < 0 ? 100 : pad)) / Math.abs(dy || 1e-6)); // сверху — счёт и таблица
   const px = W / 2 + dx * k, py = H / 2 + dy * k, a = Math.atan2(dy, dx);
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
   ctx.save();
@@ -1279,6 +1307,11 @@ function drawPointer(tx, ty, color) {
   ctx.fillStyle = color; ctx.fill();
   ctx.lineWidth = 2; ctx.strokeStyle = 'rgba(0,0,0,.5)'; ctx.stroke();
   ctx.restore();
+  if (crown) { // корона рядом со стрелкой, ближе к центру экрана
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    drawCrown(px - Math.cos(a) * 26, py - Math.sin(a) * 26 + 6, 8, 1.5);
+  }
+  return { x: px, y: py };
 }
 function sceneSnakes() {
   if (mode === 'net') { const out = []; for (const s of net.snakes.values()) if (s.visible) out.push(s); return out; }
@@ -1363,10 +1396,10 @@ function draw() {
   }
   ctx.globalAlpha = 1;
 
-  if (mode) {
-    if (feast && time < feast.until) drawPointer(feast.x, feast.y, GOLD_C);
-    const rt = revengeTarget();
-    if (rt) drawPointer(rt.x, rt.y, REVENGE);
+  if (mode) { // у края экрана: куда ползёт своя змейка и где лидер (обидчика и пир не показываем — решение владельца)
+    const lt = leaderTarget();
+    const lp = lt ? drawPointer(lt.x, lt.y, GOLD_C, true) : null;
+    drawHeading(lp);
   }
   drawJoystick();
 }
