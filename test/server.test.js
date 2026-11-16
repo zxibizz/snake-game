@@ -39,7 +39,7 @@ function client() {
 test('статика и healthz', async () => {
   const r = await fetch(`http://127.0.0.1:${PORT}/`);
   assert.equal(r.status, 200);
-  assert.match(await r.text(), /Змейград/);
+  assert.match(await r.text(), /Змейка/);
   const h = await (await fetch(`http://127.0.0.1:${PORT}/healthz`)).json();
   assert.equal(h.ok, true);
   assert.equal((await fetch(`http://127.0.0.1:${PORT}/%2e%2e/package.json`)).status, 404);

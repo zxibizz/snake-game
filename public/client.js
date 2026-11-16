@@ -624,9 +624,9 @@ function leaveNet() {
 }
 async function shareRoom() {
   const url = `${location.origin}${location.pathname}?room=${net.code}`;
-  const text = `Заходи в Змейград! Комната ${net.code}`;
+  const text = `Заходи в Змейку! Комната ${net.code}`;
   try {
-    if (navigator.share) { await navigator.share({ title: 'Змейград', text, url }); return; }
+    if (navigator.share) { await navigator.share({ title: 'Змейка', text, url }); return; }
   } catch { return; }
   try { await navigator.clipboard.writeText(url); snack('Ссылка на комнату скопирована'); } catch { snack(`Код комнаты: ${net.code}`); }
 }
@@ -1079,8 +1079,8 @@ function renderFoot() {
 }
 $('btnInfo').addEventListener('click', () => {
   const ctl = isTouch
-    ? 'Коснись экрана в любом месте и веди пальцем — это джойстик. Держи молнию, чтобы ускориться: это тратит немного длины.'
-    : 'Змейка ползёт к курсору мыши. Левая кнопка или пробел — ускорение, тратит немного длины. Можно стрелками ← →. Пауза — Esc.';
+    ? 'Коснись экрана в любом месте и веди пальцем — это джойстик. Держи молнию, чтобы ускориться: каждая секунда сжигает 5 % длины, но не меньше 10.'
+    : 'Змейка ползёт к курсору мыши. Левая кнопка или пробел — ускорение: каждая секунда сжигает 5 % длины, но не меньше 10. Можно стрелками ← →. Пауза — Esc.';
   const ih = installHint();
   dialog('Как играть', `<p>${ctl}</p><p>Подрежь соперника — пусть врежется в тебя головой. Золотой пир и обидчик отмечены стрелками у края экрана.</p>` +
     `<p>Звёзды за еду, победы и места открывают новые раскраски.</p>` +

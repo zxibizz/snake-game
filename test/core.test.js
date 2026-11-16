@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { World, Snake, countOf, spacingOf, SNAKES_N, DIFF, R, GOLD, SKINS, PAL, TITLES, titleOf,
-  speedOf, turnOf, remainsOf, radiusOf, boostCostOf, BASE_SPEED, BOOST_SPEED, MIN_BOOST_MASS } from '../public/core.js';
+  speedOf, turnOf, remainsOf, radiusOf, boostCostOf, BASE_SPEED, BOOST_SPEED, MIN_BOOST_MASS, layBody, angDiff } from '../public/core.js';
 
 // змейка B лежит поперёк пути головы змейки A
 function crossing(teamA, teamB) {
@@ -146,7 +146,7 @@ test('рывок дорогой: длина уходит тем быстрее, 
     for (let i = 0; i < 40; i++) w.step(1 / 40);
     const lost = m0 - s.mass;
     assert.ok(Math.abs(lost - boostCostOf(m0)) < boostCostOf(m0) * 0.05, `за секунду рывка ${lost.toFixed(1)} из ${m0}`);
-    assert.ok(lost >= 10 && lost >= m0 * 0.02, `рывок слишком дешёвый: ${lost.toFixed(1)} из ${m0}`);
+    assert.ok(lost >= 10 && lost >= m0 * 0.05 * 0.95, `за секунду рывка сгорает 5 % длины, а сгорело ${lost.toFixed(1)} из ${m0}`);
     const left = w.foods.reduce((a, f) => a + f.v, 0);
     assert.ok(left <= lost * 0.55, `позади остаётся не больше половины потраченного: ${left.toFixed(1)} из ${lost.toFixed(1)}`);
   }
@@ -175,4 +175,66 @@ test('игрок и новые боты выползают из точки, а �
   for (let i = 0; i < 50 && !bot; i++) bot = w.spawnBot(false);
   assert.ok(bot);
   assert.equal(span(bot), 0);
+});
+
+// пустая арена: бот и игрок с телами, уложенными прямо назад от головы
+function duel(diff, bot, human) {
+  const w = new World({ diff, foodN: 0, bots: 0 });
+  w.D = { ...DIFF[diff], ...(bot.D || {}) };
+  const mk = (o, isHuman) => {
+    const s = new Snake(w.nextSnakeId++, o.x, o.y, o.mass, 0, isHuman ? 'H' : 'B', isHuman, 0, o.a, layBody(o.x, o.y, o.a, o.mass, 0, 0, 0));
+    s.age = 30; s.inv = 0; s.huntCd = 99; s.pers = 1; s.cau = 1;
+    return w.addSnake(s);
+  };
+  const b = mk(bot, false), h = mk(human, true);
+  w.buildGrids();
+  return { w, b, h };
+}
+
+test('бот замечает, что ему перерезают путь, и уходит вдоль чужого пути', () => {
+  for (const wary of [0, 1]) {
+    const { w, b } = duel('hard', { x: 0, y: 0, a: 0, mass: 300, D: { wary } }, { x: 220, y: -150, a: Math.PI / 2, mass: 300 });
+    w.think(b, 0);
+    const turn = Math.abs(angDiff(b.ta, 0));
+    if (wary) assert.ok(turn > 0.8, `не отвернул: ${turn.toFixed(2)}`);
+    else assert.ok(turn < 0.4, `не заметил — едет прямо: ${turn.toFixed(2)}`);
+  }
+});
+
+test('засада: игрок сам ползёт поперёк тела бота — бот не сворачивает к еде', () => {
+  for (const aggr of [0, 5]) {
+    const { w, b } = duel('hard', { x: 0, y: 0, a: 0, mass: 400, D: { aggr } }, { x: 250, y: -300, a: Math.PI / 2, mass: 100 });
+    w.addFood(60, 250, 20, 0, 0);
+    w.buildGrids();
+    w.think(b, 0);
+    if (aggr) assert.ok(Math.abs(angDiff(b.ta, 0)) < 0.2, `свернул из засады: ${b.ta.toFixed(2)}`);
+    else assert.ok(angDiff(b.ta, 0) > 0.6, `без засады — к еде: ${b.ta.toFixed(2)}`);
+  }
+});
+
+test('охота: вдвоём заходят с разных сторон, у края — со стороны центра', () => {
+  const { w, b, h } = duel('hard', { x: 0, y: 200, a: 0, mass: 400 }, { x: 300, y: 0, a: 0, mass: 100 });
+  const b2 = w.addSnake(new Snake(w.nextSnakeId++, 0, 260, 400, 0, 'B2', false, 0, 0, layBody(0, 260, 0, 400, 0, 0, 0)));
+  w.startHunt(b, h);
+  w.startHunt(b2, h);
+  assert.notEqual(b.hside, 0);
+  assert.equal(b2.hside, -b.hside);
+
+  const e = duel('hard', { x: R * 0.6, y: 0, a: 0, mass: 400 }, { x: R * 0.8, y: 0, a: -Math.PI / 2, mass: 100 });
+  e.w.startHunt(e.b, e.h);
+  const ps = Math.sin(e.h.a), pc = Math.cos(e.h.a);
+  const px = e.h.x - ps * e.b.hside * 100, py = e.h.y + pc * e.b.hside * 100; // точка, куда бот заходит сбоку
+  assert.ok(Math.hypot(px, py) < Math.hypot(e.h.x, e.h.y), 'у края бот заходит со стороны центра');
+});
+
+test('на свежие останки бот сползается издалека', () => {
+  const { w, b } = duel('hard', { x: 0, y: 0, a: -Math.PI / 2, mass: 300 }, { x: -3000, y: 3000, a: 0, mass: 50 });
+  // останки лежат вертикально в 1000 справа — дальше, чем бот видит еду, так что повернуть его может только запах останков
+  const v = w.addSnake(new Snake(w.nextSnakeId++, 1000, -400, 300, 0, 'V', false, 0, -Math.PI / 2, layBody(1000, -400, -Math.PI / 2, 300, 0, 0, 0)));
+  w.kill(v, null);
+  w.snakes = w.snakes.filter((s) => s.alive);
+  w.decide = () => true; // бот решился пойти
+  w.buildGrids();
+  w.think(b, w.snakes.indexOf(b));
+  assert.ok(Math.abs(angDiff(b.ta, 0)) < 1, `к останкам не повернул: ${b.ta.toFixed(2)}`);
 });

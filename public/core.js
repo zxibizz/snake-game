@@ -2,17 +2,17 @@
 // Здесь нет DOM и сети — только мир, змейки, еда, боты и столкновения.
 
 // Версия протокола и файлов: при изменении любого файла в public/ поднять и здесь, и в sw.js (тест сверяет).
-export const VERSION = '6';
+export const VERSION = '7';
 export const TAU = Math.PI * 2;
 export const R = 7000;                  // радиус арены (координаты по сети — Int16 / 4, предел 8191)
 export const BASE_SPEED = 210;          // пикс/с — у «Малыша»; с каждым званием змейка быстрее, см. speedOf
 export const BOOST_SPEED = 400;
 export const SPEED_PER_TITLE = 0.035;   // прибавка к скорости за каждое звание
 export const BOT_FEUD = 0.06;           // доля попыток охоты, в которых бот согласен подрезать другого бота: меньше — спокойнее арена
-// Рывок дорогой: в секунду уходит BOOST_COST длины и ещё BOOST_SHARE от всей длины — едой по пути его не окупить,
+// Рывок дорогой: в секунду сгорает BOOST_SHARE всей длины, но не меньше BOOST_COST — едой по пути его не окупить,
 // длинной змее он обходится в десятки длины в секунду. Половина потраченного остаётся едой позади.
 export const BOOST_COST = 10;
-export const BOOST_SHARE = 0.02;
+export const BOOST_SHARE = 0.05;
 export const BOOST_DROP = 0.5;
 export const MIN_BOOST_MASS = 20;
 export const START_MASS = 15;
@@ -33,24 +33,25 @@ const G2 = GRID_N * GRID_N;
 // aggr — как часто бот ищет, кого подрезать; humanAggr — насколько охотно выбирает игрока;
 // maxHunters — сколько ботов сразу охотятся на одного игрока; grace — секунд после появления игрока без охоты;
 // rest — средняя пауза бота между охотами, с; foresee — на сколько секунд вперёд крупный бот просчитывает чужие головы
-// (0 — только базовые 0,45 с): чем больше, тем труднее подрезать гиганта.
+// (0 — только базовые 0,45 с): чем больше, тем труднее подрезать гиганта;
+// wary — как часто бот замечает, что ему перерезают путь, и уходит вдоль чужого пути.
 export const DIFF = {
   easy: {
     label: 'Лёгкий', mass: [15, 2500], giants: 4, giantMin: 800,
     speed: 0.97, turn: 0.95, react: 0.2, look: 275,
-    aggr: 0.3, humanAggr: 0.45, maxHunters: 1, grace: 10, huntRange: 480, boost: 0.55, rest: 6, foresee: 0,
+    aggr: 0.3, humanAggr: 0.45, maxHunters: 1, grace: 10, huntRange: 480, boost: 0.55, rest: 6, foresee: 0, wary: 0.35,
     encircle: false, edgeKills: false, respawn: true,
   },
   medium: {
     label: 'Средний', mass: [15, 3500], giants: 5, giantMin: 1100,
     speed: 1, turn: 1, react: 0.13, look: 335,
-    aggr: 0.55, humanAggr: 0.85, maxHunters: 2, grace: 6, huntRange: 640, boost: 0.8, rest: 4, foresee: 0.4,
+    aggr: 0.55, humanAggr: 0.85, maxHunters: 2, grace: 6, huntRange: 640, boost: 0.8, rest: 4, foresee: 0.4, wary: 0.6,
     encircle: true, edgeKills: true, respawn: false,
   },
   hard: {
     label: 'Сложный', mass: [20, 6000], giants: 6, giantMin: 1800,
     speed: 1.03, turn: 1.08, react: 0.08, look: 410,
-    aggr: 0.9, humanAggr: 1.3, maxHunters: 4, grace: 3, huntRange: 820, boost: 0.95, rest: 2, foresee: 0.9,
+    aggr: 0.9, humanAggr: 1.3, maxHunters: 4, grace: 3, huntRange: 820, boost: 0.95, rest: 2, foresee: 0.9, wary: 0.85,
     encircle: true, edgeKills: true, respawn: false,
   },
 };
@@ -109,7 +110,7 @@ export function speedOf(mass, boosting) {
 // поворотливость, рад/с: толстая змейка поворачивает медленнее
 export const turnOf = (r) => 7 / (1 + Math.max(0, r - 11) / 40);
 // во сколько длины в секунду обходится рывок
-export const boostCostOf = (m) => BOOST_COST + m * BOOST_SHARE;
+export const boostCostOf = (m) => Math.max(BOOST_COST, m * BOOST_SHARE);
 // сколько длины остаётся едой после проигрыша: у малышей — три четверти, у гигантов — заметно меньшая доля
 export const remainsOf = (m) => (m <= 100 ? Math.max(4, m * 0.75) : 75 * Math.pow(m / 100, 0.75));
 
@@ -188,6 +189,11 @@ export class Snake {
     this.goFeast = false;
     this.side = Math.random() < 0.5 ? -1 : 1;
     this.wander = this.a; this.kills = 0;
+    // память бота: с какой стороны заходит на цель, куда ползёт за едой, кого заметил и на чьи останки идёт
+    this.cau = rand(0.6, 1.3);       // осторожность: как часто замечает, что его подрезают
+    this.hside = 0; this.huntT0 = 0;
+    this.goalC = -1; this.goalT = 0; this.goalV = 0; this.ambTarget = 0; this.ambUntil = 0;
+    this.mem = new Map();           // что бот решил о встрече (заметил угрозу, устроит засаду, пойдёт на останки) — на несколько секунд
     this.r = radiusOf(mass);
     this.segs = segs || layBody(x, y, this.a, mass, 0, 0, 0);
   }
@@ -195,7 +201,17 @@ export class Snake {
   get y() { return this.segs[0].y; }
 }
 
-const OFFS = [0, 0.3, -0.3, 0.6, -0.6, 1.0, -1.0, 1.5, -1.5, 2.1, -2.1];
+const OFFS = [0, 0.3, -0.3, 0.6, -0.6, 1.0, -1.0, 1.5, -1.5, 2.1, -2.1]; // резче не надо: луч прямой, а змея поворачивает дугой
+
+// где пересекутся пути двух голов, идущих прямо: через t1 с туда доползёт первая, через t2 — вторая.
+// null — пути параллельны или пересекаются позади
+function crossing(bx, by, bvx, bvy, ox, oy, ovx, ovy) {
+  const den = bvx * ovy - bvy * ovx;
+  if (Math.abs(den) < 1e-6) return null;
+  const dx = ox - bx, dy = oy - by;
+  const t1 = (dx * ovy - dy * ovx) / den, t2 = (dx * bvy - dy * bvx) / den;
+  return t1 > 0 && t2 > 0 ? [t1, t2] : null;
+}
 
 export class World {
   // teams: змейки с одинаковым ненулевым team проходят друг сквозь друга (режим «семья против ботов»)
@@ -215,6 +231,8 @@ export class World {
     this.time = 0;
     this.byId = new Map();
     this.hunted = new Map();     // id змейки → сколько ботов на неё охотятся
+    this.huntSide = new Map();   // id змейки → с какой стороны заходит первый охотник
+    this.deaths = [];            // недавние проигрыши: туда сползаются за останками
     this.feast = null;           // { x, y, until }
     this.feastT = rand(20, 30);
     // для сервера: что изменилось с прошлой отправки
@@ -408,10 +426,20 @@ export class World {
     }
     const by = killer && killer.alive ? killer : null;
     if (by) by.kills++;
+    let cx = 0, cy = 0;                                      // куда сползаться: середина останков, а не голова
+    for (const q of s.segs) { cx += q.x; cy += q.y; }
+    this.deaths.push({ id: s.id, x: cx / s.segs.length, y: cy / s.segs.length, v: total, t: this.time });
     this.events.push({ type: 'kill', victim: s, killer: by, vm: s.mass, km: by ? by.mass : 0 });
   }
 
   // ---------- ИИ ботов ----------
+  // Бот на каждом раздумье решает по порядку:
+  // 1) угроза — чужая голова вот-вот проползёт поперёк его пути: уходит вдоль чужого пути, а не врезается;
+  // 2) охота — подрезает цель: заходит сбоку с упреждением, вдвоём — с разных сторон, у края прижимает к стене,
+  //    бросает погоню, если не догнать;
+  // 3) засада — чужая голова сама идёт поперёк его тела: бот не сворачивает и дотягивает тело, при нужде рывком;
+  // 4) еда — выбирает богатое место и держится его, на свежие останки сползается издалека, рывок — только когда окупится;
+  // потом лучами обходит тела, край и чужие головы.
   rayDanger(b, bi, a, look) {
     const step = Math.max(16, b.r * 0.9);
     const ca = Math.cos(a), sa = Math.sin(a);
@@ -437,7 +465,7 @@ export class World {
       const dx = o.x - b.x, dy = o.y - b.y;
       if (dx * dx + dy * dy > r2) continue;
       const v = speedOf(o.mass, o.isBoosting) * (o.human ? 1 : D.speed);
-      out.push({ id: o.id, x: o.x, y: o.y, r: o.r, vx: Math.cos(o.a) * v, vy: Math.sin(o.a) * v });
+      out.push({ id: o.id, s: o, x: o.x, y: o.y, r: o.r, v, vx: Math.cos(o.a) * v, vy: Math.sin(o.a) * v });
     }
     return out;
   }
@@ -463,78 +491,211 @@ export class World {
     }
     return best;
   }
+  // самая срочная угроза: чья голова пройдёт поперёк пути бота раньше него, и тело ещё будет лежать там,
+  // когда бот доползёт. Заметить её успевает не каждый бот: вероятность — wary уровня и осторожность бота
+  threatOf(b, heads, vb) {
+    const D = this.D, bvx = Math.cos(b.a) * vb, bvy = Math.sin(b.a) * vb;
+    let best = null, bt = 1.3;
+    for (const o of heads) {
+      const c = crossing(b.x, b.y, bvx, bvy, o.x, o.y, o.vx, o.vy);
+      if (!c) continue;
+      const [t1, t2] = c;
+      if (t1 >= bt || t2 > t1 + 0.15 || t1 > t2 + bodyLenOf(o.s.mass) / o.v) continue;
+      if (this.decide(b, 'a' + o.id, D.wary * b.cau)) { bt = t1; best = o; }
+    }
+    return best;
+  }
+  // засада: чья голова сама идёт поперёк тела бота — бот проходит точку раньше, и тело ещё лежит там, когда она доползёт
+  ambushOf(b, heads, vb) {
+    const D = this.D, bvx = Math.cos(b.a) * vb, bvy = Math.sin(b.a) * vb, body = bodyLenOf(b.mass) / vb;
+    for (const o of heads) {
+      const s = o.s;
+      const mine = b.ambUntil > this.time && b.ambTarget === s.id ? 1 : 0;
+      if (s.human ? s.age <= D.grace || (this.hunted.get(s.id) || 0) - mine >= D.maxHunters : s.mass < 30) continue;
+      const c = crossing(b.x, b.y, bvx, bvy, o.x, o.y, o.vx, o.vy);
+      if (!c) continue;
+      const [t1, t2] = c;
+      if (t2 > 1.6 || t2 < t1 + 0.08 || t2 > t1 + body * 0.8) continue;
+      // на бота — редко (как и охота друг на друга), на игрока — по задиристости уровня и характеру бота
+      if (!this.decide(b, 'm' + o.id, s.human ? D.aggr * b.pers : BOT_FEUD * 3)) continue;
+      // засада считается охотой: на игрока — не больше maxHunters ботов сразу
+      if (!mine) this.hunted.set(s.id, (this.hunted.get(s.id) || 0) + 1);
+      b.ambTarget = s.id; b.ambUntil = this.time + 0.6;
+      return { o, t1, t2 };
+    }
+    return null;
+  }
+  // решение бота о встрече принимается один раз и держится 4 с — иначе он передумывал бы на каждом раздумье
+  decide(b, key, p) {
+    let m = b.mem.get(key);
+    if (!m || m[1] < this.time) {
+      if (b.mem.size > 24) for (const [k, v] of b.mem) if (v[1] < this.time) b.mem.delete(k);
+      m = [Math.random() < p, this.time + 4];
+      b.mem.set(key, m);
+    }
+    return m[0];
+  }
+  startHunt(b, P) {
+    b.hunt = rand(2.5, 6); b.huntTarget = P.id; b.huntT0 = this.time;
+    this.hunted.set(P.id, (this.hunted.get(P.id) || 0) + 1);
+    const mate = this.huntSide.get(P.id);
+    if (mate) { b.hside = -mate; return; } // второй охотник заходит с другой стороны
+    const pc = Math.cos(P.a), ps = Math.sin(P.a);
+    if (this.D.edgeKills && P.x * P.x + P.y * P.y > (R * 0.72) ** 2) {
+      b.hside = ps * P.x - pc * P.y >= 0 ? 1 : -1;     // у края — со стороны центра: цели некуда свернуть, кроме стены
+    } else {
+      b.hside = (P.x - b.x) * ps - (P.y - b.y) * pc >= 0 ? 1 : -1; // с той стороны, где бот уже есть
+    }
+    this.huntSide.set(P.id, b.hside);
+  }
+  stopHunt(b) {
+    if (this.huntSide.get(b.huntTarget) === b.hside) this.huntSide.delete(b.huntTarget);
+    b.hunt = 0; b.huntCd = rand(0.5, 1.5) * this.D.rest / b.pers;
+  }
+
+  // еда: клетки сетки с едой, а не отдельные крошки. Цель держится, пока новая не окажется заметно лучше
+  forage(b, heads) {
+    const D = this.D, hx = b.x, hy = b.y;
+    const view = D.look * 1.4 + b.r * 4, view2 = view * view;
+    const cr = Math.ceil(view / CELL);
+    const c0 = this.cellOf(hx, hy), cx0 = c0 % GRID_N, cy0 = (c0 / GRID_N) | 0;
+    const ca = Math.cos(b.a), sa = Math.sin(b.a);
+    // у чужой крупной головы не пасёмся
+    const big = heads.filter((o) => o.s.mass > b.mass * 0.7);
+    let best = 0, bc = -1, bx = 0, by = 0, bv = 0, keep = 0, kx = 0, ky = 0, kv = 0;
+    for (let cy = Math.max(0, cy0 - cr); cy <= Math.min(GRID_N - 1, cy0 + cr); cy++) {
+      for (let cx = Math.max(0, cx0 - cr); cx <= Math.min(GRID_N - 1, cx0 + cr); cx++) {
+        const c = cy * GRID_N + cx;
+        let v = 0, sx = 0, sy = 0;
+        for (let i = this.foodHead[c]; i >= 0; i = this.foodNext[i]) {
+          const f = this.foods[i];
+          if (!f || f.dead) continue;
+          v += f.v; sx += f.x * f.v; sy += f.y * f.v;
+        }
+        if (v === 0) continue;
+        const fx = sx / v, fy = sy / v, dx = fx - hx, dy = fy - hy, d2 = dx * dx + dy * dy;
+        if (d2 > view2) continue;
+        const d = Math.sqrt(d2) + 1;
+        let sc = Math.pow(v, 0.8) / (d + 60) * (1.25 + (dx * ca + dy * sa) / d);
+        for (const o of big) if ((o.x - fx) ** 2 + (o.y - fy) ** 2 < (220 + o.r) ** 2) { sc *= 0.3; break; }
+        if (c === b.goalC) { keep = sc * 1.4; kx = fx; ky = fy; kv = v; }
+        if (sc > best) { best = sc; bc = c; bx = fx; by = fy; bv = v; }
+      }
+    }
+    if (keep > 0 && keep >= best && this.time < b.goalT) { bx = kx; by = ky; bv = kv; }
+    else if (bc >= 0) { b.goalC = bc; b.goalT = this.time + rand(1.5, 2.5); }
+    else { b.goalC = -1; b.goalV = 0; return null; }
+    b.goalV = bv;
+    // за богатой едой — рывком, если рядом соперник и съеденное окупит рывок
+    if (bv >= 6 && b.mass > 50) {
+      const d = Math.hypot(bx - hx, by - hy), t = d / BOOST_SPEED;
+      const rival = heads.some((o) => Math.hypot(o.x - bx, o.y - by) < d * 1.3);
+      if (rival && d < 450 && bv * 0.6 > boostCostOf(b.mass) * t && Math.random() < D.boost * b.pers) b.boost = true;
+    }
+    return Math.atan2(by - hy, bx - hx);
+  }
+
   think(b, bi) {
     const D = this.D;
     const hx = b.x, hy = b.y;
-    let desired;
+    let desired = null;
     b.boost = false;
+    const look0 = D.look * (1 + b.r / 50);
+    const heads = this.nearHeads(b, Math.max(look0 * 1.4, 600));
+    const vb = speedOf(b.mass, false) * D.speed;
 
     let P = null;
     if (b.hunt > 0) {
       P = this.byId.get(b.huntTarget) || null;
       if (P && (!P.alive || P.inv > 0 || Math.hypot(P.x - hx, P.y - hy) > D.huntRange * 1.8)) P = null;
-      if (!P) { b.hunt = 0; b.huntCd = rand(0.5, 1.5) * D.rest / b.pers; }
+      // погоня без толку: за 3 с так и не поравнялись — бросаем
+      if (P && this.time - b.huntT0 > 3) {
+        const along = (hx - P.x) * Math.cos(P.a) + (hy - P.y) * Math.sin(P.a);
+        if (along < -300) P = null;
+      }
+      if (!P) this.stopHunt(b);
     }
-    if (!P && b.huntCd <= 0 && b.mass > 60 && Math.random() < D.aggr * b.pers * 0.5) {
+
+    // 1) угроза — важнее всего, кроме своей цели: к ней бот идёт наперерез намеренно
+    const th = this.threatOf(b, heads, vb);
+    if (th && (!P || th.id !== P.id)) {
+      const side = Math.cos(th.s.a) * (hy - th.y) - Math.sin(th.s.a) * (hx - th.x) >= 0 ? 1 : -1;
+      const along = th.s.a + side * 0.6, back = th.s.a + Math.PI - side * 0.6; // вдоль чужого пути или прочь от него
+      desired = Math.abs(angDiff(along, b.a)) < Math.abs(angDiff(back, b.a)) ? along : back;
+      b.goalC = -1;
+    }
+
+    if (desired === null && !P && b.huntCd <= 0 && b.mass > 60 && Math.random() < D.aggr * b.pers * 0.5) {
       P = this.pickTarget(b);
-      if (P) { b.hunt = rand(2.5, 6); b.huntTarget = P.id; this.hunted.set(P.id, (this.hunted.get(P.id) || 0) + 1); }
+      if (P) this.startHunt(b, P);
       else b.huntCd = rand(0.5, 1.5);
     }
 
-    if (P) {
+    if (desired === null && P) {
+      // 2) охота
       const dx = P.x - hx, dy = P.y - hy, dist = Math.hypot(dx, dy);
       const pc = Math.cos(P.a), ps = Math.sin(P.a);
       const along = -(dx * pc + dy * ps);     // > 0 — бот впереди головы цели
       const lat = dx * ps - dy * pc;          // с какой стороны от цели бот
-      const side = lat >= 0 ? 1 : -1;
-      const canBoost = b.mass > 45 && Math.random() < D.boost;
+      const side = b.hside || (lat >= 0 ? 1 : -1);
+      const canBoost = b.mass > 60 && Math.random() < D.boost;
       if (D.encircle && b.age > 8 && b.mass > P.mass * 3 && dist < 320 && bodyLenOf(b.mass) > TAU * Math.max(dist, 80) * 1.15) {
         desired = Math.atan2(dy, dx) + b.side * (Math.PI / 2 - 0.35); // кружим и сжимаем кольцо
       } else if (along < 40) {
-        // догоняем сбоку и обгоняем
+        // догоняем сбоку с упреждением и обгоняем
         const gap = b.r + P.r + 50, lead = clamp(dist * 0.6, 90, 320);
         desired = Math.atan2(P.y + ps * lead + pc * side * gap - hy, P.x + pc * lead - ps * side * gap - hx);
-        if (canBoost && along > -600 && Math.abs(lat) < 520) b.boost = true;
+        if (canBoost && along > -380 && Math.abs(lat) < 450) b.boost = true; // рывок — только когда уже рядом
       } else {
         // обогнали — заворачиваем поперёк пути цели
         const lead = 50 + along * 0.4;
         desired = Math.atan2(P.y + ps * lead - hy, P.x + pc * lead - hx);
         if (canBoost && Math.abs(lat) < 380) b.boost = true;
       }
-    } else {
-      // ищем еду
-      const view = D.look * 1.4 + b.r * 4;
-      const cr = Math.ceil(view / CELL);
-      const c0 = this.cellOf(hx, hy), cx0 = c0 % GRID_N, cy0 = (c0 / GRID_N) | 0;
-      const ca = Math.cos(b.a), sa = Math.sin(b.a);
-      let best = -1, bx = 0, by = 0, bv = 0, bd = 0;
-      for (let cy = Math.max(0, cy0 - cr); cy <= Math.min(GRID_N - 1, cy0 + cr); cy++) {
-        for (let cx = Math.max(0, cx0 - cr); cx <= Math.min(GRID_N - 1, cx0 + cr); cx++) {
-          for (let i = this.foodHead[cy * GRID_N + cx]; i >= 0; i = this.foodNext[i]) {
-            const f = this.foods[i];
-            if (!f || f.dead) continue;
-            const dx = f.x - hx, dy = f.y - hy, d = Math.sqrt(dx * dx + dy * dy) + 1;
-            if (d > view) continue;
-            const sc = f.v / (d + 40) * (1.3 + (dx * ca + dy * sa) / d);
-            if (sc > best) { best = sc; bx = f.x; by = f.y; bv = f.v; bd = d; }
-          }
+    }
+
+    if (desired === null) {
+      // 3) засада
+      const am = this.ambushOf(b, heads, vb);
+      if (am) {
+        desired = b.a;
+        if (am.t2 - am.t1 < 0.35 && b.mass > 60 && Math.random() < D.boost) b.boost = true;
+      }
+    }
+
+    if (desired === null) {
+      // 4) еда: свежие останки, пир, богатое место рядом
+      const F = this.feast;
+      let sv = null;
+      for (const e of this.deaths) {
+        if (this.time - e.t > 3 || e.v < 40) continue;
+        const d = Math.hypot(e.x - hx, e.y - hy);
+        if (d > 1300 || d < 150) continue;
+        if (this.decide(b, 's' + e.id, 0.35 + 0.35 * b.pers)) { sv = e; break; }
+      }
+      if (sv) {
+        desired = Math.atan2(sv.y - hy, sv.x - hx);
+        const d = Math.hypot(sv.x - hx, sv.y - hy);
+        if (d < 700 && b.mass > 60 && sv.v * 0.5 > boostCostOf(b.mass) * d / BOOST_SPEED && Math.random() < D.boost * 0.5 * b.pers) b.boost = true;
+      } else {
+        desired = this.forage(b, heads);
+        // к пиру — если под носом нет богатой еды
+        if (F && b.goFeast && Math.hypot(F.x - hx, F.y - hy) > 300 && (desired === null || b.goalV < 3)) {
+          desired = Math.atan2(F.y - hy, F.x - hx); b.boost = false;
+        } else if (desired === null) {
+          b.wander += rand(-0.25, 0.25) + angDiff(Math.atan2(-hy, -hx), b.wander) * 0.02; // неспешно, к центру
+          desired = b.wander;
         }
       }
-      const F = this.feast;
-      if (F && b.goFeast && Math.hypot(F.x - hx, F.y - hy) > 260 && bv < 3) desired = Math.atan2(F.y - hy, F.x - hx);
-      else if (best > 0) {
-        desired = Math.atan2(by - hy, bx - hx);
-        // за богатой едой (останки змей, пир) — с ускорением
-        if (bv >= 3 && bd < 380 && b.mass > 40 && Math.random() < D.boost * 0.15 * b.pers) b.boost = true;
-      } else { b.wander += rand(-0.6, 0.6); desired = b.wander; }
       if (hx * hx + hy * hy > (R * 0.88) ** 2) desired = Math.atan2(-hy, -hx) + rand(-0.5, 0.5);
     }
 
-    const look = D.look * (1 + b.r / 50) * (b.boost ? 1.4 : 1);
-    const heads = this.nearHeads(b, look);
-    const vb = speedOf(b.mass, b.boost) * D.speed;
+    // 5) обход препятствий
+    const look = look0 * (b.boost ? 1.4 : 1);
+    const vbb = speedOf(b.mass, b.boost) * D.speed;
     const tFar = 0.46 + D.foresee * clamp((b.r - 30) / 20, 0, 1); // гигант смотрит дальше: ему дольше отворачивать
     const prey = P ? P.id : 0;                                     // …но не от своей цели: к ней он и идёт наперерез
+    const near = heads.filter((o) => (o.x - hx) ** 2 + (o.y - hy) ** 2 < look * look); // дальние головы за tFar не доползут
     let bestA = b.a, bestScore = -1e9, bestDg = 0;
     const dOff = clamp(angDiff(desired, b.a), -2.1, 2.1);
     for (let i = -1; i < OFFS.length; i++) {
@@ -543,10 +704,10 @@ export class World {
       const dg = this.rayDanger(b, bi, a, look);
       // чужие головы: где окажемся мы и они через 0,15–0,45 с (крупный бот на среднем и сложном — до 1,35 с)
       let hd = 0;
-      for (const o of heads) {
+      for (const o of near) {
         const tMax = o.id === prey ? 0.46 : tFar;
         for (let t = 0.15; t <= tMax; t += 0.15) {
-          const dx = b.x + Math.cos(a) * vb * t - (o.x + o.vx * t), dy = b.y + Math.sin(a) * vb * t - (o.y + o.vy * t);
+          const dx = b.x + Math.cos(a) * vbb * t - (o.x + o.vx * t), dy = b.y + Math.sin(a) * vbb * t - (o.y + o.vy * t);
           const rr = b.r + o.r + 45, d2 = dx * dx + dy * dy;
           if (d2 < rr * rr) { hd = Math.max(hd, 1.2 - Math.min(t, 0.8) - Math.sqrt(d2) / rr * 0.4); }
         }
@@ -611,15 +772,19 @@ export class World {
     this.buildGrids();
     const { segHead, segNext, segS, segK } = this;
 
-    this.hunted.clear();
+    this.hunted.clear(); this.huntSide.clear();
     for (const s of snakes) {
-      if (s.human || !s.alive || s.hunt <= 0) continue;
+      if (s.human || !s.alive) continue;
+      if (s.ambUntil > this.time) this.hunted.set(s.ambTarget, (this.hunted.get(s.ambTarget) || 0) + 1);
+      if (s.hunt <= 0) continue;
       this.hunted.set(s.huntTarget, (this.hunted.get(s.huntTarget) || 0) + 1);
+      if (!this.huntSide.has(s.huntTarget)) this.huntSide.set(s.huntTarget, s.hside);
     }
+    while (this.deaths.length && this.time - this.deaths[0].t > 3) this.deaths.shift();
     for (let i = 0; i < snakes.length; i++) {
       const b = snakes[i];
       if (b.human || !b.alive) continue;
-      if (b.hunt > 0) { b.hunt -= dt; if (b.hunt <= 0) b.huntCd = rand(0.5, 1.5) * this.D.rest / b.pers; }
+      if (b.hunt > 0) { b.hunt -= dt; if (b.hunt <= 0) this.stopHunt(b); }
       b.thinkT -= dt;
       if (b.thinkT <= 0) { this.think(b, i); b.thinkT = this.D.react * rand(0.7, 1.3); }
     }
