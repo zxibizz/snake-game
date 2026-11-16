@@ -192,11 +192,22 @@ function fullHeight() {
   const sw = portrait ? Math.min(screen.width, screen.height) : Math.max(screen.width, screen.height);
   return Math.abs(sw - iw) < 2 && sh > ih && sh - ih < 120 ? sh : ih; // только если ширина совпала и разница — полоса, а не клавиатура
 }
+// размеры для разбора, если поле снова не на весь экран (видно в «Как играть» в установленной игре на iPhone)
+function screenInfo() {
+  const m = (css) => { const d = document.createElement('div'); d.style.cssText = `position:fixed;left:0;top:0;width:1px;visibility:hidden;${css}`;
+    document.body.appendChild(d); const h = Math.round(d.getBoundingClientRect().height); d.remove(); return h; };
+  const vv = window.visualViewport;
+  return `экран ${screen.width}×${screen.height} · окно ${innerWidth}×${innerHeight} · vv ${vv ? Math.round(vv.height) : '-'} · ` +
+    `doc ${document.documentElement.clientHeight} · поле ${H} · 100vh ${m('height:100vh')} · lvh ${m('height:100lvh')} · ` +
+    `safe ${m('height:env(safe-area-inset-top)')}/${m('height:env(safe-area-inset-bottom)')} · ${document.documentElement.className}`;
+}
 function resize() {
   DPR = Math.min(window.devicePixelRatio || 1, 2);
   W = window.innerWidth; H = fullHeight();
   // холст, интерфейс, затемнение диалогов и экраны меню — одной высоты (CSS: var(--app-h))
   document.documentElement.style.setProperty('--app-h', H !== window.innerHeight ? `${H}px` : '');
+  document.documentElement.classList.toggle('tall', H !== window.innerHeight);
+  window.scrollTo(0, 0); // страница выше окна — не дать ей уехать
   canvas.width = Math.round(W * DPR); canvas.height = Math.round(H * DPR);
 }
 window.addEventListener('resize', resize);
@@ -1196,7 +1207,7 @@ $('btnInfo').addEventListener('click', () => {
   const ih = installHint();
   dialog('Как играть', `<p>${ctl}</p><p>Подрежь соперника — пусть врежется в тебя головой. Золотая стрелка с короной у края экрана показывает, где лидер.</p>` +
     `<p>Звёзды за еду, победы и места открывают новые раскраски.</p>` +
-    `<div class="note ${offline.cls}">${icon(offline.ic)}<span>${offline.text}${ih ? ` ${ih}` : ''}</span></div>`,
+    `<div class="note ${offline.cls}">${icon(offline.ic)}<span>${offline.text}${ih ? ` ${ih}` : ''}</span></div>` + (IOS_PWA ? `<p class="muted">${screenInfo()}</p>` : ''),
   [{ label: 'Понятно', kind: 'filled', onClick: closeDialog }]);
 });
 let updatesWatched = false;

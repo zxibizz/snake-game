@@ -34,6 +34,11 @@ svg.i{width:24px;height:24px;fill:currentColor;flex:none}
 #c{position:fixed;inset:0;width:100%;height:var(--app-h,100%);display:block;touch-action:none}
 /* установленная игра на iPhone: --app-h — полная высота экрана (окно короче на статус-бар, снизу была пустая полоса) */
 #hud,.scrim,.screen{height:var(--app-h,auto)}
+/* iOS не рисует закреплённые (fixed) элементы ниже своего короткого окна — обрезает по краю. Поэтому в таком режиме
+   (класс tall ставит скрипт) страница сама высотой с экран, а поле, интерфейс и диалоги лежат в ней (absolute) */
+:root.tall,:root.tall body{height:var(--app-h)}
+:root.tall body{position:relative;inset:auto}
+:root.tall #c,:root.tall #hud,:root.tall .scrim,:root.tall .screen,:root.tall #snack,:root.tall #update{position:absolute}
 
 /* --- кнопки --- */
 .btn{height:40px;padding:0 24px;border-radius:20px;font-size:14px;font-weight:500;letter-spacing:.1px;
