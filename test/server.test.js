@@ -103,7 +103,9 @@ test('переподключение с тем же токеном забира�
   a2.send({ t: 'join', code: wa.code, name: 'A', v: VERSION, token: 'tok-a' });
   const wa2 = await a2.next('welcome');
   assert.equal(wa2.you, wa.you, 'та же змейка');
-  assert.equal(wa2.snakes.filter((s) => s.human).length, 2, 'без дубля');
+  // в welcome — только змеи в зоне видимости, второй игрок может быть далеко; всех людей комнаты перечисляет таблица
+  const lb = await a2.next('lb');
+  assert.equal(lb.hum.length, 2, 'без дубля');
   for (const x of [a, b, a2]) x.ws.close();
 });
 
