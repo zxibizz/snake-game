@@ -176,9 +176,22 @@ function addXp(n) {
 // ---------- холст ----------
 const canvas = $('c'), ctx = canvas.getContext('2d');
 let W = 0, H = 0, DPR = 1;
+// Установленная игра на iPhone (статус-бар поверх страницы): окно короче экрана примерно на высоту статус-бара,
+// и снизу остаётся пустая полоса. Там холст тянем на всю высоту экрана (screen у iOS — всегда в портретной ориентации).
+const IOS_PWA = /iPhone|iPod/.test(navigator.userAgent || '') &&
+  (navigator.standalone === true || (window.matchMedia && matchMedia('(display-mode: standalone)').matches));
+function fullHeight() {
+  const iw = window.innerWidth, ih = window.innerHeight;
+  if (!IOS_PWA || !screen.width || !screen.height) return ih;
+  const portrait = ih >= iw, sh = portrait ? Math.max(screen.width, screen.height) : Math.min(screen.width, screen.height);
+  const sw = portrait ? Math.min(screen.width, screen.height) : Math.max(screen.width, screen.height);
+  return Math.abs(sw - iw) < 2 && sh > ih && sh - ih < 120 ? sh : ih; // только если ширина совпала и разница — полоса, а не клавиатура
+}
 function resize() {
   DPR = Math.min(window.devicePixelRatio || 1, 2);
-  W = window.innerWidth; H = window.innerHeight;
+  W = window.innerWidth; H = fullHeight();
+  // холст, интерфейс, затемнение диалогов и экраны меню — одной высоты (CSS: var(--app-h))
+  document.documentElement.style.setProperty('--app-h', H !== window.innerHeight ? `${H}px` : '');
   canvas.width = Math.round(W * DPR); canvas.height = Math.round(H * DPR);
 }
 window.addEventListener('resize', resize);

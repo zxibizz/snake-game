@@ -31,7 +31,9 @@ body{position:fixed;inset:0}
 [hidden]{display:none!important}
 button{font:inherit;color:inherit;cursor:pointer;border:0;background:none;padding:0}
 svg.i{width:24px;height:24px;fill:currentColor;flex:none}
-#c{position:fixed;inset:0;width:100%;height:100%;display:block;touch-action:none}
+#c{position:fixed;inset:0;width:100%;height:var(--app-h,100%);display:block;touch-action:none}
+/* установленная игра на iPhone: --app-h — полная высота экрана (окно короче на статус-бар, снизу была пустая полоса) */
+#hud,.scrim,.screen{height:var(--app-h,auto)}
 
 /* --- кнопки --- */
 .btn{height:40px;padding:0 24px;border-radius:20px;font-size:14px;font-weight:500;letter-spacing:.1px;
