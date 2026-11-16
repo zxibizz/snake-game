@@ -1,6 +1,6 @@
 // Клиент: отрисовка, управление, меню; одиночная игра считает мир сама, совместная — получает его с сервера.
 import {
-  World, SKINS, TYPES, PAL, foodLookOf, GOLD, DIFF, R, TAU, START_MASS, SNAKES_N, FOOD_N, VERSION, TITLES, titleOf, segColor,
+  World, SKINS, TYPES, SKINS_OF, PAL, foodLookOf, GOLD, DIFF, R, TAU, START_MASS, SNAKES_N, FOOD_N, VERSION, TITLES, titleOf, segColor,
   radiusOf, spacingOf, countOf, bodyLenOf, foodRadiusOf, followChain, fitLength, clamp, angDiff, keepMass,
   FLY_MAX, flyK, flyScale, MIN_BOOST_MASS,
 } from './core.js';
@@ -1608,17 +1608,23 @@ function hideHint() { clearTimeout(hintTimer); $('hint').hidden = true; }
 
 // ---------- главный экран ----------
 
-// раскраска: стрелки и свайп по змейке листают открытые раскраски (по цене) и одну следующую закрытую — цель.
-// Все 40 подряд — почти сплошь замки; играть можно только открытыми.
+// выбор змейки (решение владельца, вариант «Б»): стрелки и свайп по змейке меняют вид (бусинки, рыбка, …),
+// цветные кружки под названием — раскраски этого вида; закрытые — тусклые с замком. Играть можно только открытыми.
 let viewSkin = save.skin;
 const viewAt = (k) => { viewSkin = k; if (unlocked(SKINS[k])) { save.skin = k; persist(); } renderHome(); };
-const BY_PRICE = SKINS.map((_, i) => i).sort((a, b) => SKINS[a].stars - SKINS[b].stars || a - b);
-const skinList = () => { const open = BY_PRICE.filter((i) => unlocked(SKINS[i])), next = BY_PRICE.find((i) => !unlocked(SKINS[i])); return next === undefined ? open : open.concat(next); };
-const stepSkin = (d) => {
-  const l = skinList(); let j = l.indexOf(viewSkin);
-  if (j < 0) { const p = BY_PRICE.indexOf(viewSkin); j = l.findIndex((i) => BY_PRICE.indexOf(i) > p); if (j < 0) j = l.length; if (d > 0) j--; } // не из списка — соседи по цене
-  viewAt(l[(j + d + l.length) % l.length]);
+// к виду ti: своя раскраска, если она этого вида; иначе последняя открытая; если закрыты все — первая (покажет цену)
+const toType = (ti) => {
+  if (SKINS[save.skin].type === ti && unlocked(SKINS[save.skin])) return save.skin;
+  const open = SKINS_OF[ti].filter((i) => unlocked(SKINS[i]));
+  return open.length ? open[open.length - 1] : SKINS_OF[ti][0];
 };
+const stepSkin = (d) => viewAt(toType((SKINS[viewSkin].type + d + TYPES.length) % TYPES.length));
+// кружок раскраски: её цвета секторами
+const swatchBg = (k) => {
+  const cols = [...new Set(SKINS[k].p.map((p) => PAL[p]))].slice(0, 8);
+  return cols.length > 1 ? `conic-gradient(${cols.map((c, i) => `${c} ${(i / cols.length * 100).toFixed(1)}% ${((i + 1) / cols.length * 100).toFixed(1)}%`).join(',')})` : cols[0];
+};
+$('swatches').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) viewAt(+b.dataset.k); });
 $('skinPrev').addEventListener('click', () => stepSkin(-1));
 $('skinNext').addEventListener('click', () => stepSkin(1));
 // свайп по змейке тоже листает
@@ -1639,7 +1645,14 @@ function renderHome() {
   if (viewSkin !== save.skin && unlocked(SKINS[viewSkin])) { save.skin = viewSkin; persist(); }
   $('stars').innerHTML = `${icon('star')}${stars()}`;
   const sk = SKINS[viewSkin], open = unlocked(sk);
+  $('typeName').textContent = TYPES[sk.type].name;
   $('skinName').textContent = sk.name;
+  const focusK = document.activeElement?.closest?.('#swatches button')?.dataset.k; // клавиатура: фокус остаётся на выбранном кружке
+  $('swatches').innerHTML = SKINS_OF[sk.type].map((k) => {
+    const op = unlocked(SKINS[k]);
+    return `<button data-k="${k}" class="${k === viewSkin ? 'on' : ''}${op ? '' : ' locked'}" aria-pressed="${k === viewSkin}" style="background:${swatchBg(k)}" aria-label="${esc(SKINS[k].name)}${op ? '' : ' (закрыта)'}">${op ? '' : icon('lock')}</button>`;
+  }).join('');
+  if (focusK !== undefined) $('swatches').querySelector(`[data-k="${focusK}"]`)?.focus();
   $('skinLock').innerHTML = open ? '' : `${icon('lock')}откроется за ${sk.stars - stars()} ★`;
   document.querySelectorAll('#diff button').forEach((b) => b.classList.toggle('on', b.dataset.d === save.diff));
   const v = save.best[save.diff] || 0;
@@ -1660,7 +1673,7 @@ function drawWave(cv, k) {
   const pts = [];
   for (let i = 0; i <= n; i++) {
     const x = x0 - i * sp;
-    pts.push({ x, y: cy + Math.sin(x / (r * 3.2) - time * 3) * ch * 0.2 });
+    pts.push({ x, y: cy + Math.sin(x / (r * 3.2) + time * 3) * ch * 0.2 }); // изгибы бегут от головы к хвосту — ползёт головой вперёд
   }
   g.globalAlpha = open ? 1 : 0.35;
   for (let i = n - (n & 1); i >= 2; i -= 2) {

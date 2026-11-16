@@ -68,17 +68,25 @@ svg.i{width:24px;height:24px;fill:currentColor;flex:none}
 .stars{display:inline-flex;align-items:center;gap:6px;height:36px;padding:0 14px;border-radius:18px;background:var(--surf-high);
   font-size:16px;font-weight:600;color:#FFD447}
 .stars svg.i{width:18px;height:18px}
-.pick{display:flex;flex-direction:column;align-items:center;gap:8px}
-/* змейка крупно, по бокам стрелки; листаются открытые раскраски и одна следующая */
+.pick{display:flex;flex-direction:column;align-items:center;gap:6px}
+/* змейка крупно, по бокам стрелки — вид змейки; раскраски вида — кружки под названием */
 .pv-wrap{position:relative;width:100%;padding:0 40px} /* стрелки по бокам, не поверх головы и хвоста */
-#preview{width:100%;height:min(250px,30vh);display:block}
+#preview{width:100%;height:min(230px,25vh);display:block}
 .pv-wrap .arr{position:absolute;top:50%;transform:translateY(-50%);width:48px;height:64px;border-radius:24px;
   display:flex;align-items:center;justify-content:center;background:rgba(30,42,68,.7);color:var(--on)}
 .pv-wrap .arr:active{background:var(--surf-highest)}
 .pv-wrap .arr svg.i{width:36px;height:36px}
 #skinPrev{left:-6px} #skinNext{right:-6px}
 .skin-info{display:flex;flex-direction:column;align-items:center;gap:2px;min-height:48px;justify-content:center}
-.skin-info b{font-size:20px;font-weight:500}
+.skin-info b{font-size:20px;font-weight:600}
+#skinName{font-size:15px;color:var(--on-var)}
+/* раскраски вида — цветные кружки; до 6 в ряд (у бусинок 12 — два ряда) */
+.swatches{display:flex;justify-content:center;flex-wrap:wrap;gap:8px;max-width:236px;margin:2px auto 0}
+.swatches button{width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;color:#fff;
+  box-shadow:inset 0 0 0 1px rgba(255,255,255,.15)}
+.swatches button.on{box-shadow:0 0 0 3px var(--surface),0 0 0 5px var(--primary)}
+.swatches button.locked{opacity:.4}
+.swatches button svg.i{width:14px;height:14px;filter:drop-shadow(0 0 2px rgba(0,0,0,.8))}
 .skin-info small{font-size:15px;color:var(--on-var);display:flex;align-items:center;gap:4px}
 .skin-info small svg.i{width:16px;height:16px}
 .go{display:flex;flex-direction:column;gap:16px}
@@ -111,6 +119,9 @@ svg.i{width:24px;height:24px;fill:currentColor;flex:none}
 /* маленький телефон (iPhone SE): всё на одном экране */
 @media (max-height:600px){
   .home{gap:12px}
+  #preview{height:22vh}
+  .swatches{gap:6px;max-width:204px}
+  .swatches button{width:28px;height:28px}
   .go{gap:10px}
   #btnPlay{height:68px;border-radius:34px}
 }
@@ -118,7 +129,11 @@ svg.i{width:24px;height:24px;fill:currentColor;flex:none}
 @media (orientation:landscape) and (max-height:520px){
   .home{max-width:760px;display:grid;grid-template-columns:1fr 1fr;grid-template-rows:auto 1fr;gap:8px 32px;align-items:center}
   .top{grid-column:1/3}
-  #preview{height:min(160px,45vh)}
+  #preview{height:min(130px,34vh)}
+  .skin-info{min-height:0}
+  .skin-info b{font-size:17px}
+  .swatches{gap:6px;max-width:174px}
+  .swatches button{width:24px;height:24px}
   #btnPlay{height:64px;border-radius:32px}
   .go{gap:10px}
 }
@@ -310,10 +325,11 @@ svg.i{width:24px;height:24px;fill:currentColor;flex:none}
     <section class="pick">
       <div class="pv-wrap">
         <canvas id="preview"></canvas>
-        <button class="arr" id="skinPrev" aria-label="Предыдущая змейка" data-icon="left"></button>
-        <button class="arr" id="skinNext" aria-label="Следующая змейка" data-icon="right"></button>
+        <button class="arr" id="skinPrev" aria-label="Предыдущий вид змейки" data-icon="left"></button>
+        <button class="arr" id="skinNext" aria-label="Следующий вид змейки" data-icon="right"></button>
       </div>
-      <div class="skin-info"><b id="skinName"></b><small id="skinLock"></small></div>
+      <div class="skin-info"><b id="typeName"></b><span id="skinName"></span><small id="skinLock"></small></div>
+      <div class="swatches" id="swatches" aria-label="Раскраска"></div>
     </section>
 
     <section class="go">
