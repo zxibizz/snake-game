@@ -1194,8 +1194,8 @@ function netUpdate(now, dt) {
 function netInput(now) {
   if (!me || ui === 'dead') return;
   // меню комнаты (и настройка кнопки из него) открыто — игра не стоит, змейкой правит осторожный автопилот
-  if (ui === 'play' && (!$('dlg').hidden || fabEdit)) {
-    if (now - auto.t >= AUTO_MS) { auto.t = now; auto.ta = safeCourse(me, sceneSnakes(), net.foods.values(), auto.ta); me.ta = auto.ta; }
+  if (ui === 'play' && (roomMenuOpen() || fabEdit)) {
+    if (now - auto.t >= AUTO_MS) { auto.t = now; auto.ta = safeCourse(me, sceneSnakes(), net.foods.values(), auto.ta, DIFF[net.diff]); me.ta = auto.ta; }
     me.boost = false; net.lastB = false;
     return;
   }
@@ -1209,6 +1209,7 @@ function netInput(now) {
 }
 const AUTO_MS = 80;                     // автопилот на паузе в комнате (safeCourse в core.js) решает раз в 80 мс
 const auto = { t: -1e9, ta: null };
+const roomMenuOpen = () => !$('dlg').hidden && $('dlgBox').classList.contains('pz'); // окно паузы — меню комнаты
 // своя змейка: движение по правилам core.js, столкновения — с тем, что видно на экране, еда и бабочки — тоже
 function selfStep(dt, now) {
   if (!me || !net.link || ui === 'conn') return;
@@ -1263,6 +1264,7 @@ function selfDie(killer) {
 }
 function onNetDeath(m, dead) {
   sfx.die();
+  auto.ta = null; auto.t = -1e9; // разбились на автопилоте — после «Продолжить» руль у игрока как есть
   burst(dead, false); camKick(0, 9);
   net.deadInfo = m;
   ui = 'dead';

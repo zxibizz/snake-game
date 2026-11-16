@@ -286,9 +286,11 @@ export const coilBody = (x, y, mass) => Array.from({ length: countOf(mass) }, ()
 // (своя голова r·0,55 + чужое тело R·0,85), до тел, до чужих голов с упреждением по их курсу и до края арены;
 // свои по команде не мешают. Лучший курс — с самым большим зазором на пути (если не уйти — тот, где разобьёмся
 // позже и неглубоко); резкие повороты — только если нужно, еда по пути — немного и только когда просторно.
-// Прошлого курса prev держимся, пока другой не заметно лучше. others — змеи с segs, r, mass, a, team.
+// Прошлого курса prev держимся, пока другой не заметно лучше. others — змеи с segs, r, mass, a, team (неуязвимые —
+// тоже препятствие: неуязвимость кончается за пару секунд, может и посреди пути). D — уровень (скорость ботов).
+// Скорость голов с поправкой уровня, как в moveSnake.
 export const AUTO = { T: 1.6, DT: 0.06, N: 24, CELL: 160, SAFE: 160 };
-export function safeCourse(s, others, foods, prev = null) {
+export function safeCourse(s, others, foods, prev = null, D = null) {
   const h = s.segs[0], v = speedOf(s.mass, false), turn = turnOf(s.r), cap = AUTO.SAFE * 1.5;
   const far = v * AUTO.T + 400, C = AUTO.CELL;
   const grid = new Map(), heads = [];
@@ -306,7 +308,7 @@ export function safeCourse(s, others, foods, prev = null) {
       if (!c) grid.set(k, (c = []));
       c.push(q.x, q.y, rr);
     }
-    const sp = speedOf(o.mass, !!o.isBoosting);
+    const sp = speedOf(o.mass, !!o.isBoosting) * (o.human || !D ? 1 : D.speed);
     heads.push(o.segs[0].x, o.segs[0].y, Math.cos(o.a) * sp, Math.sin(o.a) * sp, rr * 1.6 + 20);
   }
   const span = Math.ceil((maxRR + cap) / C);
@@ -338,6 +340,7 @@ export function safeCourse(s, others, foods, prev = null) {
   for (let i = 0; i < AUTO.N; i++) {
     const off = (i % 2 ? 1 : -1) * Math.ceil(i / 2) * step; // 0, +15°, −15°, … до ±180°
     const ta = s.a + off, bend = Math.abs(off) * 15;
+    const dp = prev === null ? Infinity : Math.abs(angDiff(ta, prev)), isKeep = dp < step / 2 + 1e-6;
     let x = h.x, y = h.y, a = s.a, minC = Infinity, crash = -1, food = 0, n = 0, cut = false;
     const eaten = new Set();
     for (let t = AUTO.DT; t <= AUTO.T + 1e-9; t += AUTO.DT) {
@@ -347,15 +350,20 @@ export function safeCourse(s, others, foods, prev = null) {
       const c = clearAt(x, y, t);
       if (c < minC) minC = c;
       if (c < 0) { crash = t; break; }
-      if (minC + 60 - bend < bestS) { cut = true; break; } // этот курс уже не лучший
-      if (++n % 4 === 0) for (const f of near) if (!eaten.has(f) && (f.x - x) ** 2 + (f.y - y) ** 2 < 4900) { eaten.add(f); food += f.v; }
+      // этот курс уже не лучший (прежний досчитываем: его удержание сравнивает настоящую оценку)
+      if (!isKeep && minC + 60 - bend < bestS) { cut = true; break; }
+      if (++n % 2 === 0) {
+        for (const f of near) {
+          const er = s.r * 0.8 + f.r + 15;
+          if (!eaten.has(f) && (f.x - x) ** 2 + (f.y - y) ** 2 < er * er) { eaten.add(f); food += f.v; }
+        }
+      }
     }
     let score;
     if (cut) score = -Infinity; // недосчитан — ни выбрать, ни удержать
     else if (crash >= 0) score = -1000 + crash * 300 + Math.max(minC, -100); // не уйти — хотя бы позже и неглубоко
     else score = minC - bend + (minC > AUTO.SAFE ? Math.min(food, 40) * 1.5 : 0);
-    const dp = prev === null ? Infinity : Math.abs(angDiff(ta, prev));
-    if (dp < step / 2 + 1e-6 && dp < keepD) { keepD = dp; keepA = ta; keepS = score; }
+    if (isKeep && dp < keepD) { keepD = dp; keepA = ta; keepS = score; }
     if (score > bestS) { bestS = score; bestA = ta; }
   }
   return keepA !== null && bestS - keepS < 25 ? keepA : bestA;
