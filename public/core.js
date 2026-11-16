@@ -2,7 +2,7 @@
 // Здесь нет DOM и сети — только мир, змейки, еда, боты и столкновения.
 
 // Версия протокола и файлов: при изменении любого файла в public/ поднять и здесь, и в sw.js (тест сверяет).
-export const VERSION = '4';
+export const VERSION = '5';
 export const TAU = Math.PI * 2;
 export const R = 6000;                  // радиус арены
 export const BASE_SPEED = 175;          // пикс/с
@@ -58,26 +58,26 @@ export const GOLD = 13;
 export const FOOD_COLORS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 20, 21, 27, 28];
 
 // Раскраски — палитры по сегментам. Цвета дописываются в PAL (номер цвета уходит по сети одним байтом).
-// p — номера цветов по кругу, run — бусин подряд одного цвета, head — цвет головы, lvl — с какого уровня открыта.
+// p — номера цветов по кругу, run — бусин подряд одного цвета, head — цвет головы, stars — сколько звёзд нужно накопить, чтобы открыть.
 // bounce — палитра идёт туда и обратно, чтобы цвета перетекали.
 const palIdx = (hex) => { let k = PAL.indexOf(hex); if (k < 0) { k = PAL.length; PAL.push(hex); } return k; };
-function skin(name, hexes, { bounce = false, head = hexes[0], lvl = 1 } = {}) {
+function skin(name, hexes, { bounce = false, head = hexes[0], stars = 0 } = {}) {
   const seq = bounce ? hexes.concat(hexes.slice(1, -1).reverse()) : hexes;
-  return { name, p: seq.map(palIdx), run: 2, head: palIdx(head), lvl };
+  return { name, p: seq.map(palIdx), run: 2, head: palIdx(head), stars };
 }
 export const SKINS = [
   skin('Радуга', ['#FF5A5F', '#FF8A3D', '#FFC93C', '#7ED957', '#2EC4B6', '#3D8BF5', '#8B5CF6']),
   skin('Пастельная радуга', ['#FFA8B5', '#FFC9A3', '#FFEFA3', '#C6F0A8', '#A8E6E0', '#B3CCFF', '#D4B8FF']),
   skin('Мороженое', ['#FFB3C7', '#FFF1C9', '#B5F2DA', '#B9D3FF', '#E3C8FF']),
   skin('Океан', ['#CFF5FA', '#90E0EF', '#48CAE4', '#00A6D6', '#0077B6', '#03508C'], { bounce: true, head: '#48CAE4' }),
-  skin('Тутти-фрутти', ['#FF595E', '#FFCA3A', '#8AC926', '#1982C4', '#6A4C93'], { lvl: 2 }),
-  skin('Конфетка', ['#FF5D8F', '#FFE3EC', '#FF5D8F', '#B5F2DA'], { lvl: 3 }),
-  skin('Закат', ['#FFD166', '#FFA45B', '#FF6B6B', '#E05780', '#9D4EDD', '#6A2CB8'], { bounce: true, lvl: 5 }),
-  skin('Лес', ['#1B4332', '#2D6A4F', '#40916C', '#52B788', '#95D5B2', '#C7EFCF'], { bounce: true, head: '#52B788', lvl: 7 }),
-  skin('Осень', ['#8C1C13', '#BF4342', '#E05A1E', '#F48C06', '#FAA307', '#FFC93C'], { bounce: true, head: '#E05A1E', lvl: 10 }),
-  skin('Ягоды', ['#3A0CA3', '#6A0DAD', '#9D1BB2', '#D61F8C', '#FF5D8F', '#FF9EBB'], { bounce: true, head: '#D61F8C', lvl: 13 }),
-  skin('Северное сияние', ['#0E6B5C', '#1FAB89', '#62D2A2', '#A8F0C6', '#9A8CFF', '#6C4CD6'], { bounce: true, head: '#1FAB89', lvl: 16 }),
-  skin('Павлин', ['#005F73', '#0A9396', '#94D2BD', '#E9D8A6', '#EE9B00', '#CA6702', '#9B2226'], { bounce: true, head: '#0A9396', lvl: 20 }),
+  skin('Тутти-фрутти', ['#FF595E', '#FFCA3A', '#8AC926', '#1982C4', '#6A4C93'], { stars: 250 }),
+  skin('Конфетка', ['#FF5D8F', '#FFE3EC', '#FF5D8F', '#B5F2DA'], { stars: 600 }),
+  skin('Закат', ['#FFD166', '#FFA45B', '#FF6B6B', '#E05780', '#9D4EDD', '#6A2CB8'], { bounce: true, stars: 1600 }),
+  skin('Лес', ['#1B4332', '#2D6A4F', '#40916C', '#52B788', '#95D5B2', '#C7EFCF'], { bounce: true, head: '#52B788', stars: 3000 }),
+  skin('Осень', ['#8C1C13', '#BF4342', '#E05A1E', '#F48C06', '#FAA307', '#FFC93C'], { bounce: true, head: '#E05A1E', stars: 5850 }),
+  skin('Ягоды', ['#3A0CA3', '#6A0DAD', '#9D1BB2', '#D61F8C', '#FF5D8F', '#FF9EBB'], { bounce: true, head: '#D61F8C', stars: 9600 }),
+  skin('Северное сияние', ['#0E6B5C', '#1FAB89', '#62D2A2', '#A8F0C6', '#9A8CFF', '#6C4CD6'], { bounce: true, head: '#1FAB89', stars: 14250 }),
+  skin('Павлин', ['#005F73', '#0A9396', '#94D2BD', '#E9D8A6', '#EE9B00', '#CA6702', '#9B2226'], { bounce: true, head: '#0A9396', stars: 21850 }),
 ];
 // цвет сегмента i: рисуется каждый второй сегмент («бусина»), цвета считаются по бусинам
 export const segColor = (skin, i) => { const s = SKINS[skin] || SKINS[0]; return s.p[Math.floor((i >> 1) / s.run) % s.p.length]; };

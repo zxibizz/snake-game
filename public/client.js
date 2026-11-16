@@ -19,33 +19,31 @@ const ICONS = {
   group: '<path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/>',
   share: '<path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81 1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9c-1.66 0-3 1.34-3 3s1.34 3 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.16c-.05.21-.08.43-.08.65 0 1.61 1.31 2.92 2.92 2.92 1.61 0 2.92-1.31 2.92-2.92s-1.31-2.92-2.92-2.92z"/>',
   check: '<path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/>',
-  mood: '<path d="M12 2a10 10 0 1 0 0 20 10 10 0 1 0 0-20zm0 18a8 8 0 1 1 0-16 8 8 0 1 1 0 16z"/><circle cx="8.5" cy="9.5" r="1.5"/><circle cx="15.5" cy="9.5" r="1.5"/><path d="M12 17.5c2.33 0 4.31-1.46 5.11-3.5H6.89c.8 2.04 2.78 3.5 5.11 3.5z"/>',
-  neutral: '<path d="M12 2a10 10 0 1 0 0 20 10 10 0 1 0 0-20zm0 18a8 8 0 1 1 0-16 8 8 0 1 1 0 16z"/><circle cx="8.5" cy="9.5" r="1.5"/><circle cx="15.5" cy="9.5" r="1.5"/><rect x="8" y="14.5" width="8" height="1.8" rx=".9"/>',
-  fire: '<path d="M13.5.67s.74 2.65.74 4.8c0 2.06-1.35 3.73-3.41 3.73-2.07 0-3.63-1.67-3.63-3.73l.03-.36C5.21 7.51 4 10.62 4 14c0 4.42 3.58 8 8 8s8-3.58 8-8C20 8.61 17.41 3.8 13.5.67zM11.71 19c-1.78 0-3.22-1.4-3.22-3.14 0-1.62 1.05-2.76 2.81-3.12 1.77-.36 3.6-1.21 4.62-2.58.39 1.29.59 2.65.59 4.04 0 2.65-2.15 4.8-4.8 4.8z"/>',
   trophy: '<path d="M19 5h-2V3H7v2H5c-1.1 0-2 .9-2 2v1c0 2.55 1.92 4.63 4.39 4.94.63 1.5 1.98 2.63 3.61 2.96V19H7v2h10v-2h-4v-3.1c1.63-.33 2.98-1.46 3.61-2.96C19.08 12.63 21 10.55 21 8V7c0-1.1-.9-2-2-2zM5 8V7h2v3.82C5.84 10.4 5 9.3 5 8zm14 0c0 1.3-.84 2.4-2 2.82V7h2v1z"/>',
-  heart: '<path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/>',
-  timer: '<path d="M15 1H9v2h6V1zm-4 13h2V8h-2v6zm8.03-6.61l1.42-1.42c-.43-.51-.9-.99-1.41-1.41l-1.42 1.42C16.07 4.74 14.12 4 12 4c-4.97 0-9 4.03-9 9s4.02 9 9 9 9-4.03 9-9c0-2.12-.74-4.07-1.97-5.61zM12 20c-3.87 0-7-3.13-7-7s3.13-7 7-7 7 3.13 7 7-3.13 7-7 7z"/>',
   cloudOff: '<path d="M19.35 10.04C18.67 6.59 15.64 4 12 4c-1.48 0-2.85.43-4.01 1.17l1.46 1.46C10.21 6.23 11.08 6 12 6c3.04 0 5.5 2.46 5.5 5.5v.5H19c1.66 0 3 1.34 3 3 0 1.13-.64 2.11-1.56 2.62l1.45 1.45C23.16 18.16 24 16.68 24 15c0-2.64-2.05-4.78-4.65-4.96zM3 5.27l2.75 2.74C2.56 8.15 0 10.77 0 14c0 3.31 2.69 6 6 6h11.73l2 2L21 20.73 4.27 4 3 5.27zM7.73 10l8 8H6c-2.21 0-4-1.79-4-4s1.79-4 4-4h1.73z"/>',
   lock: '<path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z"/>',
+  left: '<path d="M15.41 7.41 14 6l-6 6 6 6 1.41-1.41L10.83 12z"/>',
+  right: '<path d="M10 6 8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/>',
   star: '<path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/>',
-  flag: '<path d="M14.4 6L14 4H5v17h2v-7h5.6l.4 2h7V6z"/>',
   cloudDone: '<path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM10 17l-3.5-3.5 1.41-1.41L10 14.17 15.18 9l1.41 1.41L10 17z"/>',
 };
 const icon = (n) => `<svg class="i" viewBox="0 0 24 24" aria-hidden="true">${ICONS[n] || ''}</svg>`;
 const $ = (id) => document.getElementById(id);
 document.querySelectorAll('[data-icon]').forEach((el) => { el.insertAdjacentHTML('afterbegin', icon(el.dataset.icon)); });
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-const fmtTime = (t) => { t = Math.floor(t); return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`; };
 const hexA = (hex, a) => {
   const n = parseInt(hex.slice(1), 16);
   return `rgba(${n >> 16},${(n >> 8) & 255},${n & 255},${a})`;
 };
 
 // ---------- сохранение ----------
-const save = { best: { easy: 0, medium: 0, hard: 0 }, name: '', skin: 0, sound: true, xp: 0, daily: null,
+// xp — накопленные звёзды (имя ключа осталось от уровней)
+const save = { best: { easy: 0, medium: 0, hard: 0 }, name: '', skin: 0, sound: true, xp: 0, diff: 'easy', hinted: false,
   stats: { games: 0, kills: 0, eaten: 0, best: 0 } };
 try { Object.assign(save, JSON.parse(localStorage.getItem('zmeigrad') || '{}')); } catch { /* приватный режим */ }
+delete save.daily; // задания дня убраны
 if (!SKINS[save.skin]) save.skin = 0;
+if (!DIFF[save.diff]) save.diff = 'easy';
 const persist = () => { try { localStorage.setItem('zmeigrad', JSON.stringify(save)); } catch { /* ничего */ } };
 const myName = () => save.name || 'Игрок';
 // токен сессии: при переподключении сервер отдаёт ту же змейку, а не создаёт вторую
@@ -82,97 +80,29 @@ const sfx = {
   combo(n) { for (let i = 0; i < n + 1; i++) tone(600 + i * 150, 1200 + i * 200, 0.12, 0.08, 'triangle', i * 0.08); },
   title() { [523, 659, 784, 1047].forEach((f, i) => tone(f, f * 1.01, 0.18, 0.08, 'triangle', i * 0.09)); },
   level() { [392, 523, 659, 784, 1047, 1319].forEach((f, i) => tone(f, f, 0.22, 0.08, 'square', i * 0.08)); },
-  task() { tone(880, 1760, 0.2, 0.07, 'sine'); tone(1320, 2640, 0.25, 0.06, 'sine', 0.1); },
   feast() { tone(700, 900, 0.15, 0.06, 'triangle'); tone(900, 1200, 0.2, 0.06, 'triangle', 0.15); },
 };
 
-// ---------- прогрессия: звёзды, уровни, задания ----------
-// Звёзды копятся за всё время: еда, победы, звания, места в таблице, задания дня. Уровень открывает раскраски.
-const lvlNeed = (l) => 150 + l * 100;
-function levelOf(xp) {
-  let l = 1;
-  while (xp >= lvlNeed(l)) { xp -= lvlNeed(l); l++; }
-  return { lvl: l, cur: Math.floor(xp), need: lvlNeed(l) };
-}
-const myLevel = () => levelOf(save.xp).lvl;
-
-const TASKS = {
-  eat: { tiers: [400, 900, 1800], text: (n) => `Съешь ${n} еды`, kind: 'sum' },
-  kills: { tiers: [2, 4, 8], text: (n) => `Победи ${n} змей`, kind: 'sum' },
-  top: { tiers: [20, 10, 3], text: (n) => `Попади в топ-${n}`, kind: 'rank' },
-  grow: { tiers: [300, 800, 2000], text: (n) => `Вырасти до длины ${n}`, kind: 'max' },
-  feast: { tiers: [1, 2, 3], text: (n) => (n === 1 ? 'Найди золотой пир' : `Найди золотой пир ${n} раза`), kind: 'sum' },
-  giant: { tiers: [1, 2, 3], text: (n) => `Победи змею длиннее себя${n > 1 ? ` ${n} раза` : ''}`, kind: 'sum' },
-  survive: { tiers: [3, 5, 8], text: (n) => `Продержись ${n} мин без проигрыша`, kind: 'max' },
-  revenge: { tiers: [1, 2, 3], text: (n) => `Отомсти обидчику${n > 1 ? ` ${n} раза` : ''}`, kind: 'sum' },
-};
-const TASK_REWARD = [100, 170, 250], ALL_TASKS_BONUS = 150;
-const today = () => { const d = new Date(); return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`; };
-function ensureDaily() {
-  const day = today();
-  if (save.daily && save.daily.day === day) return save.daily;
-  // одни и те же задания на устройстве в течение дня; сложность — по уровню игрока
-  let h = 0;
-  for (const ch of day + save.name) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
-  const rnd = () => { h = (h * 1103515245 + 12345) >>> 0; return h / 4294967296; };
-  const ids = Object.keys(TASKS);
-  const lvl = myLevel(), tier = lvl < 4 ? 0 : lvl < 10 ? 1 : 2;
-  const tasks = [];
-  while (tasks.length < 3) {
-    const id = ids[Math.floor(rnd() * ids.length)];
-    if (tasks.some((t) => t.id === id)) continue;
-    const T = TASKS[id];
-    tasks.push({ id, n: T.tiers[tier], prog: T.kind === 'rank' ? 999 : 0, done: false, reward: TASK_REWARD[tier] });
-  }
-  save.daily = { day, tasks, bonus: false };
-  persist();
-  return save.daily;
-}
-const taskDone = (t) => (TASKS[t.id].kind === 'rank' ? t.prog <= t.n : t.prog >= t.n);
-function taskText(t) {
-  const T = TASKS[t.id];
-  const prog = T.kind === 'rank' ? (t.prog < 999 ? `лучшее место: ${t.prog}` : 'ещё не было') : `${Math.min(t.n, Math.floor(t.prog))} из ${t.n}`;
-  const frac = T.kind === 'rank' ? (t.prog < 999 ? clamp((100 - t.prog) / (100 - t.n), 0, 1) : 0) : clamp(t.prog / t.n, 0, 1);
-  return { title: T.text(t.n), prog, frac };
-}
-// событие для заданий: sum — прибавить, max — взять наибольшее, rank — наименьшее место
-function taskEvent(id, v) {
-  const d = ensureDaily();
-  for (const t of d.tasks) {
-    if (t.id !== id || t.done) continue;
-    const k = TASKS[id].kind;
-    t.prog = k === 'sum' ? t.prog + v : k === 'max' ? Math.max(t.prog, v) : Math.min(t.prog, v);
-    if (taskDone(t)) {
-      t.done = true;
-      sfx.task();
-      snack(`Задание выполнено: ${TASKS[id].text(t.n)} · +${t.reward} ★`);
-      addXp(t.reward);
-      if (!d.bonus && d.tasks.every((x) => x.done)) {
-        d.bonus = true;
-        setTimeout(() => { banner('Все задания дня!', `+${ALL_TASKS_BONUS} ★`); sfx.level(); addXp(ALL_TASKS_BONUS); }, 1500);
-      }
-    }
-  }
-}
+// ---------- прогрессия: звёзды открывают раскраски ----------
+// Звёзды копятся за всё время: еда, победы, звания, места в таблице. Тратить их не нужно — раскраска открывается,
+// когда накоплено её число звёзд.
+const stars = () => Math.floor(save.xp);
+const unlocked = (sk) => sk.stars <= save.xp;
+const nextSkin = () => SKINS.filter((x) => !unlocked(x)).sort((a, b) => a.stars - b.stars)[0] || null;
 function addXp(n) {
   if (n <= 0) return;
-  const before = myLevel();
+  const before = save.xp;
   save.xp += n;
   if (run) run.xp += n;
-  const after = myLevel();
-  if (after > before) {
-    const sk = SKINS.filter((x) => x.lvl > before && x.lvl <= after);
-    setTimeout(() => {
-      sfx.level();
-      banner(`Уровень ${after}!`, sk.length ? `Открыта раскраска «${sk.map((x) => x.name).join('», «')}»` : 'Так держать!');
-    }, 400);
+  const fresh = SKINS.filter((x) => x.stars > before && x.stars <= save.xp);
+  if (fresh.length) {
+    setTimeout(() => { sfx.level(); banner('Новая раскраска!', `«${fresh.map((x) => x.name).join('», «')}»`); }, 400);
     persist();
   }
 }
 
 // ---------- холст ----------
 const canvas = $('c'), ctx = canvas.getContext('2d');
-const mini = $('mini'), mctx = mini.getContext('2d');
 let W = 0, H = 0, DPR = 1;
 function resize() {
   DPR = Math.min(window.devicePixelRatio || 1, 2);
@@ -263,7 +193,7 @@ let leaderId = 0;        // у кого корона
 const cam = { x: 0, y: 0, z: 1 };
 
 function newRun(diff) {
-  return { diff, xp: 0, kills: 0, eatenBase: 0, eatXp: 0, eatTask: 0, maxTitle: 0, bestRank: 999, flags: new Set(),
+  return { diff, xp: 0, kills: 0, eatenBase: 0, eatXp: 0, eatStat: 0, maxTitle: 0, bestRank: 999, flags: new Set(),
     lifeStart: 0, killTimes: [], revenge: null, feastSeen: new Set(), maxMass: START_MASS, startT: performance.now() };
 }
 // ---------- ввод ----------
@@ -484,8 +414,7 @@ function onEvents(m) {
     if (k.k === net.youId) {
       const v = net.snakes.get(k.v);
       onMyKill(k.vn, k.v, k.vm, k.km, v ? v.segs[0] : null, v ? segColor(v.skin, 0) : GOLD);
-    } else if (k.kh && net.roomMode === 'team' && k.v !== net.youId) snack(`Команда: «${k.vn}» выбывает`);
-    else if (k.vh && k.v !== net.youId && k.kh) snack(`«${k.kn}» обгоняет «${k.vn}»`);
+    }
   }
 }
 function onStats(m) {
@@ -627,9 +556,8 @@ function onNetDeath(m) {
   const who = m.by ? `На пути была змейка «${esc(m.by)}»` : 'Это край арены';
   setTimeout(() => {
     if (ui !== 'dead' || mode !== 'net') return;
-    dialog('Ой!', `<p>${who}.</p><p>Длина была: <b>${m.mass}</b> · побед: <b>${run.kills}</b></p>${runXpLine()}` +
-      `<p>Продолжишь с половиной длины.${m.by ? ` Стрелка покажет, где «${esc(m.by)}», — отомсти!` : ''}</p>`,
-    [{ label: 'Выйти', kind: 'text', onClick: leaveNet }, { label: 'Продолжить', kind: 'filled', icon: 'play', onClick: () => netSend({ t: 'respawn' }) }]);
+    dialog('Ой!', oopsHtml(who, m.mass),
+      [{ label: 'Выйти', kind: 'text', onClick: leaveNet }, { label: 'Продолжить', kind: 'filled', icon: 'play', onClick: () => netSend({ t: 'respawn' }) }]);
   }, 700);
 }
 function startNet(firstMsg) {
@@ -668,13 +596,12 @@ function startSolo(diff) {
   cam.x = me.x; cam.y = me.y;
   cam.z = baseZoom() * 1.3;
   playTime = 0; sessionBest = START_MASS; hudT = 0; lastSoloMass = me.mass;
-  run = newRun(diff); feast = null; effects = [];
-  ensureDaily();
+  run = newRun(diff); feast = null; effects = []; bannerQ = null;
   $('roomBox').hidden = true;
   showHome(false);
   closeDialog();
   ui = 'play';
-  setTimeout(() => { if (run && ui === 'play') banner('На арене 100 змей', 'Расти и стань самой длинной!'); }, 600);
+  showHint();
 }
 function soloEvents(events) {
   for (const e of events) {
@@ -698,8 +625,7 @@ function onSoloDeath(killer) {
     recordBest();
     ui = 'dead';
     run.revenge = killer && killer.alive ? { id: killer.id, name: killer.name } : null;
-    dialog('Ой!', `<p>${who}.</p><p>Длина была: <b>${Math.floor(dead.mass)}</b> · побед: <b>${run.kills}</b></p>${runXpLine()}` +
-      `<p>Продолжишь с половиной длины.${run.revenge ? ` Стрелка покажет, где «${esc(killer.name)}», — отомсти!` : ''}</p>`,
+    dialog('Ой!', oopsHtml(who, dead.mass),
     [{ label: 'В меню', kind: 'text', onClick: toHome }, { label: 'Продолжить', kind: 'filled', icon: 'play', onClick: () => {
       me = world.addHuman({ name: myName(), skin: save.skin, mass: Math.max(START_MASS, dead.mass * 0.5), inv: 3 });
       ui = 'play'; closeDialog(); onRespawn();
@@ -710,8 +636,8 @@ function onSoloDeath(killer) {
     const summary = finishRun();
     setTimeout(() => {
       if (ui !== 'over') return;
-      dialog('Игра окончена', `<p>${who}.</p>${summary}` +
-        `<p class="record">${icon('trophy')}${isNew ? 'Новый рекорд!' : `Рекорд: ${save.best[diffKey]}`}</p>`,
+      dialog('Игра окончена', `${summary}` +
+        `<p class="record">${icon('trophy')}${isNew ? 'Новый рекорд!' : `Рекорд: ${save.best[diffKey]}`}</p><p class="muted">${who}.</p>`,
       [{ label: 'В меню', kind: 'text', onClick: toHome }, { label: 'Ещё раз', kind: 'filled', onClick: () => startSolo(diffKey) }]);
     }, 900);
   }
@@ -731,9 +657,8 @@ function onFeast(x, y, life) {
   setFeast({ x, y, life });
   if (!run) return;
   sfx.feast();
-  snack('На арене появился золотой пир — беги к нему по стрелке!');
 }
-function onMyKill(name, id, vm, km, pos, color) {
+function onMyKill(_name, id, vm, km, pos, color) {
   if (!run) return;
   run.kills++; save.stats.kills++;
   const now = playTime;
@@ -742,18 +667,11 @@ function onMyKill(name, id, vm, km, pos, color) {
   const n = run.killTimes.length;
   let xp = 10 + (vm > km ? 20 : 0) + (n >= 2 ? 10 * n : 0);
   if (pos) effects.push({ x: pos.x, y: pos.y, t: time, c: PAL[color] || GOLD_C, r: radiusOf(vm) });
-  if (run.revenge && run.revenge.id === id) {
-    run.revenge = null; xp += 40;
-    banner('Месть удалась!', `«${name}» побеждён`); sfx.combo(3);
-    taskEvent('revenge', 1);
-  } else if (n >= 2) {
-    banner(['', '', 'Двойная победа!', 'Тройная победа!', 'Мега-серия!'][Math.min(n, 4)], `«${name}» и ещё ${n - 1}`);
-    sfx.combo(n);
-  } else if (vm > km * 1.5 && vm > 300) {
-    banner('Победа над гигантом!', `«${name}» — длина ${Math.floor(vm)}`); sfx.combo(2);
-  } else { snack(`Победа над змейкой «${name}»! +${xp} ★`); sfx.win(); }
-  taskEvent('kills', 1);
-  if (vm > km) taskEvent('giant', 1);
+  // о победах не пишем: вспышка на месте змейки и звук, серия — звонче
+  if (run.revenge && run.revenge.id === id) { run.revenge = null; xp += 40; sfx.combo(3); }
+  else if (n >= 2) sfx.combo(n);
+  else if (vm > km * 1.5 && vm > 300) sfx.combo(2);
+  else sfx.win();
   addXp(xp);
 }
 const RANK_STEPS = [[50, 10, ''], [10, 40, 'Ты в первой десятке!'], [3, 80, 'Ты в тройке лидеров!'], [1, 200, 'Ты — самая длинная змея арены!']];
@@ -780,7 +698,7 @@ function runTick() {
   const total = run.eatenBase + lifeEaten();
   const ex = Math.floor(total / 4);
   if (ex > run.eatXp) { addXp(ex - run.eatXp); run.eatXp = ex; }
-  if (total > run.eatTask + 1) { const d = Math.floor(total - run.eatTask); taskEvent('eat', d); save.stats.eaten += d; run.eatTask += d; }
+  if (total > run.eatStat + 1) { const d = Math.floor(total - run.eatStat); save.stats.eaten += d; run.eatStat += d; }
   const alive = me && (mode === 'net' || me.alive) && ui === 'play';
   if (alive) {
     if (me.mass > run.maxMass) run.maxMass = me.mass;
@@ -791,17 +709,14 @@ function runTick() {
       if (ti >= 2) { banner(TITLES[ti][1], 'новое звание'); sfx.title(); }
       addXp(ti * 10);
     }
-    taskEvent('grow', me.mass);
-    taskEvent('survive', Math.floor((playTime - run.lifeStart) / 60));
     const rk = myRank();
     if (rk && playTime > 3) {
       if (rk.rank < run.bestRank) run.bestRank = rk.rank;
-      taskEvent('top', rk.rank);
       for (const [lim, xp, text] of RANK_STEPS) {
         if (rk.rank <= lim && !run.flags.has(lim)) {
           run.flags.add(lim);
           addXp(xp);
-          if (text) { banner(`Место ${rk.rank}`, text); sfx.title(); } else snack(`Ты в первой полусотне! +${xp} ★`);
+          if (text) { banner(`Место ${rk.rank}`, text); sfx.title(); }
         }
       }
     }
@@ -809,14 +724,13 @@ function runTick() {
       const key = `${Math.round(feast.x)},${Math.round(feast.y)}`;
       if (!run.feastSeen.has(key) && Math.hypot(me.segs[0].x - feast.x, me.segs[0].y - feast.y) < 420) {
         run.feastSeen.add(key);
-        taskEvent('feast', 1); addXp(15);
-        snack('Золотой пир! Ешь скорее, пока не растащили');
+        addXp(15);
       }
     }
   }
   if (run.revenge) {
     const t = revengeTarget();
-    if (t === false) { snack(`«${run.revenge.name}» уже выбыл без тебя`); run.revenge = null; }
+    if (t === false) run.revenge = null;
   }
   persistT -= 0.25;
   if (persistT <= 0) { persistT = 5; persist(); }
@@ -834,51 +748,44 @@ function revengeTarget() {
   if (net.rv === 0) return false;      // сервер сказал, что обидчика больше нет
   return net.rv ? { x: net.rv[0], y: net.rv[1] } : null;
 }
-function runXpLine() {
-  return run ? `<p class="xp-line">${icon('star')}+${run.xp} звёзд за эту игру</p>` : '';
+// звёзды за игру и сколько осталось до следующей раскраски
+function unlockHtml(xp) {
+  const nx = nextSkin();
+  const prev = nx ? Math.max(0, ...SKINS.filter(unlocked).map((x) => x.stars)) : 0;
+  const bar = nx ? `<div class="bar"><i style="width:${(100 * clamp((save.xp - prev) / (nx.stars - prev), 0, 1)).toFixed(1)}%"></i></div>` +
+    `<small>до раскраски «${esc(nx.name)}» ещё ${nx.stars - stars()} ★</small>` : '<small>открыты все раскраски!</small>';
+  return `<div class="unlock"><span class="xp">${icon('star')}+${xp}</span>${bar}</div>`;
 }
-function levelHtml() {
-  const L = levelOf(save.xp);
-  return `<div class="lvl"><div class="badge"><small>УР.</small>${L.lvl}</div><div class="info"><b>Уровень ${L.lvl}</b>` +
-    `<div class="bar gold"><i style="width:${(100 * L.cur / L.need).toFixed(1)}%"></i></div>` +
-    `<span>${icon('star').replace('class="i"', 'class="i star" style="width:14px;height:14px;vertical-align:-2px"')} ${L.cur} из ${L.need} до следующего</span></div></div>`;
-}
-// итоги игры: звёзды уже начислены по ходу, здесь — статистика и сохранение
+const oopsHtml = (who, mass) => `<p>${who}.</p><div class="big-num">${Math.floor(mass)}</div>` +
+  `<p class="muted">Продолжишь с половиной длины.</p>`;
 function finishRun() {
   if (!run) return '';
   runTick();
   const r = run;
   save.stats.games++;
   persist();
-  const html = `<div class="big-num">${Math.floor(r.maxMass)}</div><p>лучшая длина · звание «${TITLES[r.maxTitle][1]}»</p>` +
-    `<div class="sum"><div><b>${r.bestRank < 999 ? `#${r.bestRank}` : '—'}</b><small>лучшее место</small></div>` +
-    `<div><b>${r.kills}</b><small>побед над змеями</small></div><div><b>${fmtTime(playTime)}</b><small>время</small></div>` +
-    `<div><b class="star">+${r.xp} ★</b><small>звёзд</small></div></div>${levelHtml()}`;
+  const html = `<div class="big-num">${Math.floor(r.maxMass)}</div><p class="title-line">${TITLES[r.maxTitle][1]}</p>${unlockHtml(r.xp)}`;
   run = null;
   return html;
 }
 
 // ---------- меню, пауза ----------
-function tasksHtml() {
-  const d = ensureDaily();
-  return `<div class="tasks">${d.tasks.map((t) => {
-    const x = taskText(t);
-    return `<div class="task${t.done ? ' done' : ''}"><span class="ti">${icon(t.done ? 'check' : 'flag')}</span>` +
-      `<span class="tt">${esc(x.title)}<div class="bar"><i style="width:${(x.frac * 100).toFixed(0)}%"></i></div><small>${x.prog}</small></span>` +
-      `<span class="rw">${t.done ? 'готово' : `+${t.reward} ★`}</span></div>`;
-  }).join('')}</div>`;
-}
+const soundAction = () => ({
+  label: '', kind: 'text sound', icon: save.sound ? 'vol' : 'volOff', aria: 'Звук',
+  onClick: (e) => {
+    save.sound = !save.sound; persist(); ensureAudio();
+    e.currentTarget.innerHTML = icon(save.sound ? 'vol' : 'volOff');
+  },
+});
 function openMenu() {
   if (ui !== 'play') return;
   if (mode === 'solo') {
     ui = 'paused';
-    dialog('Пауза', `${runXpLine()}<div class="sub">Задания на сегодня</div>${tasksHtml()}`,
-      [{ label: 'В меню', kind: 'text', onClick: toHome }, { label: 'Продолжить', kind: 'filled', icon: 'play', onClick: resume }]);
+    dialog('Пауза', '', [soundAction(), { label: 'В меню', kind: 'text', onClick: toHome }, { label: 'Продолжить', kind: 'filled', onClick: resume }]);
   } else if (mode === 'net') {
-    dialog(`Комната ${net.code}`, `<p>Игра продолжается, пока открыто меню.</p><p>${net.roomMode === 'team' ? 'Команда против ботов' : 'Все против всех'} · боты: ${DIFF[net.diff].label.toLowerCase()}</p>` +
-      `${runXpLine()}<div class="sub">Задания на сегодня</div>${tasksHtml()}`,
-    [{ label: 'Выйти', kind: 'text', onClick: leaveNet }, { label: 'Пригласить', kind: 'tonal', icon: 'share', onClick: shareRoom },
-      { label: 'Играть', kind: 'filled', onClick: closeDialog }]);
+    dialog(`Комната ${net.code}`, `<p>${net.roomMode === 'team' ? 'Команда против ботов' : 'Все против всех'} · боты: ${DIFF[net.diff].label.toLowerCase()}</p>` +
+      '<p>Игра продолжается, пока открыто меню.</p>',
+    [soundAction(), { label: 'Выйти', kind: 'text', onClick: leaveNet }, { label: 'Играть', kind: 'filled', onClick: closeDialog }]);
   }
 }
 function resume() { if (ui === 'paused') { ui = 'play'; closeDialog(); last = performance.now(); } }
@@ -889,16 +796,13 @@ document.addEventListener('visibilitychange', () => {
   if (!document.hidden && mode === 'net' && !net.ws && !net.leaving) netReconnect();
 });
 window.addEventListener('pagehide', persist);
-const soundBtn = $('btnSound');
-const renderSound = () => { soundBtn.innerHTML = icon(save.sound ? 'vol' : 'volOff'); };
-soundBtn.addEventListener('click', () => { save.sound = !save.sound; persist(); renderSound(); ensureAudio(); });
-renderSound();
 
 function toHome() {
   if (mode === 'solo' && me) recordBest();
   if (run) finishRun();
-  mode = null; me = null; ui = 'home'; feast = null; effects = [];
+  mode = null; me = null; ui = 'home'; feast = null; effects = []; bannerQ = null;
   closeDialog();
+  hideHint();
   world = new World({ diff: 'easy', bots: 45, foodN: 3500 }); // демо за меню — полегче для телефона
   demoFocus = null;
   cam.x = 0; cam.y = 0;
@@ -908,6 +812,7 @@ function toHome() {
 function showHome(v) {
   $('home').hidden = !v;
   $('hud').hidden = v;
+  if (!v) $('name').blur();
   $('btnMenu').innerHTML = icon(mode === 'net' ? 'menu' : 'pause');
 }
 
@@ -921,7 +826,8 @@ function dialog(title, body, actions) {
     const b = document.createElement('button');
     b.className = `btn ${a.kind || 'text'}`;
     b.innerHTML = (a.icon ? icon(a.icon) : '') + esc(a.label);
-    b.addEventListener('click', a.onClick);
+    if (a.aria) b.setAttribute('aria-label', a.aria);
+    b.addEventListener('click', (e) => a.onClick(e));
     box.appendChild(b);
   }
   $('dlg').hidden = false;
@@ -934,8 +840,18 @@ function snack(text) {
   clearTimeout(snackTimer);
   snackTimer = setTimeout(() => s.classList.remove('show'), 2400);
 }
-// крупная надпись по центру: звания, места, серии побед, уровни
+// крупная надпись по центру: звания, места, новые раскраски. Одна за раз: следующая ждёт конца текущей,
+// а из ждущих остаётся только последняя — чтобы не было ленты надписей.
+let bannerUntil = 0, bannerQ = null, bannerTimer = 0;
 function banner(title, sub = '') {
+  const now = performance.now();
+  if (now < bannerUntil) {
+    bannerQ = [title, sub];
+    clearTimeout(bannerTimer);
+    bannerTimer = setTimeout(() => { const q = bannerQ; bannerQ = null; if (q && mode) banner(...q); }, bannerUntil - now + 200);
+    return;
+  }
+  bannerUntil = now + 2600;
   const b = $('banner');
   b.querySelector('b').textContent = title;
   b.querySelector('small').textContent = sub;
@@ -944,78 +860,132 @@ function banner(title, sub = '') {
   b.classList.add('show');
 }
 
+// подсказка управления — только в первой игре на устройстве
+let hintTimer = 0;
+function showHint() {
+  if (save.hinted) return;
+  const h = $('hint');
+  h.textContent = inputKind === 'touch' ? 'Коснись экрана и веди пальцем — змейка ползёт следом. Молния — ускорение'
+    : 'Змейка ползёт к курсору. Кнопка мыши или пробел — ускорение';
+  h.hidden = false; h.classList.remove('fade');
+  clearTimeout(hintTimer);
+  hintTimer = setTimeout(() => { h.classList.add('fade'); save.hinted = true; persist(); hintTimer = setTimeout(hideHint, 700); }, 6000);
+}
+function hideHint() { clearTimeout(hintTimer); $('hint').hidden = true; }
+
 // ---------- главный экран ----------
 const nameInput = $('name');
 nameInput.value = save.name;
 nameInput.addEventListener('input', () => { save.name = nameInput.value.trim().slice(0, 12); persist(); });
 nameInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') nameInput.blur(); });
-const skinsEl = $('skins');
-// превью раскраски — полоски её цветов
-const skinBg = (sk) => {
-  const cols = [];
-  for (let i = 0; i < 8; i++) cols.push(PAL[sk.p[Math.floor(i * Math.max(1, sk.p.length / 8)) % sk.p.length]]);
-  return `linear-gradient(135deg,${cols.map((c, i) => `${c} ${(i * 12.5).toFixed(1)}% ${((i + 1) * 12.5).toFixed(1)}%`).join(',')})`;
-};
-SKINS.forEach((sk, i) => {
-  const b = document.createElement('button');
-  b.className = 'skin';
-  b.style.background = skinBg(sk);
-  b.setAttribute('aria-label', sk.name);
-  b.addEventListener('click', () => {
-    if (sk.lvl > myLevel()) { $('skinName').textContent = `«${sk.name}» откроется на ${sk.lvl} уровне`; return; }
-    save.skin = i; persist(); renderHome();
-  });
-  skinsEl.appendChild(b);
-});
-document.querySelectorAll('.item[data-d]').forEach((b) => b.addEventListener('click', () => startSolo(b.dataset.d)));
-function renderHome() {
-  const lvl = myLevel();
-  if (!SKINS[save.skin] || SKINS[save.skin].lvl > lvl) save.skin = 0;
-  $('lvl').outerHTML = levelHtml().replace('class="lvl"', 'class="lvl" id="lvl"');
-  [...skinsEl.children].forEach((b, i) => {
-    const sk = SKINS[i], locked = sk.lvl > lvl;
-    b.classList.toggle('sel', i === save.skin);
-    b.classList.toggle('locked', locked);
-    b.innerHTML = locked ? `${icon('lock')}<span class="lv">ур. ${sk.lvl}</span>` : icon('check');
-  });
-  const next = SKINS.filter((x) => x.lvl > lvl).sort((a, b) => a.lvl - b.lvl)[0];
-  $('skinName').textContent = `«${SKINS[save.skin].name}»` + (next ? ` · следующая раскраска на ${next.lvl} уровне` : ' · открыты все раскраски!');
-  const d = ensureDaily();
-  $('tasks').innerHTML = tasksHtml().replace(/^<div class="tasks">|<\/div>$/g, '');
-  $('tasksNote').textContent = d.tasks.every((t) => t.done) ? 'все выполнены — завтра будут новые' : `за все три — ещё +${ALL_TASKS_BONUS} ★`;
-  for (const k of Object.keys(DIFF)) {
-    const v = save.best[k] || 0;
-    $(`best-${k}`).innerHTML = v ? `<span class="chip">${icon('trophy')}${v}</span>` : '';
-  }
-  const online = navigator.onLine !== false;
-  const note = $('netNote');
-  note.hidden = online;
-  note.className = 'note warn';
-  note.innerHTML = `${icon('cloudOff')}<span>Сейчас нет интернета — совместная игра недоступна.</span>`;
-  $('btnCreate').disabled = !online;
-  $('btnJoin').disabled = !online;
-}
-window.addEventListener('online', renderHome);
-window.addEventListener('offline', renderHome);
 
-// создать комнату
+// раскраска: стрелками листаются все, играть можно только открытыми
+let viewSkin = save.skin;
+const stepSkin = (d) => { viewSkin = (viewSkin + d + SKINS.length) % SKINS.length; if (unlocked(SKINS[viewSkin])) { save.skin = viewSkin; persist(); } renderHome(); };
+$('skinPrev').addEventListener('click', () => stepSkin(-1));
+$('skinNext').addEventListener('click', () => stepSkin(1));
+// свайп по змейке тоже листает
+let swipeX = null;
+const pv = $('preview'), pctx = pv.getContext('2d');
+pv.addEventListener('pointerdown', (e) => { swipeX = e.clientX; });
+pv.addEventListener('pointerup', (e) => { if (swipeX !== null && Math.abs(e.clientX - swipeX) > 40) stepSkin(e.clientX < swipeX ? 1 : -1); swipeX = null; });
+
+$('diff').addEventListener('click', (e) => {
+  const b = e.target.closest('button');
+  if (!b) return;
+  save.diff = b.dataset.d; persist(); renderHome();
+});
+$('btnPlay').addEventListener('click', () => startSolo(save.diff));
+
+function renderHome() {
+  if (!unlocked(SKINS[save.skin])) save.skin = 0;
+  if (!SKINS[viewSkin]) viewSkin = save.skin;
+  $('stars').innerHTML = `${icon('star')}${stars()}`;
+  const sk = SKINS[viewSkin], open = unlocked(sk);
+  $('skinName').textContent = sk.name;
+  $('skinLock').innerHTML = open ? '' : `${icon('lock')}откроется за ${sk.stars - stars()} ★`;
+  document.querySelectorAll('#diff button').forEach((b) => b.classList.toggle('on', b.dataset.d === save.diff));
+  const v = save.best[save.diff] || 0;
+  $('best').innerHTML = v ? `${icon('trophy')}рекорд ${v}` : '';
+}
+
+// превью: змейка выбранной раскраски ползёт волной на месте
+function drawPreview() {
+  const cw = pv.clientWidth, ch = pv.clientHeight;
+  if (!cw || !ch) return;
+  if (pv.width !== Math.round(cw * DPR) || pv.height !== Math.round(ch * DPR)) { pv.width = Math.round(cw * DPR); pv.height = Math.round(ch * DPR); }
+  const g = pctx, sk = SKINS[viewSkin], open = unlocked(sk);
+  g.setTransform(1, 0, 0, 1, 0, 0);
+  g.clearRect(0, 0, pv.width, pv.height);
+  const r = Math.min(ch * 0.14, cw / 26), n = 34, sp = r * 0.62, len = n * sp;
+  const x0 = cw / 2 + len / 2, cy = ch / 2;
+  const pts = [];
+  for (let i = 0; i <= n; i++) {
+    const x = x0 - i * sp;
+    pts.push({ x, y: cy + Math.sin(x / (r * 3.2) - time * 3) * ch * 0.2 });
+  }
+  g.globalAlpha = open ? 1 : 0.35;
+  const hb = BSPR / 2;
+  for (let i = n - (n & 1); i >= 2; i -= 2) {
+    const q = pts[i], p = pts[i - 1], o = pts[i + 1] || q;
+    const rr = i > n - 6 ? r * (0.55 + 0.45 * (n - i) / 6) : r;
+    let dx = p.x - o.x, dy = p.y - o.y;
+    const sc = DPR * rr / hb / (Math.hypot(dx, dy) || 1);
+    dx *= sc; dy *= sc;
+    g.setTransform(dx, dy, -dy, dx, DPR * q.x, DPR * q.y);
+    g.drawImage(beadSprite(segColor(viewSkin, i)), -hb, -hb);
+  }
+  g.setTransform(DPR, 0, 0, DPR, 0, 0);
+  const h = pts[0], a = Math.atan2(h.y - pts[1].y, h.x - pts[1].x), hr = r * 1.1;
+  g.drawImage(headSprite(sk.head), h.x - hr, h.y - hr, hr * 2, hr * 2);
+  for (const side of [-1, 1]) {
+    const ex = h.x + Math.cos(a + side * 0.6) * r * 0.55, ey = h.y + Math.sin(a + side * 0.6) * r * 0.55;
+    g.beginPath(); g.arc(ex, ey, r * 0.36, 0, TAU); g.fillStyle = '#FFFFFF'; g.fill();
+    g.beginPath(); g.arc(ex + Math.cos(a) * r * 0.14, ey + Math.sin(a) * r * 0.14, r * 0.2, 0, TAU); g.fillStyle = '#1A1C19'; g.fill();
+  }
+  g.globalAlpha = 1;
+}
+
+// играть вместе: создать комнату или войти по коду
 let createOpts = { mode: 'team', diff: 'easy' };
 function segHtml(name, opts) {
   return `<div class="seg" data-seg="${name}">${opts.map(([v, l]) =>
     `<button data-v="${v}" class="${createOpts[name] === v ? 'on' : ''}">${icon('check')}${l}</button>`).join('')}</div>`;
 }
+function openTogether() {
+  if (navigator.onLine === false) {
+    dialog('Нужен интернет', '<p>Играть вместе можно только через интернет. Одному — и без сети.</p>', [{ label: 'Понятно', kind: 'filled', onClick: closeDialog }]);
+    return;
+  }
+  dialog('Играть вместе',
+    `<button class="btn filled big wide" id="dCreate">${icon('group')}Создать комнату</button>` +
+    '<div class="or">или войди по коду</div>' +
+    '<div class="join"><div class="field"><input id="code" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="off" placeholder=" ">' +
+    '<label for="code">Код комнаты</label></div><button class="btn tonal big" id="dJoin">Войти</button></div>',
+    [{ label: 'Закрыть', kind: 'text', onClick: closeDialog }]);
+  const code = $('code');
+  code.addEventListener('input', () => { code.value = code.value.replace(/\D/g, '').slice(0, 4); });
+  const join = () => {
+    if (!/^\d{4}$/.test(code.value)) { code.focus(); return; }
+    code.blur();
+    startNet(hello({ t: 'join', code: code.value }));
+  };
+  $('dJoin').addEventListener('click', join);
+  code.addEventListener('keydown', (e) => { if (e.key === 'Enter') join(); });
+  $('dCreate').addEventListener('click', openCreate);
+}
+$('btnTogether').addEventListener('click', openTogether);
 function openCreate() {
   dialog('Новая комната',
     `<div class="sub">Режим</div>${segHtml('mode', [['team', 'Команда'], ['ffa', 'Все против всех']])}` +
     '<p class="hint" id="modeHint"></p>' +
-    `<div class="sub">Боты</div>${segHtml('diff', [['easy', 'Лёгкие'], ['medium', 'Средние'], ['hard', 'Сложные']])}` +
-    '<p class="hint">После проигрыша в комнате всегда можно продолжить.</p>',
+    `<div class="sub">Боты</div>${segHtml('diff', [['easy', 'Лёгкие'], ['medium', 'Средние'], ['hard', 'Сложные']])}`,
     [{ label: 'Отмена', kind: 'text', onClick: closeDialog },
       { label: 'Создать', kind: 'filled', onClick: () => startNet(hello({ t: 'create', ...createOpts })) }]);
   const hint = () => {
     $('modeHint').textContent = createOpts.mode === 'team'
       ? 'Свои змейки проходят друг сквозь друга — играете вместе против ботов.'
-      : 'Как в одиночной игре: подрезать можно и друг друга.';
+      : 'Подрезать можно и друг друга.';
   };
   hint();
   document.querySelectorAll('#dlg .seg').forEach((seg) => {
@@ -1028,40 +998,35 @@ function openCreate() {
     });
   });
 }
-$('btnCreate').addEventListener('click', openCreate);
-const codeInput = $('code');
-codeInput.addEventListener('input', () => { codeInput.value = codeInput.value.replace(/\D/g, '').slice(0, 4); });
-const joinByCode = () => {
-  const code = codeInput.value.trim();
-  if (!/^\d{4}$/.test(code)) { snackHome('Код комнаты — 4 цифры'); codeInput.focus(); return; }
-  codeInput.blur();
-  startNet(hello({ t: 'join', code }));
-};
-$('btnJoin').addEventListener('click', joinByCode);
-codeInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') joinByCode(); });
-function snackHome(text) {
-  dialog('Код комнаты', `<p>${esc(text)}</p>`, [{ label: 'Понятно', kind: 'filled', onClick: closeDialog }]);
-}
 
-$('help').innerHTML = (isTouch
-  ? 'Управление: коснись экрана в любом месте и веди пальцем — это джойстик. Держи молнию, чтобы ускориться: это тратит немного длины.'
-  : 'Управление: змейка ползёт к курсору мыши. Левая кнопка или пробел — ускорение, тратит немного длины. Можно стрелками ← →. Пауза — Esc.') +
-  ' Подрежь соперника — пусть врежется в тебя головой. Золотой пир и обидчик отмечены стрелками у края экрана.';
-$('ver').textContent = `версия ${VERSION}`;
-
-// ---------- офлайн ----------
+// ---------- как играть и офлайн ----------
 const isStandalone = (window.matchMedia && matchMedia('(display-mode: standalone)').matches) ||
   (window.matchMedia && matchMedia('(display-mode: fullscreen)').matches) || navigator.standalone === true;
 const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 function installHint() {
   if (isStandalone) return '';
-  if (isIOS) return ' Чтобы играть в самолёте: Safari → «Поделиться» → «На экран „Домой“», затем один раз открой игру с иконки, пока есть интернет.';
-  if (/Android/.test(navigator.userAgent)) return ' Чтобы играть в самолёте: Chrome → ⋮ → «Добавить на главный экран», затем один раз открой игру с иконки при интернете.';
+  if (isIOS) return 'Чтобы играть в самолёте: Safari → «Поделиться» → «На экран „Домой“», затем один раз открой игру с иконки, пока есть интернет.';
+  if (/Android/.test(navigator.userAgent)) return 'Чтобы играть в самолёте: Chrome → ⋮ → «Добавить на главный экран», затем один раз открой игру с иконки при интернете.';
   return '';
 }
+let offline = { cls: '', ic: 'cloudOff', text: 'Проверяю, сохранена ли игра для офлайна…' };
+function renderFoot() {
+  const f = $('btnInfo');
+  f.className = `foot ${offline.cls}`;
+  f.innerHTML = `${icon(offline.ic)}Как играть · версия ${VERSION}`;
+}
+$('btnInfo').addEventListener('click', () => {
+  const ctl = isTouch
+    ? 'Коснись экрана в любом месте и веди пальцем — это джойстик. Держи молнию, чтобы ускориться: это тратит немного длины.'
+    : 'Змейка ползёт к курсору мыши. Левая кнопка или пробел — ускорение, тратит немного длины. Можно стрелками ← →. Пауза — Esc.';
+  const ih = offline.cls === 'ok' ? installHint() : '';
+  dialog('Как играть', `<p>${ctl}</p><p>Подрежь соперника — пусть врежется в тебя головой. Золотой пир и обидчик отмечены стрелками у края экрана.</p>` +
+    `<p>Звёзды за еду, победы и места открывают новые раскраски.</p>` +
+    `<div class="note ${offline.cls}">${icon(offline.ic)}<span>${offline.text}${ih ? ` ${ih}` : ''}</span></div>`,
+  [{ label: 'Понятно', kind: 'filled', onClick: closeDialog }]);
+});
 async function checkOffline() {
-  const el = $('offline');
-  const set = (cls, ic, text) => { el.className = `note ${cls}`; el.innerHTML = `${icon(ic)}<span>${text}</span>`; };
+  const set = (cls, ic, text) => { offline = { cls, ic, text }; renderFoot(); };
   if (!('serviceWorker' in navigator) || !window.caches) { set('warn', 'cloudOff', 'Этот браузер не умеет сохранять игру для офлайна.'); return; }
   try {
     await navigator.serviceWorker.register('sw.js');
@@ -1072,12 +1037,13 @@ async function checkOffline() {
       const c = await caches.open(k);
       if ((await c.match('index.html')) && (await c.match('client.js')) && (await c.match('core.js'))) ok = true;
     }
-    if (ok) set('ok', 'cloudDone', 'Игра сохранена на устройстве: одиночная игра работает без интернета.' + installHint());
-    else { set('', 'cloudOff', 'Сохраняю игру для офлайна…' + installHint()); setTimeout(checkOffline, 1500); }
+    if (ok) set('ok', 'cloudDone', 'Игра сохранена на устройстве: одному можно играть без интернета.');
+    else { set('', 'cloudOff', 'Сохраняю игру для офлайна…'); setTimeout(checkOffline, 1500); }
   } catch (e) {
     set('warn', 'cloudOff', 'Не получилось включить офлайн-режим: ' + esc(e.message));
   }
 }
+renderFoot();
 checkOffline();
 
 // ---------- камера ----------
@@ -1164,7 +1130,7 @@ function drawSnake(s, vx0, vy0, vx1, vy1) {
     ctx.lineWidth = 3 / cam.z; ctx.strokeStyle = REVENGE; ctx.stroke();
   }
   if (s.id === leaderId) drawCrown(h.x, h.y - r - 30 / cam.z, Math.max(r * 0.6, 10 / cam.z));
-  if (mode !== null || s === demoFocus) {
+  if (mode !== null) {
     ctx.font = `500 ${Math.round(13 / cam.z)}px Roboto, system-ui, sans-serif`;
     ctx.textAlign = 'center';
     ctx.fillStyle = s === me ? PRIMARY : rv ? REVENGE : isMate(s) ? TERTIARY : hexA(ON, 0.75);
@@ -1191,7 +1157,7 @@ function drawJoystick() {
   ctx.fillStyle = hexA(PRIMARY, 0.85); ctx.fill();
 }
 // стрелка у края экрана к цели за его пределами
-function drawPointer(tx, ty, color, label) {
+function drawPointer(tx, ty, color) {
   const sx = W / 2 + (tx - cam.x) * cam.z, sy = H / 2 + (ty - cam.y) * cam.z;
   const pad = 54;
   if (sx > pad && sx < W - pad && sy > pad && sy < H - pad) return;
@@ -1206,11 +1172,6 @@ function drawPointer(tx, ty, color, label) {
   ctx.fillStyle = color; ctx.fill();
   ctx.lineWidth = 2; ctx.strokeStyle = 'rgba(0,0,0,.5)'; ctx.stroke();
   ctx.restore();
-  ctx.font = '600 12px Roboto, system-ui, sans-serif';
-  ctx.textAlign = 'center';
-  ctx.fillStyle = color;
-  const lx = px - Math.cos(a) * 26, ly = py - Math.sin(a) * 26 + 4;
-  ctx.fillText(`${label} · ${Math.round(Math.hypot(tx - (me ? me.segs[0].x : cam.x), ty - (me ? me.segs[0].y : cam.y)) / 100)} м`, lx, ly);
 }
 function sceneSnakes() {
   if (mode === 'net') { const out = []; for (const s of net.snakes.values()) if (s.visible) out.push(s); return out; }
@@ -1261,43 +1222,11 @@ function draw() {
   ctx.globalAlpha = 1;
 
   if (mode) {
-    if (feast && time < feast.until) drawPointer(feast.x, feast.y, GOLD_C, 'Пир');
+    if (feast && time < feast.until) drawPointer(feast.x, feast.y, GOLD_C);
     const rt = revengeTarget();
-    if (rt) drawPointer(rt.x, rt.y, REVENGE, run.revenge.name);
+    if (rt) drawPointer(rt.x, rt.y, REVENGE);
   }
   drawJoystick();
-}
-
-function drawMini() {
-  const S = mini.width, c = S / 2, k = (S / 2 - 8) / R;
-  mctx.clearRect(0, 0, S, S);
-  mctx.beginPath(); mctx.arc(c, c, S / 2 - 4, 0, TAU);
-  mctx.fillStyle = 'rgba(39,43,39,0.9)'; mctx.fill();
-  mctx.lineWidth = 3; mctx.strokeStyle = hexA(EDGE, 0.7); mctx.stroke();
-  const dot = (x, y, m, color) => {
-    const sz = 2 + Math.min(7, radiusOf(m) / 8);
-    mctx.fillStyle = color;
-    mctx.fillRect(c + x * k - sz / 2, c + y * k - sz / 2, sz, sz);
-  };
-  if (mode === 'net') {
-    const lb = net.lb;
-    if (lb) {
-      for (let i = 0; i < lb.mm.length; i += 3) dot(lb.mm[i] * 25, lb.mm[i + 1] * 25, lb.mm[i + 2], 'rgba(194,201,189,0.45)');
-      for (const h of lb.hum) if (h[0] !== net.youId && net.roomMode === 'team' && h[5] === net.myTeam) dot(h[2], h[3], 400, TERTIARY);
-    }
-  } else {
-    for (const s of sceneSnakes()) if (s !== me) dot(s.segs[0].x, s.segs[0].y, s.mass, s.id === leaderId ? GOLD_C : 'rgba(194,201,189,0.45)');
-  }
-  if (feast && time < feast.until) {
-    mctx.beginPath(); mctx.arc(c + feast.x * k, c + feast.y * k, 7 + 2 * Math.sin(time * 6), 0, TAU);
-    mctx.fillStyle = GOLD_C; mctx.fill();
-  }
-  const rt = mode ? revengeTarget() : null;
-  if (rt) { mctx.beginPath(); mctx.arc(c + rt.x * k, c + rt.y * k, 6, 0, TAU); mctx.fillStyle = REVENGE; mctx.fill(); }
-  if (me && (mode === 'net' || me.alive)) {
-    mctx.beginPath(); mctx.arc(c + me.segs[0].x * k, c + me.segs[0].y * k, 8, 0, TAU);
-    mctx.fillStyle = PRIMARY; mctx.fill();
-  }
 }
 
 let hudT = 0;
@@ -1306,35 +1235,25 @@ function updateHud(dt) {
   if (hudT > 0) return;
   hudT = 0.25;
   runTick();
-  const snakes = sceneSnakes();
   let len = 0;
   if (mode === 'solo' && me) len = Math.floor(me.alive ? me.mass : me.maxMass);
   else if (mode === 'net') len = Math.floor(me ? me.mass : (net.deadInfo ? net.deadInfo.mass : 0));
-  const ti = titleOf(len), nextT = TITLES[ti + 1];
-  const frac = nextT ? clamp((len - TITLES[ti][0]) / (nextT[0] - TITLES[ti][0]), 0, 1) : 1;
   const rk = myRank();
-  let sub = `${TITLES[ti][1]}${nextT ? ` → ${nextT[1]}` : ''}`;
-  if (mode === 'net' && net.roomMode === 'team' && net.lb) {
-    const team = net.lb.hum.filter((h) => h[5] === net.myTeam).reduce((a, h) => a + h[4], 0);
-    sub += ` · команда ${team}`;
-  }
-  $('score').innerHTML = `<b>Длина ${len}</b>` +
-    `<small class="rk">${rk ? `#${rk.rank} из ${rk.n} · ` : ''}<span class="star">${icon('star')}+${run ? run.xp : 0}</span></small>` +
-    `<div class="bar"><i style="width:${(frac * 100).toFixed(0)}%"></i></div><small>${esc(sub)}</small>`;
+  $('score').innerHTML = `<b>${len}</b>${rk ? `<small>#${rk.rank}</small>` : ''}`;
 
-  // таблица лидеров: в одиночной — весь мир, в комнате — с сервера
+  // топ-3 и своя строка: в одиночной — весь мир, в комнате — с сервера
   let rows;
   if (mode === 'net') rows = net.lb ? net.lb.top.map((t) => ({ id: t[0], name: t[1], mass: t[2], human: t[3], team: t[4] })) : [];
-  else rows = snakes.slice().sort((a, b) => b.mass - a.mass).slice(0, 5);
+  else rows = sceneSnakes().filter((s) => s.alive).sort((a, b) => b.mass - a.mass).slice(0, 3);
   leaderId = rows.length ? rows[0].id : 0;
   const myId = mode === 'net' ? net.youId : me && me.id;
-  let html = `<div class="head"><span>Самые длинные</span><span>${rk ? rk.n : snakes.length} змей</span></div>`;
   const row = (s, i) => {
     const cls = s.id === myId ? ' me' : (mode === 'net' && net.roomMode === 'team' && s.human && s.team === net.myTeam) ? ' mate' : '';
-    return `<div class="row${cls}"><span>${i === 0 ? `<span class="c">${icon('trophy').replace('class="i"', 'class="i" style="width:12px;height:12px;vertical-align:-1px"')}</span>` : `${i + 1}. `}${esc(s.name)}</span><span>${Math.floor(s.mass)}</span></div>`;
+    const place = i === 0 ? `<span class="c">${icon('trophy').replace('class="i"', 'class="i" style="width:12px;height:12px;vertical-align:-1px"')}</span> ` : `${i + 1}. `;
+    return `<div class="row${cls}"><span>${place}${esc(s.name)}</span><span>${Math.floor(s.mass)}</span></div>`;
   };
-  rows.slice(0, 5).forEach((s, i) => { html += row(s, i); });
-  if (rk && rk.rank > 5 && me) html += `<div class="sep"></div>${row({ id: myId, name: me.name, mass: me.mass }, rk.rank - 1)}`;
+  let html = rows.slice(0, 3).map(row).join('');
+  if (rk && rk.rank > 3 && me) html += `${rk.rank > 4 ? '<div class="gap">···</div>' : ''}${row({ id: myId, name: me.name, mass: me.mass }, rk.rank - 1)}`;
   $('board').innerHTML = html;
 }
 
@@ -1367,7 +1286,8 @@ function frame(now) {
   if (ui !== 'paused') {
     updateCamera(dt);
     draw();
-    if (mode) { drawMini(); updateHud(dt); }
+    if (mode) updateHud(dt);
+    else if (!$('home').hidden) drawPreview();
   }
   requestAnimationFrame(frame);
 }
@@ -1378,8 +1298,7 @@ requestAnimationFrame(frame);
 // приглашение по ссылке ?room=1234
 const inviteCode = new URLSearchParams(location.search).get('room');
 if (inviteCode && /^\d{4}$/.test(inviteCode)) {
-  codeInput.value = inviteCode;
-  dialog(`Комната ${inviteCode}`, '<p>Тебя зовут играть вместе. Проверь имя и цвет змейки на главном экране или заходи сразу.</p>',
+  dialog(`Комната ${inviteCode}`, '<p>Тебя зовут играть вместе. Проверь имя и раскраску на главном экране или заходи сразу.</p>',
     [{ label: 'Позже', kind: 'text', onClick: closeDialog }, { label: 'Войти', kind: 'filled', onClick: () => startNet(hello({ t: 'join', code: inviteCode })) }]);
 }
 
