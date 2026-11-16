@@ -56,22 +56,57 @@ const hello = (o) => ({ ...o, name: myName(), skin: save.skin, token: TOKEN, v: 
 // iPhone: звук включается только из «настоящего» жеста (касание отпущено, клик, клавиша), а не из pointerdown;
 // после сворачивания или звонка контекст становится 'interrupted' и сам не просыпается. Беззвучный режим
 // (переключатель сбоку) Web Audio слушается — так решил владелец.
-let actx = null, lastEatSound = 0;
+let actx = null, bus = null, lastEatSound = 0; // bus — общий вход звуков: громкость и компрессор
 let audioStuck = 0, resumeBusy = false; // с какого момента жесты не будят контекст; ждём ли ответа resume()
 function newAudio() {
   try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch { actx = null; return; }
+  try { // компрессор: звуки громче (динамик телефона тихий), а наложенные не хрипят
+    const comp = actx.createDynamicsCompressor();
+    comp.threshold.value = -18; comp.knee.value = 12; comp.ratio.value = 6; comp.attack.value = 0.003; comp.release.value = 0.15;
+    bus = actx.createGain(); bus.gain.value = 1;
+    bus.connect(comp); comp.connect(actx.destination);
+  } catch { bus = null; }
   try { // пустой отрывок в жесте — старые iOS иначе не открывают вывод
     const src = actx.createBufferSource();
     src.buffer = actx.createBuffer(1, 1, 22050);
     src.connect(actx.destination); src.start(0);
   } catch { /* */ }
 }
+// Chrome, Firefox, Edge и встроенные браузеры на iPhone — это WKWebView: Web Audio там молчит, пока страница не
+// сыграла обычный <audio>. Играем беззвучный отрывок в жесте (в Safari и в установленной игре не нужно — там звук и так есть,
+// и беззвучный режим там слушается). В таких браузерах звук играет и в беззвучном режиме.
+const UA = navigator.userAgent || '';
+const IOS_WEBVIEW = /iPhone|iPad|iPod/.test(UA) && (/CriOS|FxiOS|EdgiOS|OPiOS|YaBrowser|GSA\//.test(UA) || !/Safari\//.test(UA));
+let htmlAudio = null;
+function silentWav() { // 0,25 с тишины, 8 кГц, 8 бит
+  const n = 2000, b = new Uint8Array(44 + n), v = new DataView(b.buffer);
+  const str = (o, t) => { for (let i = 0; i < t.length; i++) b[o + i] = t.charCodeAt(i); };
+  str(0, 'RIFF'); v.setUint32(4, 36 + n, true); str(8, 'WAVEfmt '); v.setUint32(16, 16, true); v.setUint16(20, 1, true);
+  v.setUint16(22, 1, true); v.setUint32(24, 8000, true); v.setUint32(28, 8000, true); v.setUint16(32, 1, true); v.setUint16(34, 8, true);
+  str(36, 'data'); v.setUint32(40, n, true); b.fill(128, 44);
+  return URL.createObjectURL(new Blob([b], { type: 'audio/wav' }));
+}
+function unlockHtmlAudio() {
+  if (!IOS_WEBVIEW || document.hidden) return;
+  if (!save.sound) { if (htmlAudio) htmlAudio.pause(); return; } // звук выключен — чужую музыку не глушим
+  if (!htmlAudio) {
+    try {
+      htmlAudio = document.createElement('audio');
+      htmlAudio.setAttribute('x-webkit-airplay', 'deny');
+      htmlAudio.setAttribute('playsinline', '');
+      htmlAudio.loop = true; htmlAudio.preload = 'auto'; htmlAudio.src = silentWav();
+    } catch { htmlAudio = null; return; }
+  }
+  if (htmlAudio.paused) { const p = htmlAudio.play(); if (p && p.catch) p.catch(() => {}); }
+}
+document.addEventListener('visibilitychange', () => { if (document.hidden && htmlAudio) htmlAudio.pause(); });
 function wakeAudio() {
   if (!actx || actx.state === 'running' || resumeBusy) return;
   resumeBusy = true;
   Promise.resolve(actx.resume()).catch(() => {}).finally(() => { resumeBusy = false; });
 }
 function ensureAudio() { // только из жестов: pointerup / touchend / click / keydown
+  unlockHtmlAudio();
   if (!actx) { newAudio(); audioStuck = 0; }
   if (!actx || actx.state === 'running') { audioStuck = 0; return; }
   // iOS 17 иногда не будит прерванный контекст: resume() уже ответил, а жесты не помогают дольше 1,5 с — новый
@@ -94,7 +129,7 @@ function tone(f0, f1, dur, vol, type = 'sine', delay = 0) {
   o.frequency.exponentialRampToValueAtTime(f1, t + dur);
   g.gain.setValueAtTime(vol, t);
   g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-  o.connect(g).connect(actx.destination);
+  o.connect(g); g.connect(bus || actx.destination);
   o.start(t); o.stop(t + dur + 0.02);
 }
 const sfx = {
@@ -102,15 +137,22 @@ const sfx = {
     const now = performance.now();
     if (now - lastEatSound < 70) return;
     lastEatSound = now;
-    tone(520 + Math.random() * 220, 950, 0.06, 0.04, 'triangle');
+    tone(620 + Math.random() * 220, 1150, 0.07, 0.12, 'triangle');
   },
-  die() { tone(420, 60, 0.6, 0.14, 'sawtooth'); },
-  win() { tone(520, 1040, 0.14, 0.09, 'triangle'); tone(780, 1560, 0.18, 0.08, 'triangle', 0.12); },
-  combo(n) { for (let i = 0; i < n + 1; i++) tone(600 + i * 150, 1200 + i * 200, 0.12, 0.08, 'triangle', i * 0.08); },
-  title() { [523, 659, 784, 1047].forEach((f, i) => tone(f, f * 1.01, 0.18, 0.08, 'triangle', i * 0.09)); },
-  level() { [392, 523, 659, 784, 1047, 1319].forEach((f, i) => tone(f, f, 0.22, 0.08, 'square', i * 0.08)); },
-  fly() { [880, 1175, 1568].forEach((f, i) => tone(f, f * 1.25, 0.09, 0.06, 'sine', i * 0.05)); },
+  // громкости — до компрессора; частоты не ниже ~150 Гц: ниже динамик телефона почти не играет
+  die() { tone(640, 150, 0.6, 0.3, 'sawtooth'); },
+  win() { tone(520, 1040, 0.14, 0.25, 'triangle'); tone(780, 1560, 0.18, 0.22, 'triangle', 0.12); },
+  combo(n) { for (let i = 0; i < n + 1; i++) tone(600 + i * 150, 1200 + i * 200, 0.12, 0.22, 'triangle', i * 0.08); },
+  title() { [523, 659, 784, 1047].forEach((f, i) => tone(f, f * 1.01, 0.18, 0.22, 'triangle', i * 0.09)); },
+  level() { [392, 523, 659, 784, 1047, 1319].forEach((f, i) => tone(f, f, 0.22, 0.12, 'square', i * 0.08)); },
+  fly() { [880, 1175, 1568].forEach((f, i) => tone(f, f * 1.25, 0.09, 0.18, 'sine', i * 0.05)); },
 };
+// проверка звука: что с ним на этом устройстве — показываем после включения звука на паузе
+function audioStatus() {
+  if (!actx) return 'Звук не запустился: браузер не дал его включить';
+  if (actx.state === 'running') return 'Звук работает. Не слышно — проверь беззвучный режим и громкость';
+  return `Звук не включился (${actx.state}). Коснись экрана ещё раз`;
+}
 
 // ---------- прогрессия: звёзды открывают раскраски ----------
 // Звёзды копятся за всё время: еда, победы, звания, места в таблице. Тратить их не нужно — раскраска открывается,
@@ -126,7 +168,7 @@ function addXp(n) {
   const fresh = SKINS.filter((x) => x.stars > before && x.stars <= save.xp);
   if (fresh.length) {
     if (run) run.unlocked.push(...fresh.map((x) => x.name));
-    if (mode && ui === 'play') banner('Новая раскраска!', `«${fresh.map((x) => x.name).join('», «')}»`, sfx.level, true);
+    if (mode && ui === 'play') flashMe(2, sfx.level); // какая — покажет окно после игры
     persist();
   }
 }
@@ -683,7 +725,7 @@ function startSolo(diff) {
   cam.x = me.x; cam.y = me.y;
   cam.z = baseZoom() * 1.3;
   playTime = 0; sessionBest = START_MASS; hudT = 0; lastSoloMass = me.mass;
-  run = newRun(diff); feast = null; effects = []; clearBanners();
+  run = newRun(diff); feast = null; effects = []; clearGlow();
   $('roomBox').hidden = true;
   showHome(false);
   closeDialog();
@@ -756,7 +798,7 @@ function onMyKill(id, vm, km, pos, color) {
   else sfx.win();
   addXp(xp);
 }
-const RANK_STEPS = [[SNAKES_N >> 1, 10, ''], [10, 40, 'Ты в первой десятке!'], [3, 80, 'Ты в тройке лидеров!'], [1, 200, 'Ты — самая длинная змея арены!']];
+const RANK_STEPS = [[SNAKES_N >> 1, 10, false], [10, 40, true], [3, 80, true], [1, 200, true]]; // [место, звёзды, волна]
 // место и число змей на арене
 function myRank() {
   if (!me) return null;
@@ -788,17 +830,17 @@ function runTick() {
     const ti = titleOf(me.mass);
     if (ti > run.maxTitle) {
       run.maxTitle = ti;
-      if (ti >= 2) banner(TITLES[ti][1], 'новое звание', sfx.title);
+      if (ti >= 2) flashMe(1, sfx.title);
       addXp(ti * 10);
     }
     const rk = myRank();
     if (rk && playTime > 3) {
       if (rk.rank < run.bestRank) run.bestRank = rk.rank;
-      for (const [lim, xp, text] of RANK_STEPS) {
+      for (const [lim, xp, flash] of RANK_STEPS) {
         if (rk.rank <= lim && !run.flags.has(lim)) {
           run.flags.add(lim);
           addXp(xp);
-          if (text) banner(`Место ${rk.rank}`, text, sfx.title);
+          if (flash) flashMe(1, sfx.title);
         }
       }
     }
@@ -859,7 +901,8 @@ function finishRun() {
 const soundAction = () => ({
   label: '', kind: 'text sound', icon: save.sound ? 'vol' : 'volOff', aria: 'Звук',
   onClick: (e) => {
-    save.sound = !save.sound; persist();
+    save.sound = !save.sound; persist(); unlockHtmlAudio(); // общий слушатель жестов сработал ещё до переключения
+    if (save.sound) { sfx.title(); setTimeout(() => snack(audioStatus()), 500); } // сразу слышно, работает ли звук
     e.currentTarget.innerHTML = icon(save.sound ? 'vol' : 'volOff');
   },
 });
@@ -886,7 +929,7 @@ window.addEventListener('pagehide', persist);
 function toHome() {
   if (mode === 'solo' && me) recordBest();
   if (run) finishRun();
-  mode = null; me = null; ui = 'home'; feast = null; effects = []; clearBanners();
+  mode = null; me = null; ui = 'home'; feast = null; effects = []; clearGlow();
   closeDialog();
   hideHint();
   world = new World({ diff: 'easy', bots: SNAKES_N >> 1, foodN: FOOD_N >> 1 }); // демо за меню — вдвое легче игры для телефона
@@ -926,33 +969,26 @@ function snack(text) {
   clearTimeout(snackTimer);
   snackTimer = setTimeout(() => s.classList.remove('show'), 2400);
 }
-// крупная надпись по центру: звания, места, новые раскраски. Одна за раз, следующие ждут в очереди (не больше трёх:
-// лишние места и звания отбрасываются, новая раскраска — никогда). Звук играет вместе с надписью.
-let bannerUntil = 0, bannerQ = [], bannerTimer = 0;
-function banner(title, sub = '', sound = null, keep = false) {
-  const now = performance.now();
-  if (now < bannerUntil) {
-    bannerQ.push({ title, sub, sound, keep });
-    while (bannerQ.length > 3) { const k = bannerQ.findIndex((q) => !q.keep); bannerQ.splice(k < 0 ? 0 : k, 1); }
-    clearTimeout(bannerTimer);
-    bannerTimer = setTimeout(nextBanner, bannerUntil - now + 200);
-    return;
-  }
-  bannerUntil = now + 2600;
+// успех (звание, место, раскраска) — не надписью, а волной золотого свечения по своей змейке от головы к хвосту:
+// бусины на гребне вспыхивают и чуть раздуваются. Надписи мешали играть — решение владельца.
+const GLOW_DUR = 1.1;
+let glow = null; // { t0, waves }
+function flashMe(waves, sound) {
+  if (glow && glow.who === me && time - glow.t0 < GLOW_DUR * glow.waves * 0.5) { // уже идёт — не перезапускать
+    if (waves <= glow.waves) return;           // и звук не повторять: несколько успехов разом — один сигнал
+    glow.waves = waves;
+  } else glow = { t0: time, waves, who: me }; // новая змейка после «Продолжить» чужую волну не подхватит
   if (sound) sound();
-  const b = $('banner');
-  b.querySelector('b').textContent = title;
-  b.querySelector('small').textContent = sub;
-  b.classList.remove('show');
-  void b.offsetWidth; // перезапуск анимации
-  b.classList.add('show');
-  if (bannerQ.length) { clearTimeout(bannerTimer); bannerTimer = setTimeout(nextBanner, 2800); }
 }
-function nextBanner() {
-  const q = bannerQ.shift();
-  if (q && mode) banner(q.title, q.sub, q.sound, q.keep);
+function clearGlow() { glow = null; }
+// сила свечения бусины i из n (0…1) или null, если волны нет
+function glowOf(n) {
+  if (!glow) return null;
+  const t = (time - glow.t0) / GLOW_DUR;
+  if (t >= glow.waves) { glow = null; return null; }
+  const p = (t % 1) * (n + 24) - 12, w = 5 + n * 0.08;
+  return (i) => { const d = (i - p) / w; return d * d > 9 ? 0 : Math.exp(-d * d); };
 }
-function clearBanners() { bannerQ = []; clearTimeout(bannerTimer); bannerUntil = 0; $('banner').classList.remove('show'); }
 
 // подсказка управления — только в первой игре на устройстве
 let hintTimer = 0;
@@ -1122,7 +1158,7 @@ $('btnInfo').addEventListener('click', () => {
     ? 'Коснись экрана в любом месте и веди пальцем — это джойстик. Держи молнию, чтобы ускориться: каждая секунда сжигает 5 % длины, но не меньше 10.'
     : 'Змейка ползёт к курсору мыши. Левая кнопка или пробел — ускорение: каждая секунда сжигает 5 % длины, но не меньше 10. Можно стрелками ← →. Пауза — Esc.';
   const ih = installHint();
-  dialog('Как играть', `<p>${ctl}</p><p>Подрежь соперника — пусть врежется в тебя головой. У края экрана зелёная метка показывает, куда ты ползёшь, а золотая стрелка с короной — где лидер.</p>` +
+  dialog('Как играть', `<p>${ctl}</p><p>Подрежь соперника — пусть врежется в тебя головой. Золотая стрелка с короной у края экрана показывает, где лидер.</p>` +
     `<p>Звёзды за еду, победы и места открывают новые раскраски.</p>` +
     `<div class="note ${offline.cls}">${icon(offline.ic)}<span>${offline.text}${ih ? ` ${ih}` : ''}</span></div>`,
   [{ label: 'Понятно', kind: 'filled', onClick: closeDialog }]);
@@ -1185,7 +1221,17 @@ function drawSnake(s, vx0, vy0, vx1, vy1) {
   ctx.globalAlpha = s.inv > 0 ? 0.45 + 0.25 * Math.sin(time * 18) : 1;
   // рисуем бусины через сегмент: меньше перерисовки, а тело всё равно сплошное; мелкую на экране — реже
   const step = r * cam.z < 3 ? 4 : 2;
-  const a0 = ctx.globalAlpha, boost = s.isBoosting;
+  const a0 = ctx.globalAlpha, boost = s.isBoosting, gw = glow && s === glow.who ? glowOf(n) : null;
+  if (gw) { // золотой ореол под гребнем волны успеха
+    const g = r * 2.6;
+    for (let i = (n - 1) & ~1; i >= 0; i -= step) {
+      const w = gw(i), q = segs[i];
+      if (w < 0.05 || q.x < x0 || q.x > x1 || q.y < y0 || q.y > y1) continue;
+      ctx.globalAlpha = a0 * w;
+      ctx.drawImage(glowSprite(GOLD), q.x - g, q.y - g, g * 2, g * 2);
+    }
+    ctx.globalAlpha = a0;
+  }
   if (boost) {
     const g = r * 2;
     for (let i = (n - 1) & ~1; i >= 0; i -= 4) {
@@ -1202,7 +1248,8 @@ function drawSnake(s, vx0, vy0, vx1, vy1) {
   for (let i = (n - 1) & ~1; i >= 2; i -= step) {
     const q = segs[i];
     if (q.x < x0 || q.x > x1 || q.y < y0 || q.y > y1) continue;
-    const rr = i > n - tail ? r * (0.55 + 0.45 * (n - i) / tail) : r; // хвост сужается
+    const gwi = gw ? gw(i) : 0;
+    const rr = (i > n - tail ? r * (0.55 + 0.45 * (n - i) / tail) : r) * (1 + 0.22 * gwi); // хвост сужается; на гребне — шире
     const p = segs[i - 1], o = segs[i + 1] || q;
     let dx = p.x - o.x, dy = p.y - o.y, d = Math.hypot(dx, dy);
     if (d < 1e-6) { dx = Math.cos(s.a); dy = Math.sin(s.a); d = 1; } // соседи совпали (хвост при росте) — смотрим по ходу головы
@@ -1211,13 +1258,11 @@ function drawSnake(s, vx0, vy0, vx1, vy1) {
     ctx.setTransform(dx, dy, -dy, dx, k * q.x + camT.e, k * q.y + camT.f);
     const c = segColor(s.skin, i);
     ctx.drawImage(beadSprite(c), -hb, -hb);
-    if (boost) {
-      const w = boostWave(i);
-      if (w > 0.25) { ctx.globalAlpha = a0 * w; ctx.drawImage(beadLitSprite(c), -hb, -hb); ctx.globalAlpha = a0; }
-    }
+    const lit = Math.max(boost ? boostWave(i) : 0, gwi);
+    if (lit > 0.25) { ctx.globalAlpha = a0 * lit; ctx.drawImage(beadLitSprite(c), -hb, -hb); ctx.globalAlpha = a0; }
   }
   ctx.setTransform(k, 0, 0, k, camT.e, camT.f);
-  const hr = r * 1.1;
+  const hr = r * 1.1 * (1 + 0.22 * (gw ? gw(0) : 0));
   ctx.drawImage(headSprite(sk.head), h.x - hr, h.y - hr, hr * 2, hr * 2);
   const a = s.a, look = s.ta;
   for (const side of [-1, 1]) {
@@ -1271,31 +1316,10 @@ function leaderTarget() {
   const mm = net.lb && net.lb.mm;
   return mm && mm.length >= 2 && net.lb.top[0] && net.lb.top[0][0] === leaderId ? { x: mm[0] * 25, y: mm[1] * 25 } : null;
 }
-// метка у края экрана по курсу своей змейки — видно, куда она ползёт прямо сейчас
-// lp — где стоит стрелка лидера: рядом с ней метку не рисуем, она и так показывает туда же
-function drawHeading(lp) {
-  if (!meLive() || !me.segs || !me.segs.length) return;
-  const h = me.segs[0], a = me.a;
-  const hx = W / 2 + (h.x - cam.x) * cam.z, hy = H / 2 + (h.y - cam.y) * cam.z;
-  const side = 30, top = 100, bottom = 30, c = Math.cos(a), sn = Math.sin(a); // сверху — счёт и таблица
-  const kx = c > 0 ? (W - side - hx) / c : c < 0 ? (side - hx) / c : Infinity;
-  const ky = sn > 0 ? (H - bottom - hy) / sn : sn < 0 ? (top - hy) / sn : Infinity;
-  const k = Math.min(kx, ky);
-  if (!(k > 0) || !isFinite(k)) return;
-  const mx = hx + c * k, my = hy + sn * k;
-  if (lp && Math.hypot(mx - lp.x, my - lp.y) < 48) return;
-  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
-  ctx.save();
-  ctx.translate(mx, my); ctx.rotate(a);
-  ctx.beginPath(); ctx.moveTo(9, 0); ctx.lineTo(-6, -9); ctx.lineTo(-6, 9); ctx.closePath();
-  ctx.globalAlpha = 0.85; ctx.fillStyle = PRIMARY; ctx.fill();
-  ctx.lineWidth = 1.5; ctx.strokeStyle = 'rgba(0,0,0,.45)'; ctx.stroke();
-  ctx.restore();
-}
 function drawPointer(tx, ty, color, crown = false) {
   const sx = W / 2 + (tx - cam.x) * cam.z, sy = H / 2 + (ty - cam.y) * cam.z;
   const pad = 54;
-  if (sx > pad && sx < W - pad && sy > pad && sy < H - pad) return null;
+  if (sx > pad && sx < W - pad && sy > pad && sy < H - pad) return;
   const dx = sx - W / 2, dy = sy - H / 2;
   const k = Math.min((W / 2 - pad) / Math.abs(dx || 1e-6), (H / 2 - (dy < 0 ? 100 : pad)) / Math.abs(dy || 1e-6)); // сверху — счёт и таблица
   const px = W / 2 + dx * k, py = H / 2 + dy * k, a = Math.atan2(dy, dx);
@@ -1311,7 +1335,6 @@ function drawPointer(tx, ty, color, crown = false) {
     ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
     drawCrown(px - Math.cos(a) * 26, py - Math.sin(a) * 26 + 6, 8, 1.5);
   }
-  return { x: px, y: py };
 }
 function sceneSnakes() {
   if (mode === 'net') { const out = []; for (const s of net.snakes.values()) if (s.visible) out.push(s); return out; }
@@ -1396,10 +1419,9 @@ function draw() {
   }
   ctx.globalAlpha = 1;
 
-  if (mode) { // у края экрана: куда ползёт своя змейка и где лидер (обидчика и пир не показываем — решение владельца)
+  if (mode) { // у края экрана — только где лидер (курс, обидчика и пир не показываем — решение владельца)
     const lt = leaderTarget();
-    const lp = lt ? drawPointer(lt.x, lt.y, GOLD_C, true) : null;
-    drawHeading(lp);
+    if (lt) drawPointer(lt.x, lt.y, GOLD_C, true);
   }
   drawJoystick();
 }
