@@ -59,7 +59,7 @@ export const SELF_LEN = 20;
 export function encodeSelf(s, seq) {
   const w = new Out(SELF_LEN);
   w.u8_(10); w.u32(s.id); w.u16(seq & 0xffff); w.i16(q4(s.segs[0].x)); w.i16(q4(s.segs[0].y));
-  w.u16(qa(s.a)); w.u16(qa(s.ta)); w.f32(s.mass); w.u8_((s.isBoosting ? 1 : 0) | (s.inv > 0 ? 2 : 0));
+  w.u16(qa(s.a)); w.u16(qa(s.ta)); w.f32(s.mass); w.u8_((s.isBoosting ? 1 : 0) | (s.inv > 0 ? 2 : 0) | (s.stage << 2));
   return w.done();
 }
 const foodIn = (w, cells) => w.foods.filter((f) => !f.dead && cells.has(f.cell));
@@ -93,7 +93,7 @@ function snapshot(tick, snakes, flies) {
   o.u8_(1); o.u32(tick); o.u16(snakes.length);
   for (const s of snakes) {
     o.u32(s.id); o.i16(q4(s.x)); o.i16(q4(s.y)); o.u16(qa(s.a)); o.u16(qa(s.ta)); o.f32(s.mass);
-    o.u8_((s.isBoosting ? 1 : 0) | (s.inv > 0 ? 2 : 0));
+    o.u8_((s.isBoosting ? 1 : 0) | (s.inv > 0 ? 2 : 0) | (s.stage << 2)); // биты 2–4 — ступень (линька)
   }
   o.u8_(flies.length);
   for (const f of flies) {
@@ -232,7 +232,7 @@ export class Room {
     const a = dv.getUint16(11, true) / 65535 * TAU, ta = dv.getUint16(13, true) / 65535 * TAU;
     const mass = dv.getFloat32(15, true), fl = dv.getUint8(19);
     if (![x, y, mass].every(Number.isFinite) || mass <= 0) return;
-    this.world.setRemote(s, x, y, a, ta, Math.min(mass, 1e6), !!(fl & 1), !!(fl & 2));
+    this.world.setRemote(s, x, y, a, ta, Math.min(mass, 1e6), !!(fl & 1), !!(fl & 2), (fl >> 2) & 7);
   }
   join(c, m) {
     if (m.v !== VERSION) { c.conn.send({ t: 'err', code: 'version' }); return; }

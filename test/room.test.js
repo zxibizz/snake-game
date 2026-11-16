@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Room, encodeSelf, MAX_HUMANS } from '../public/room.js';
-import { VERSION, SNAKES_N, Snake, followChain, spacingOf } from '../public/core.js';
+import { VERSION, SNAKES_N, Snake, followChain, spacingOf, STAGE_R } from '../public/core.js';
 
 function conn() {
   const c = { json: [], bins: [], fasts: [], closed: false };
@@ -172,4 +172,27 @@ test('хозяин закрыл комнату — закрыты и ещё не
   room.attach(k);
   room.closeAll();
   assert.ok(a.k.closed && k.closed);
+});
+
+test('линька в комнате: ступень игрока приходит от него, не теряется и уходит другим в снимке', () => {
+  const room = new Room({ code: '1', mode: 'ffa', diff: 'easy' });
+  const a = player(room, 'A'), b = player(room, 'B');
+  const s = room.world.byId.get(a.w.me.id), bw = room.world.byId.get(b.w.me.id);
+  const me = new Snake(a.w.me.id, 100, 100, 400, 0, '', true, 0, 0); // ступень 2
+  room.self(a.c, new DataView(encodeSelf(me, 1).buffer));
+  assert.equal(s.stage, 2);
+  const cheat = new Snake(b.w.me.id, 300, 100, 20, 0, '', true, 0, 0); cheat.stage = 5;
+  room.self(b.c, new DataView(encodeSelf(cheat, 1).buffer));
+  assert.equal(bw.stage, 0, 'ступень выше длины, до которой дорос, не берём');
+  me.mass = 60; // похудела рывком — ступень у неё та же
+  room.self(a.c, new DataView(encodeSelf(me, 2).buffer));
+  assert.equal(s.stage, 2);
+  sendSelf(room, b, 300, 100, 20, 1);
+  room.step();
+  const snap = new DataView(b.k.fasts.at(-1).buffer), n = snap.getUint16(5, true);
+  let fl = -1;
+  for (let i = 0, o = 7; i < n; i++, o += 17) if (snap.getUint32(o, true) === s.id) fl = snap.getUint8(o + 16);
+  assert.ok(fl >= 0, 'змейка A видна B');
+  assert.equal((fl >> 2) & 7, 2);
+  assert.equal(bw.stage, 0);
 });

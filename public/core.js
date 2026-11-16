@@ -2,12 +2,12 @@
 // Здесь нет DOM и сети — только мир, змейки, еда, боты и столкновения.
 
 // Версия протокола и файлов: при изменении любого файла в public/ поднять и здесь, и в sw.js (тест сверяет).
-export const VERSION = '38';
+export const VERSION = '39';
 export const TAU = Math.PI * 2;
 export const R = 7000;                  // радиус арены (координаты по сети — Int16 / 4, предел 8191)
-export const BASE_SPEED = 210;          // пикс/с — у «Малыша»; с каждым званием змейка быстрее, см. speedOf
+export const BASE_SPEED = 210;          // пикс/с — на первой ступени; с каждой ступенью (линькой) змейка быстрее, см. speedOf
 export const BOOST_SPEED = 400;
-export const SPEED_PER_TITLE = 0.035;   // прибавка к скорости за каждое звание
+export const SPEED_PER_STAGE = 0.06;    // прибавка к скорости за каждую ступень
 // Рывок дорогой: в секунду сгорает BOOST_SHARE всей длины, но не меньше BOOST_COST — едой по пути его не окупить,
 // длинной змее он обходится в десятки длины в секунду. Половина потраченного остаётся едой позади.
 export const BOOST_COST = 10;
@@ -27,10 +27,10 @@ export const FLY_BASE = 3;              // столько стоит пуста�
 export const FLY_SPEED = 150;           // пикс/с — порхает (у полной на 30 % медленнее)
 export const FLY_DART = 600;            // пикс/с — увёртка у пустой (у полной на 35 % медленнее)
 export const FLY_SEE = 300;             // с какого расстояния до головы бабочка начинает увёртываться
-// по званию того, кто гонится: малышам ловить легче (бабочка позже замечает, медленнее и реже увёртывается,
-// ловится краем головы), крупным пойманная бабочка даёт больше еды — в полтора раза у «Полоза», вдвое с «Питона»
+// по ступени того, кто гонится: малышам ловить легче (бабочка позже замечает, медленнее и реже увёртывается,
+// ловится краем головы), крупным пойманная бабочка даёт больше еды — в полтора раза с 700, вдвое с 1300
 // Поблажка малышам — только игрокам: боты-малыши и так часто проползают рядом и опустошали бы бабочек.
-export const flyEase = (s) => (s.human ? clamp((4 - titleOf(s.mass)) / 4, 0, 1) : 0);   // 1 у «Малыша», 0 с «Полоза»
+export const flyEase = (s) => (s.human ? clamp((3 - stageOf(s.mass)) / 3, 0, 1) : 0);   // 1 на первой ступени, 0 с четвёртой (900)
 export const flyGain = (m) => (m >= 1300 ? 2 : m >= 700 ? 1.5 : 1);
 export const flyK = (n) => Math.sqrt(clamp(n, 0, FLY_MAX) / FLY_MAX);
 export const flyScale = (n) => 1.9 + 1.5 * flyK(n);   // рисунок: скобки радиусом 9,5 × масштаб
@@ -194,20 +194,39 @@ export const SKIN_NEAR = SKINS.map((_, i) => SKINS.map((_, j) => j).filter((j) =
 // цвет сегмента i: рисуется каждый второй сегмент («бусина»), цвета считаются по бусинам
 export const segColor = (skin, i) => { const s = SKINS[skin] || SKINS[0]; return s.p[Math.floor((i >> 1) / s.run) % s.p.length]; };
 
-// звания по длине — чувство роста за одну игру
-export const TITLES = [
-  [0, 'Малыш'], [60, 'Червячок'], [150, 'Змейка'], [350, 'Ужик'], [700, 'Полоз'], [1300, 'Питон'],
-  [2200, 'Удав'], [3500, 'Анаконда'], [5500, 'Великий змей'], [8000, 'Змей Горыныч'], [12000, 'Легенда арены'],
-];
-export function titleOf(mass) {
+// Линьки: масса даёт только длину, а толщину и вид чешуи — ступень. На пороге длины STAGES змейка линяет:
+// становится толще (STAGE_R) и наряднее. За жизнь ступень не теряется (похудела рывком — короче, но не тоньше),
+// после «Продолжить» — заново по длине. Толщина до новой ступени дорастает за MOLT_T с — не скачком.
+export const STAGES = [0, 100, 350, 900, 2200, 5000];
+export const STAGE_R = [13, 20, 28, 38, 47, 56];
+export const MOLT_T = 0.8;
+export const MOLT_WAIT = 0.35;          // толщина начинает расти не сразу, а когда на экране свечение добежит до головы
+export function stageOf(mass) {
   let i = 0;
-  while (i + 1 < TITLES.length && mass >= TITLES[i + 1][0]) i++;
+  while (i + 1 < STAGES.length && mass >= STAGES[i + 1]) i++;
   return i;
 }
+// ступень по нынешней длине (не ниже прежней) и толщина, которая к ней дорастает
+export function growStage(s, dt) {
+  const st = stageOf(s.mass);
+  if (st > s.stage) setStage(s, st);
+  growR(s, dt);
+}
+export function setStage(s, st) {
+  if (st <= s.stage) return;
+  s.stage = st; s.moltWait = MOLT_WAIT; s.rFrom = s.r;
+}
+// толщина дорастает до ступени за MOLT_T (после паузы MOLT_WAIT); перескочила ступень — быстрее, но за то же время
+export function growR(s, dt) {
+  const t = STAGE_R[s.stage];
+  if (s.r >= t || s.stage === 0) { s.r = t; return; }
+  if (s.moltWait > 0) { s.moltWait -= dt; return; }
+  s.r = Math.min(t, s.r + (t - Math.min(s.rFrom ?? t, STAGE_R[s.stage - 1])) / MOLT_T * dt);
+}
 
-// скорость растёт ступенями — вместе со званием; ускорение прибавляет поменьше, чтобы гиганта всё ещё можно было обогнать
+// скорость растёт ступенями по нынешней длине; ускорение прибавляет поменьше, чтобы гиганта всё ещё можно было обогнать
 export function speedOf(mass, boosting) {
-  const k = SPEED_PER_TITLE * titleOf(mass);
+  const k = SPEED_PER_STAGE * stageOf(mass);
   return boosting ? BOOST_SPEED * (1 + k * 0.5) : BASE_SPEED * (1 + k);
 }
 // поворотливость, рад/с: толстая змейка поворачивает медленнее
@@ -239,8 +258,8 @@ export const angDiff = (a, b) => { // a - b в диапазоне [-π, π]
   return d;
 };
 
-// размеры змейки от массы — одни и те же у сервера и у клиента, который достраивает тела.
-// До 900 толщина растёт быстро, дальше медленно: гиганты толстые, но не на пол-экрана.
+// «объём» змейки по массе — от него шаг между бусинами (длина тела в сегментах); одинаков у всех, кто достраивает тела.
+// Сама толщина — по ступени (STAGE_R), а не отсюда.
 export const radiusOf = (m) => (m <= 900 ? 9 + Math.sqrt(Math.max(0, m)) * 0.95 : 37.5 + 9 * Math.log(m / 900));
 export const spacingOf = (m) => radiusOf(m) * 0.42;
 // длина тела по массе
@@ -390,7 +409,7 @@ export class Snake {
     this.surpId = 0; this.surpT = 0; this.surpLast = -9; // чей хвост перерезал путь и когда бот это заметит
     this.slipT = 0;                 // до какого времени бот «зевает» (D.slip)
     this.mem = new Map();           // что бот решил о встрече (заметил угрозу, устроит засаду, пойдёт на останки) — на несколько секунд
-    this.r = radiusOf(mass);
+    this.stage = stageOf(mass); this.r = STAGE_R[this.stage];
     this.segs = segs || layBody(x, y, this.a, mass, 0, 0, 0);
   }
   get x() { return this.segs[0].x; }
@@ -742,7 +761,7 @@ export class World {
   // место для бота: всё тело внутри арены, далеко от игроков и не поперёк чужой головы.
   // Не нашлось — null (бот появится позже); при создании мира берём последнюю попытку.
   placeBot(mass, force) {
-    const humans = this.humans(), L = bodyLenOf(mass), r = radiusOf(mass);
+    const humans = this.humans(), L = bodyLenOf(mass), r = STAGE_R[stageOf(mass)];
     const curl = L > 500 ? (1.1 * Math.PI) / L : 0;
     const heads = this.snakes.filter((s) => s.alive).map((s) => s.segs[0]);
     let inside = null;
@@ -817,14 +836,17 @@ export class World {
   // ---------- удалённые игроки (совместная игра без сервера) ----------
   // Змейку игрока в комнате считает его собственное устройство: мир хозяина комнаты её не двигает, не кормит
   // и не убивает, а только ставит туда, куда она сама приползла, — боты видят её тело и врезаются в него.
-  setRemote(s, x, y, a, ta, mass, boost, inv) {
+  setRemote(s, x, y, a, ta, mass, boost, inv, stage = 0) {
     s.remote = true;
     s.segs[0].x = x; s.segs[0].y = y;
-    s.a = a; s.ta = ta; s.mass = mass; s.r = radiusOf(mass);
+    s.a = a; s.ta = ta; s.mass = mass;
+    if (mass > s.maxMass) s.maxMass = mass;
+    // ступень — от игрока (за жизнь не теряется), но не выше той, до которой он дорос
+    setStage(s, Math.max(stageOf(mass), Math.min(stage, stageOf(s.maxMass))));
+    growR(s, Math.max(0, this.time - (s.setT ?? this.time))); s.setT = this.time;
     s.isBoosting = boost; s.inv = inv ? 1 : 0;
     followChain(s.segs, spacingOf(mass));
     fitLength(s.segs, countOf(mass));
-    if (mass > s.maxMass) s.maxMass = mass;
   }
   // удалённый игрок съел крошки: убираем их из мира (масса у него уже своя)
   eatIds(ids, s) {
@@ -1020,7 +1042,7 @@ export class World {
   // еда: клетки сетки с едой, а не отдельные крошки. Цель держится, пока новая не окажется заметно лучше
   forage(b, heads) {
     const D = this.D, hx = b.x, hy = b.y;
-    const view = D.look * 1.4 + b.r * 4, view2 = view * view;
+    const view = D.look * 1.4 + radiusOf(b.mass) * 4, view2 = view * view; // по массе, не по ступени
     const cr = Math.ceil(view / CELL);
     const c0 = this.cellOf(hx, hy), cx0 = c0 % GRID_N, cy0 = (c0 / GRID_N) | 0;
     const ca = Math.cos(b.a), sa = Math.sin(b.a);
@@ -1229,7 +1251,7 @@ export class World {
   // ---------- движение ----------
   moveSnake(s, dt) {
     const D = this.D;
-    s.r = radiusOf(s.mass);
+    growStage(s, dt);
     const turn = turnOf(s.r) * (s.human ? 1 : D.turn);
     const d = angDiff(s.ta, s.a), mt = turn * dt;
     s.a += d > mt ? mt : d < -mt ? -mt : d;

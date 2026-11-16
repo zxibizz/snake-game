@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { World, Snake, safeCourse, rand, countOf, spacingOf, SNAKES_N, DIFF, R, GOLD, SKINS, PAL, TITLES, titleOf,
+import { World, Snake, safeCourse, rand, countOf, spacingOf, SNAKES_N, DIFF, R, GOLD, SKINS, PAL, STAGES, STAGE_R, MOLT_T, MOLT_WAIT, stageOf, growStage,
   speedOf, turnOf, remainsOf, radiusOf, boostCostOf, BASE_SPEED, BOOST_SPEED, MIN_BOOST_MASS, layBody, angDiff, keepMass, START_MASS,
   FLY_N, FLY_MAX, FLY_BASE, flyRadius, flyEase, flyGain, SKIN_NEAR, skinDist, TYPES, SKINS_OF } from '../public/core.js';
 
@@ -103,10 +103,40 @@ test('останки змеи — в цветах её раскраски', () =
   assert.ok(Math.abs(drop.reduce((a, f) => a + f.v, 0) - remainsOf(300)) < 1);
 });
 
-test('звания по длине', () => {
-  assert.equal(titleOf(0), 0);
-  assert.equal(TITLES[titleOf(400)][1], 'Ужик');
-  assert.equal(titleOf(1e9), TITLES.length - 1);
+test('линьки: ступень по длине, за жизнь не теряется, толщина дорастает за MOLT_T', () => {
+  assert.equal(stageOf(0), 0);
+  assert.equal(stageOf(99), 0);
+  assert.equal(stageOf(100), 1);
+  assert.equal(stageOf(1e9), STAGES.length - 1);
+  assert.equal(STAGES.length, STAGE_R.length);
+  for (let i = 1; i < STAGE_R.length; i++) assert.ok(STAGE_R[i] > STAGE_R[i - 1] * 1.15, 'каждая линька заметно толще');
+  const s = new Snake(1, 0, 0, 90, 0, 't', true);
+  assert.equal(s.stage, 0); assert.equal(s.r, STAGE_R[0]);
+  s.mass = 120; growStage(s, 0.01);
+  assert.equal(s.stage, 1);
+  assert.equal(s.r, STAGE_R[0], 'сначала свечение — толщина ещё прежняя');
+  for (let t = 0; t < MOLT_WAIT + 0.1; t += 0.025) growStage(s, 0.025);
+  assert.ok(s.r > STAGE_R[0] && s.r < STAGE_R[1], 'толщина растёт, а не скачком');
+  for (let t = 0; t < MOLT_WAIT + MOLT_T + 0.05; t += 0.025) growStage(s, 0.025);
+  assert.equal(s.r, STAGE_R[1]);
+  const j = new Snake(3, 0, 0, 90, 0, 'j', true);
+  j.mass = 400; // перескочила ступень — дорастает за то же время
+  for (let t = 0; t < MOLT_WAIT + MOLT_T + 0.05; t += 0.025) growStage(j, 0.025);
+  assert.equal(j.stage, 2); assert.equal(j.r, STAGE_R[2]);
+  s.mass = 40; growStage(s, 0.025);
+  assert.equal(s.stage, 1, 'похудела рывком — ступень та же');
+  assert.equal(s.r, STAGE_R[1]);
+  assert.equal(new Snake(2, 0, 0, 1000, 0, 'u', true).stage, 3, 'новая жизнь — по длине');
+});
+
+test('линька в мире: змейка, которая наела порог, толстеет', () => {
+  const w = new World({ diff: 'easy', bots: 0, foodN: 0, flies: 0 });
+  const me = w.addHuman({ name: 't', skin: 0, mass: 95, inv: 9 });
+  assert.equal(me.stage, 0);
+  me.mass = 101;
+  for (let i = 0; i < 60; i++) w.step(0.025);
+  assert.equal(me.stage, 1);
+  assert.equal(me.r, STAGE_R[1]);
 });
 
 test('палитра влезает в байт, у раскрасок есть цвета', () => {
@@ -117,11 +147,11 @@ test('палитра влезает в байт, у раскрасок есть 
   }
 });
 
-test('чем выше звание, тем быстрее змейка, но ускорение малыша обгоняет гиганта', () => {
+test('чем выше ступень, тем быстрее змейка, но ускорение малыша обгоняет гиганта', () => {
   assert.equal(speedOf(15, false), BASE_SPEED);
   assert.equal(speedOf(15, true), BOOST_SPEED);
-  for (let i = 1; i < TITLES.length; i++) {
-    assert.ok(speedOf(TITLES[i][0], false) > speedOf(TITLES[i][0] - 1, false), `ступень скорости на звании «${TITLES[i][1]}»`);
+  for (let i = 1; i < STAGES.length; i++) {
+    assert.ok(speedOf(STAGES[i], false) > speedOf(STAGES[i] - 1, false), `ступень скорости на ${STAGES[i]}`);
   }
   assert.ok(speedOf(15, true) > speedOf(1e6, false) * 1.3, 'гиганта можно обогнать на ускорении');
   assert.ok(speedOf(1e6, true) > speedOf(1e6, false) * 1.3);
@@ -349,9 +379,9 @@ test('голова ловит бабочку: собранное высыпае�
   assert.equal(w.flies.length, 1);
 });
 
-test('бабочки по званию: малышу-игроку ловить легче, крупным — вдвое больше еды', () => {
+test('бабочки по ступени: малышу-игроку ловить легче, крупным — вдвое больше еды', () => {
   assert.equal(flyEase({ human: true, mass: 15 }), 1);
-  assert.equal(flyEase({ human: true, mass: 700 }), 0);
+  assert.equal(flyEase({ human: true, mass: 900 }), 0);
   assert.equal(flyEase({ human: false, mass: 15 }), 0, 'ботам поблажки нет');
   assert.equal(flyGain(300), 1);
   assert.equal(flyGain(2000), 2);

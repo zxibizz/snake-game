@@ -1,7 +1,7 @@
 // Клиент: отрисовка, управление, меню; одиночная игра считает мир сама. В совместной мир считает браузер
 // хозяина комнаты (room.js), а свою змейку каждый игрок — у себя; связь между игроками прямая (rtc.js).
 import {
-  World, SKINS, TYPES, SKINS_OF, PAL, foodLookOf, GOLD, DIFF, R, TAU, START_MASS, SNAKES_N, FOOD_N, VERSION, TITLES, titleOf, segColor,
+  World, SKINS, TYPES, SKINS_OF, PAL, foodLookOf, GOLD, DIFF, R, TAU, START_MASS, SNAKES_N, FOOD_N, VERSION, segColor, STAGE_R, growR, setStage, MOLT_WAIT,
   radiusOf, spacingOf, countOf, bodyLenOf, foodRadiusOf, followChain, fitLength, clamp, angDiff, keepMass,
   FLY_MAX, flyK, flyScale, flyRadius, flyEase, MIN_BOOST_MASS, Snake, safeCourse,
 } from './core.js';
@@ -189,6 +189,14 @@ const sfx = {
   win() { tone(520, 1040, 0.14, 0.25, 'triangle'); tone(780, 1560, 0.18, 0.22, 'triangle', 0.12); haptic('kill'); },
   combo(n) { for (let i = 0; i < n + 1; i++) tone(600 + i * 150, 1200 + i * 200, 0.12, 0.22, 'triangle', i * 0.08); haptic('combo'); },
   title() { [523, 659, 784, 1047].forEach((f, i) => tone(f, f * 1.01, 0.18, 0.22, 'triangle', i * 0.09)); haptic('title'); },
+  // своя линька: подъём, пока свечение бежит к голове, и аккорд, когда змейка раздувается
+  molt() {
+    tone(200, 900, 0.36, 0.12, 'triangle');
+    [523, 659, 784, 1047, 1319].forEach((f, i) => tone(f, f * 1.01, 0.24, 0.2, 'triangle', MOLT_CHARGE + i * 0.06));
+    haptic('molt');
+  },
+  // чужая линька на экране — то же тихо и с её стороны
+  moltFar(pan, k) { tone(260, 800, 0.3, 0.05 * k, 'triangle', 0, pan); tone(1047, 1060, 0.18, 0.06 * k, 'sine', MOLT_CHARGE, pan); },
   level() { [392, 523, 659, 784, 1047, 1319].forEach((f, i) => tone(f, f, 0.22, 0.12, 'square', i * 0.08)); haptic('title'); },
   fly() { [880, 1175, 1568].forEach((f, i) => tone(f, f * 1.25, 0.09, 0.18, 'sine', i * 0.05)); haptic('fly'); },
 };
@@ -241,6 +249,7 @@ const HAPTIC = {
   kill: [20, 60, 30],
   combo: [16, 45, 16, 45, 40],
   title: [12, 50, 12, 50, 12, 50, 50],
+  molt: [8, 30, 8, 30, 8, 120, 60],
   die: [70, 50, 140],
 };
 const lastHap = {};
@@ -260,7 +269,7 @@ function audioStatus() {
 }
 
 // ---------- прогрессия: звёзды открывают раскраски ----------
-// Звёзды копятся за всё время: еда, победы, звания, места в таблице. Тратить их не нужно — раскраска открывается,
+// Звёзды копятся за всё время: еда, победы, линьки, места в таблице. Тратить их не нужно — раскраска открывается,
 // когда накоплено её число звёзд.
 const stars = () => Math.floor(save.xp);
 const unlocked = (sk) => sk.stars <= save.xp;
@@ -410,76 +419,117 @@ function ball(g, R, col, rear = true) {
   if (rear) { g.beginPath(); g.arc(0, 0, R * 0.62, Math.PI - 1, Math.PI + 1); g.lineWidth = w; g.lineCap = 'round'; g.strokeStyle = shade(col, -0.35); g.stroke(); }
 }
 // v — вариант узора по номеру бусины (VARIANTS вида), acc — цвет узора
+// full — бусина с узором вида (с 3-й ступени); без него — тот же вид попроще: без узора и блика
 const BEADS = {
-  beads: (g, R, col) => ball(g, R, col),
-  fish: (g, R, col) => { // чешуйка-капелька острым концом назад
+  beads: (g, R, col, v, acc, full) => ball(g, R, col, full),
+  fish: (g, R, col, v, acc, full) => { // чешуйка-капелька острым концом назад
     const drop = (sc) => { g.beginPath(); g.arc(0, 0, R * sc, -2.25, 2.25); g.lineTo(-R * 1.4 * sc, 0); g.closePath(); };
     drop(1); g.fillStyle = shade(col, -0.5); g.fill();
     const gr = g.createRadialGradient(R * 0.35, 0, R * 0.1, 0, 0, R * 1.1);
     gr.addColorStop(0, shade(col, 0.4)); gr.addColorStop(0.65, col); gr.addColorStop(1, shade(col, -0.25));
     drop(0.88); g.fillStyle = gr; g.fill();
+    if (!full) return;
     g.beginPath(); g.arc(0, 0, R * 0.74, -1.1, 1.1); g.lineWidth = R * 0.1; g.lineCap = 'round'; g.strokeStyle = shade(col, 0.55); g.stroke();
   },
-  caterpillar: (g, R, col, v, acc) => { // лапки по бокам и блик
+  caterpillar: (g, R, col, v, acc, full) => { // лапки по бокам и блик
     for (const sd of [-1, 1]) circ(g, -R * 0.12, sd * R * 0.96, R * 0.27, shade(acc || col, -0.5));
     ball(g, R * 0.97, col, false);
-    circ(g, -R * 0.5, -R * 0.35, R * 0.16, 'rgba(255,255,255,0.5)');
+    if (full) circ(g, -R * 0.5, -R * 0.35, R * 0.16, 'rgba(255,255,255,0.5)');
   },
-  dots: (g, R, col, v, acc) => { // пятна: через бусину одно и два
+  dots: (g, R, col, v, acc, full) => { // пятна: через бусину одно и два
     ball(g, R, col, false);
+    if (!full) return;
     if (v) circ(g, -R * 0.52, 0, R * 0.26, acc);
     else { circ(g, -R * 0.4, -R * 0.55, R * 0.2, acc); circ(g, -R * 0.4, R * 0.55, R * 0.2, acc); }
   },
-  dragon: (g, R, col, v, acc) => { // гребень по спине
+  dragon: (g, R, col, v, acc, full) => { // гребень по спине
     ball(g, R, col);
+    if (!full) return;
     g.beginPath(); g.moveTo(R * 0.35, -R * 0.3); g.lineTo(-R * 1.12, 0); g.lineTo(R * 0.35, R * 0.3); g.closePath();
     const gr = g.createLinearGradient(R * 0.35, 0, -R, 0); gr.addColorStop(0, shade(acc, 0.35)); gr.addColorStop(1, acc);
     g.fillStyle = gr; g.fill(); g.lineWidth = R * 0.08; g.lineJoin = 'round'; g.strokeStyle = shade(acc, -0.55); g.stroke();
   },
-  tiger: (g, R, col, v, acc) => { // полоска-уголок
+  tiger: (g, R, col, v, acc, full) => { // полоска-уголок
     ball(g, R, col, false);
+    if (!full) return;
     g.save(); g.beginPath(); g.arc(0, 0, R * 0.91, 0, TAU); g.clip();
     g.beginPath(); g.moveTo(-R * 0.05, -R); g.lineTo(-R * 0.42, 0); g.lineTo(-R * 0.05, R);
     g.lineTo(-R * 0.4, R); g.lineTo(-R * 0.78, 0); g.lineTo(-R * 0.4, -R); g.closePath();
     g.fillStyle = acc; g.fill(); g.restore();
   },
-  robot: (g, R, col, v, acc) => { // кубик с заклёпками и лампочкой
+  robot: (g, R, col, v, acc, full) => { // кубик с заклёпками и лампочкой
     const h = R * 0.88;
     g.beginPath(); g.roundRect(-h, -h, h * 2, h * 2, R * 0.28); g.fillStyle = shade(col, -0.55); g.fill();
     const gr = g.createLinearGradient(h, 0, -h, 0); gr.addColorStop(0, shade(col, 0.35)); gr.addColorStop(1, shade(col, -0.15));
     g.beginPath(); g.roundRect(-h * 0.84, -h * 0.84, h * 1.68, h * 1.68, R * 0.2); g.fillStyle = gr; g.fill();
     for (const y of [-1, 1]) circ(g, -h * 0.6, y * h * 0.62, R * 0.09, shade(col, -0.45));
+    if (!full) return;
     g.save(); g.shadowBlur = R * 0.8; g.shadowColor = acc; circ(g, -h * 0.55, 0, R * (v ? 0.14 : 0.2), acc); g.restore();
   },
-  neon: (g, R, col) => { // светящееся кольцо на тёмном
+  neon: (g, R, col, v, acc, full) => { // светящееся кольцо на тёмном
     circ(g, 0, 0, R, '#0C100E');
-    g.save(); g.shadowBlur = R * 0.9; g.shadowColor = col;
+    g.save(); g.shadowBlur = R * (full ? 0.9 : 0.4); g.shadowColor = col;
     g.beginPath(); g.arc(0, 0, R * 0.74, 0, TAU); g.lineWidth = R * 0.2; g.strokeStyle = col; g.stroke();
-    circ(g, -R * 0.5, 0, R * 0.14, col); g.restore();
+    if (full) circ(g, -R * 0.5, 0, R * 0.14, col);
+    g.restore();
   },
 };
+// Ступени (линьки): 1-я — простая плоская бусина, 2-я — бусина вида с объёмом, 3-я — с узором вида (BEADS),
+// дальше — наряд поверх (dressBead): 4-я — светлый кант и блик-капелька, 5-я — ещё шипы по хребту,
+// 6-я — кант и шипы золотые. При отрисовке 5-й ступени ещё переливы по телу, 6-й — сияние и искры с хвоста.
+function plainBead(g, t, R, col) {
+  if (t === 'robot') {
+    const h = R * 0.88;
+    g.beginPath(); g.roundRect(-h, -h, h * 2, h * 2, R * 0.28); g.fillStyle = shade(col, -0.3); g.fill();
+    g.beginPath(); g.roundRect(-h * 0.86, -h * 0.86, h * 1.72, h * 1.72, R * 0.2); g.fillStyle = col; g.fill();
+    return;
+  }
+  if (t === 'neon') {
+    circ(g, 0, 0, R, '#0C100E');
+    g.beginPath(); g.arc(0, 0, R * 0.74, 0, TAU); g.lineWidth = R * 0.14; g.strokeStyle = col; g.stroke();
+    return;
+  }
+  circ(g, 0, 0, R, shade(col, -0.3)); circ(g, 0, 0, R * 0.88, col);
+}
+function dressBead(g, R, col, st) {
+  const gold = st >= 5, edge = gold ? GOLD_C : shade(col, 0.7);
+  g.save(); g.globalCompositeOperation = 'source-atop'; // только по самой бусине
+  g.beginPath(); g.arc(0, 0, R * 0.8, Math.PI * 0.42, Math.PI * 1.58);
+  g.lineWidth = R * (gold ? 0.14 : 0.1); g.lineCap = 'round'; g.strokeStyle = edge; g.stroke();
+  circ(g, -R * 0.28, -R * 0.42, R * 0.13, 'rgba(255,255,255,0.65)');
+  g.restore();
+  if (st < 4) return;
+  const sc = gold ? GOLD_C : shade(col, 0.75);
+  g.beginPath(); g.moveTo(-R * 0.5, -R * 0.3); g.lineTo(-R * 0.98, 0); g.lineTo(-R * 0.5, R * 0.3); g.closePath();
+  g.fillStyle = sc; g.fill(); g.lineWidth = R * 0.06; g.lineJoin = 'round'; g.strokeStyle = shade(gold ? GOLD_C : col, -0.55); g.stroke();
+}
 const VARIANTS = { dots: 2, robot: 2 };
 const skinOf = (skin) => SKINS[skin] || SKINS[0];
 const typeId = (skin) => TYPES[skinOf(skin).type].id;
 // вариант узора бусины i (рисуются чётные сегменты): чередуется по бусинам
 const beadVar = (skin, i) => { const n = VARIANTS[typeId(skin)]; return n ? (i >> 1) % n : 0; };
 // спрайт бусины; у спрайта .e — половина размера: рисовать в (-e, -e). mode: 0 — бусина, 1 — вспыхнувшая, 2 — силуэт для обводки
-const beadCache = new Map();
-function beadSprite(skin, col, v, mode = 0) {
-  const sk = skinOf(skin), key = (((sk.type * 512 + sk.acc + 1) * 512 + col) * 4 + v) * 4 + mode;
+const beadCache = new Map(), BEAD_CACHE_MAX = 600; // со ступенями спрайтов вшестеро больше — держим не больше 600
+// st — ступень (линька): от неё наряд бусины; по умолчанию — полный вид без наряда (превью на главной и в паузе)
+function beadSprite(skin, col, v, mode = 0, st = 2) {
+  const sk = skinOf(skin), key = ((((sk.type * 512 + sk.acc + 1) * 512 + col) * 4 + v) * 4 + mode) * 8 + st;
   let c = beadCache.get(key);
   if (c) return c;
   const t = TYPES[sk.type].id, E = BEAD_E[t] || 80;
   c = document.createElement('canvas'); c.width = c.height = E * 2; c.e = E;
   const g = c.getContext('2d');
   g.translate(E, E);
-  BEADS[t](g, BR, PAL[col] || PAL[0], v, PAL[sk.acc]);
+  const cl = PAL[col] || PAL[0];
+  if (st === 0) plainBead(g, t, BR, cl);
+  else BEADS[t](g, BR, cl, v, PAL[sk.acc], st >= 2);
+  if (st >= 3) dressBead(g, BR, cl, st);
   if (mode === 1) { // та же бусина, вспыхнувшая: для волны свечения при ускорении
     g.globalCompositeOperation = 'source-atop';
     const gr = g.createRadialGradient(BR * 0.2, 0, 0, 0, 0, BR * 1.2);
     gr.addColorStop(0, 'rgba(255,255,255,0.9)'); gr.addColorStop(0.6, 'rgba(255,255,255,0.45)'); gr.addColorStop(1, 'rgba(255,255,255,0.2)');
     g.fillStyle = gr; g.fillRect(-E, -E, E * 2, E * 2);
   } else if (mode === 2) silhouette(g, E);
+  if (beadCache.size >= BEAD_CACHE_MAX) beadCache.delete(beadCache.keys().next().value); // самый старый — нарисуем снова, если понадобится
   beadCache.set(key, c);
   return c;
 }
@@ -633,7 +683,7 @@ let podium = [];         // id первых трёх: золотая, сереб
 const cam = { x: 0, y: 0, z: 1 };
 
 function newRun(diff) {
-  return { diff, xp: 0, kills: 0, eatenBase: 0, eatXp: 0, eatStat: 0, maxTitle: 0, bestRank: 999, flags: new Set(),
+  return { diff, xp: 0, kills: 0, eatenBase: 0, eatXp: 0, eatStat: 0, maxStage: 0, bestRank: 999, flags: new Set(),
     lifeStart: 0, killTimes: [], revenge: null, feastSeen: new Set(), unlocked: [], maxMass: START_MASS, startT: performance.now() };
 }
 // ---------- ввод ----------
@@ -1007,7 +1057,7 @@ function unflat(flat) {
 function makeNetSnake(m) {
   const segs = unflat(m.segs);
   return { id: m.id, name: m.name, skin: m.skin, team: m.team, human: m.human, segs, a: 0, ta: 0, mass: START_MASS,
-    r: radiusOf(START_MASS), isBoosting: false, inv: 0, visible: false, seen: false };
+    r: STAGE_R[0], stage: undefined, isBoosting: false, inv: 0, visible: false, seen: false }; // ступень — с первым снимком
 }
 function setFeast(f) { feast = f ? { x: f.x, y: f.y, until: time + f.life } : null; }
 function showRoomCode() {
@@ -1118,7 +1168,7 @@ function onBinary(buf) {
     const mass = dv.getFloat32(o + 12, true), fl = dv.getUint8(o + 16);
     o += 17;
     if (id === net.youId) continue;
-    snakes.set(id, { x, y, a, ta, mass, boost: !!(fl & 1), inv: !!(fl & 2) });
+    snakes.set(id, { x, y, a, ta, mass, boost: !!(fl & 1), inv: !!(fl & 2), stage: Math.min((fl >> 2) & 7, STAGE_R.length - 1) });
     const sn = net.snakes.get(id);
     if (sn) sn.seen = true;
   }
@@ -1157,7 +1207,8 @@ function netUpdate(now, dt) {
     sn.a = a0.a + angDiff(b.a, a0.a) * t;
     sn.ta = b.ta;
     sn.mass = a0.mass + (b.mass - a0.mass) * t;
-    sn.r = radiusOf(sn.mass);
+    if (sn.stage === undefined) { sn.stage = b.stage; sn.r = STAGE_R[b.stage]; } // увидели впервые — без линьки
+    else { setStage(sn, b.stage); growR(sn, dt); }
     sn.isBoosting = b.boost;
     sn.inv = b.inv ? 1 : 0;
     const h = sn.segs[0];
@@ -1366,7 +1417,7 @@ function onSoloDeath(killer) {
   }, toHome), { cls: 'oops', wait: 600 });
 }
 
-// ---------- ход игры: звания, места, серии, пир, месть ----------
+// ---------- ход игры: линьки, места, серии, пир, месть ----------
 const lifeEaten = () => (mode === 'net' ? net.eaten : me && me.alive ? me.eaten : 0);
 function onLifeEnd(eaten, maxMass) {
   if (!run) return;
@@ -1435,12 +1486,8 @@ function runTick() {
   if (alive) {
     if (me.mass > run.maxMass) run.maxMass = me.mass;
     if (me.mass > save.stats.best) save.stats.best = Math.floor(me.mass);
-    const ti = titleOf(me.mass);
-    if (ti > run.maxTitle) {
-      run.maxTitle = ti;
-      if (ti >= 2) flashMe(1, sfx.title);
-      addXp(ti * 10);
-    }
+    const st = me.stage || 0; // линьку видно и слышно на самой змейке (moltCheck), здесь — звёзды за новую ступень в игре
+    if (st > run.maxStage) { run.maxStage = st; addXp(st * 30); }
     const rk = myRank();
     if (rk && playTime > 3) {
       if (rk.rank < run.bestRank) run.bestRank = rk.rank;
@@ -1500,7 +1547,7 @@ function finishRun() {
   const r = run;
   save.stats.games++;
   persist();
-  const html = `<div class="big-num">${Math.floor(r.maxMass)}</div><p class="title-line">${TITLES[r.maxTitle][1]}</p>${unlockHtml(r.xp, r.unlocked)}`;
+  const html = `<div class="big-num">${Math.floor(r.maxMass)}</div>${unlockHtml(r.xp, r.unlocked)}`;
   run = null;
   return html;
 }
@@ -1638,7 +1685,7 @@ function snack(text) {
   clearTimeout(snackTimer);
   snackTimer = setTimeout(() => s.classList.remove('show'), 2400);
 }
-// успех (звание, место, раскраска) — не надписью, а волной золотого свечения по своей змейке от головы к хвосту:
+// успех (место, раскраска) — не надписью, а волной золотого свечения по своей змейке от головы к хвосту:
 // бусины на гребне вспыхивают и чуть раздуваются. Надписи мешали играть — решение владельца.
 const GLOW_DUR = 1.1;
 let glow = null; // { t0, waves }
@@ -1660,7 +1707,7 @@ function glowOf(n) {
 }
 
 // ---------- эффекты: глоток, искры, толчок камеры ----------
-function clearFx() { effects = []; gulps = []; lumps = []; sparks = []; kick.t = -9; slowUntil = 0; gulpT = -9; }
+function clearFx() { effects = []; gulps = []; lumps = []; sparks = []; sheds = []; kick.t = -9; slowUntil = 0; gulpT = -9; }
 const inView = (x, y, m = 0) => Math.abs(x - cam.x) < W / 2 / cam.z + m && Math.abs(y - cam.y) < H / 2 / cam.z + m;
 function onGulp(f) { // крошка f ({ x, y, r, c }) съедена своей змейкой
   if (gulps.length < 40) gulps.push({ x: f.x, y: f.y, r: f.lr ?? foodLookOf(f.v), c: f.c, t: time });
@@ -1966,6 +2013,8 @@ function updateCamera(dt) {
     const k = Math.min(1, dt * (target === me ? 12 : 3));
     cam.x += (h.x - cam.x) * k; cam.y += (h.y - cam.y) * k;
     tr = target.r;
+    // линька: камера сперва держит прежний масштаб — видно, как змейка толстеет, — и только потом плавно отъезжает
+    if (target.moltT !== undefined && time - target.moltT < MOLT_FX + 0.2) tr = STAGE_R[target.moltFrom];
   }
   // чем толще змейка, тем дальше камера — гиганту нужно видеть, кого он окружает
   let zt = baseZoom() * clamp(1.3 * Math.pow(11 / tr, 0.5), 0.5, 1.3);
@@ -1980,9 +2029,76 @@ const camT = { k: 1, e: 0, f: 0 }; // матрица камеры текущег
 // ускорение: по сегментам от головы к хвосту бежит волна, каждый светится своим цветом
 const boostWave = (i) => { const w = 0.5 + 0.5 * Math.sin(time * 16 - i * 0.22); return w * w; };
 const isMate = (s) => mode === 'net' && net.roomMode === 'team' && s.human && s.team && s.team === net.myTeam;
+// ---------- линька ----------
+// Сначала свечение бежит от хвоста к голове (MOLT_CHARGE с), потом от головы к хвосту катится волна: за ней бусины
+// уже новой толщины и нового наряда, на гребне — раздуваются с перехлёстом. Старая кожа остаётся лежать бледной
+// тенью и рассыпается искрами (sheds). Толщина в мире (s.r) растёт с той же паузы MOLT_WAIT за MOLT_T — вместе с волной.
+const MOLT_CHARGE = MOLT_WAIT, MOLT_FX = 1.35, SHED_T = 1.3; // толщина в мире начинает расти вместе с волной
+let sheds = []; // { t, pts, r, skin, st, burst }
+// заметили, что змейка перелиняла (ступень выросла с прошлого кадра); увидели впервые — без линьки
+function moltCheck(s) {
+  const st = s.stage || 0;
+  if (s.seenSt === undefined) { s.seenSt = st; return; }
+  if (st <= s.seenSt) return;
+  s.moltFrom = s.seenSt; s.seenSt = st; s.moltT = time;
+  const segs = s.segs, h = segs[0];
+  if (s === me) { sfx.molt(); s.moltKick = true; }
+  else if (inView(h.x, h.y)) placed(h.x, h.y, sfx.moltFar);
+  if (!inView(h.x, h.y, bodyLenOf(s.mass)) || REDUCED) return;
+  const stride = Math.max(2, Math.ceil(segs.length / 160) * 2), pts = [];
+  for (let i = 0; i < segs.length; i += stride) pts.push({ x: segs[i].x, y: segs[i].y, c: segColor(s.skin, i) });
+  if (sheds.length >= 6) sheds.shift();
+  sheds.push({ t: time + MOLT_CHARGE, pts, r: STAGE_R[s.moltFrom], skin: s.skin, st: s.moltFrom, burst: false });
+}
+// старая кожа: бледные силуэты бусин прежней толщины поверх змейки, гаснут и рассыпаются искрами
+function drawSheds(vx0, vy0, vx1, vy1) {
+  sheds = sheds.filter((d) => time - d.t < SHED_T);
+  const k = camT.k;
+  for (const d of sheds) {
+    const p = (time - d.t) / SHED_T;
+    if (p < 0) continue;
+    const pts = d.pts, n = pts.length;
+    if (!d.burst && p > 0.45) { // рассыпается
+      d.burst = true;
+      for (let j = 0; j < Math.min(28, n); j++) {
+        const q = pts[Math.floor(j / Math.min(28, n) * n)], a = Math.random() * TAU, v = 40 + Math.random() * 120;
+        addSpark(q.x, q.y, Math.cos(a) * v, Math.sin(a) * v, j % 2 ? 11 : q.c, d.r * (0.25 + Math.random() * 0.25), 0.5 + Math.random() * 0.4);
+      }
+    }
+    ctx.globalAlpha = 0.65 * (1 - p) * (1 - p);
+    const rr = d.r * (1 + 0.25 * p);
+    for (let i = n - 1; i >= 1; i--) {
+      const q = pts[i];
+      if (q.x < vx0 - rr || q.x > vx1 + rr || q.y < vy0 - rr || q.y > vy1 + rr) continue;
+      const o = pts[i - 1];
+      let dx = o.x - q.x, dy = o.y - q.y;
+      const dd = Math.hypot(dx, dy) || 1, sc = k * rr / BEAD_U / dd;
+      dx *= sc; dy *= sc;
+      ctx.setTransform(dx, dy, -dy, dx, k * q.x + camT.e, k * q.y + camT.f);
+      const sp = beadSprite(d.skin, q.c, 0, 2, d.st);
+      ctx.drawImage(sp, -sp.e, -sp.e);
+    }
+    ctx.setTransform(k, 0, 0, k, camT.e, camT.f);
+  }
+  ctx.globalAlpha = 1;
+}
+// переливы 5-й ступени и выше: по телу от головы к хвосту бегут узкие светлые полосы
+const shimmerAt = (i) => { const w = Math.sin(i * 0.11 - time * 2.6); return w > 0.6 ? 0.6 * Math.pow(w, 16) : 0; };
 function drawSnake(s, vx0, vy0, vx1, vy1) {
-  const segs = s.segs, r = s.r;
+  moltCheck(s);
+  const segs = s.segs, st = s.stage || 0;
   const h = segs[0], n = segs.length;
+  // линька идёт: mp — сколько секунд с её начала; rOld/rNew — толщина до и после
+  const mp = s.moltT === undefined ? 9 : time - s.moltT, molting = mp < MOLT_FX;
+  const rNew = STAGE_R[st], rOld = molting ? STAGE_R[s.moltFrom] : s.r, r = molting ? rNew : s.r;
+  const charging = molting && mp < MOLT_CHARGE;
+  const front = !molting ? 0 : charging ? (1 - mp / MOLT_CHARGE) * (n + 10) : (mp - MOLT_CHARGE) / (MOLT_FX - MOLT_CHARGE) * (n + 30) - 10;
+  const fw = 4 + n * 0.04;
+  // волна линьки у бусины i: pass — прошла ли (0…1), bump — гребень (0…1)
+  const passAt = (i) => (!molting ? 1 : charging ? 0 : clamp(0.5 + (front - i) / 3, 0, 1));
+  const bumpAt = (i) => { if (!molting) return 0; const d = (i - front) / (charging ? 6 : fw); return d * d > 9 ? 0 : Math.exp(-d * d); };
+  const baseR = (i) => (molting ? rOld + (rNew - rOld) * passAt(i) : r);
+  if (s === me && s.moltKick && molting && !charging) { s.moltKick = false; camKick(0.09, 0); }
   const margin = bodyLenOf(s.mass) + r;
   if (h.x < vx0 - margin || h.x > vx1 + margin || h.y < vy0 - margin || h.y > vy1 + margin) return;
   const x0 = vx0 - r * 2, x1 = vx1 + r * 2, y0 = vy0 - r * 2, y1 = vy1 + r * 2;
@@ -1990,6 +2106,22 @@ function drawSnake(s, vx0, vy0, vx1, vy1) {
   // рисуем бусины через сегмент: меньше перерисовки, а тело всё равно сплошное; мелкую на экране — реже
   const step = r * cam.z < 3 ? 4 : 2;
   const a0 = ctx.globalAlpha, boost = s.isBoosting, gw = glow && s === glow.who ? glowOf(n) : null;
+  if (st >= 5 && !molting) { // 6-я ступень: золотое сияние вокруг тела и искорки с хвоста
+    const g = r * 1.9;
+    ctx.globalAlpha = a0 * 0.16;
+    for (let i = (n - 1) & ~1; i >= 0; i -= 6) {
+      const q = segs[i];
+      if (q.x < x0 - g || q.x > x1 + g || q.y < y0 - g || q.y > y1 + g) continue;
+      ctx.drawImage(glowSprite(GOLD), q.x - g, q.y - g, g * 2, g * 2);
+    }
+    ctx.globalAlpha = a0;
+    const t = segs[n - 1];
+    if (time - (s.sparkT || 0) > 0.14 && t.x > x0 && t.x < x1 && t.y > y0 && t.y < y1) {
+      s.sparkT = time;
+      const a = Math.random() * TAU;
+      addSpark(t.x, t.y, Math.cos(a) * 40, Math.sin(a) * 40, GOLD, r * 0.22, 0.6);
+    }
+  }
   if (gw) { // золотой ореол под гребнем волны успеха
     const g = r * 2.6;
     for (let i = (n - 1) & ~1; i >= 0; i -= step) {
@@ -1997,6 +2129,16 @@ function drawSnake(s, vx0, vy0, vx1, vy1) {
       if (w < 0.05 || q.x < x0 || q.x > x1 || q.y < y0 || q.y > y1) continue;
       ctx.globalAlpha = a0 * w;
       ctx.drawImage(glowSprite(GOLD), q.x - g, q.y - g, g * 2, g * 2);
+    }
+    ctx.globalAlpha = a0;
+  }
+  if (molting) { // линька: свечение бежит к голове (белое), потом гребень волны светится цветами бусин
+    for (let i = (n - 1) & ~1; i >= 0; i -= 2) {
+      const w = bumpAt(i), q = segs[i];
+      if (w < 0.05 || q.x < x0 || q.x > x1 || q.y < y0 || q.y > y1) continue;
+      const g = baseR(i) * (charging ? 2.2 : 2.8);
+      ctx.globalAlpha = a0 * w * (charging ? 0.9 : 0.75);
+      ctx.drawImage(glowSprite(charging ? 11 : segColor(s.skin, i)), q.x - g, q.y - g, g * 2, g * 2);
     }
     ctx.globalAlpha = a0;
   }
@@ -2015,7 +2157,7 @@ function drawSnake(s, vx0, vy0, vx1, vy1) {
   const tail = Math.min(10, n >> 2);
   // радиус бусины: хвост сужается; на гребне волны успеха — шире
   const mine = s === me && lumps.length > 0;
-  const radAt = (i, gwi) => (i > n - tail ? r * (0.55 + 0.45 * (n - i) / tail) : r) * (1 + 0.22 * gwi + (mine ? 0.16 * lumpAt(i) : 0));
+  const radAt = (i, gwi) => { const b = baseR(i); return (i > n - tail ? b * (0.55 + 0.45 * (n - i) / tail) : b) * (1 + 0.22 * gwi + 0.3 * (charging ? 0 : bumpAt(i)) + (mine ? 0.16 * lumpAt(i) : 0)); };
   // edge > 0 — проход обводки: силуэты бусин шире на edge; иначе сами бусины
   const beads = (edge) => {
     for (let i = (n - 1) & ~1; i >= 2; i -= step) {
@@ -2031,14 +2173,15 @@ function drawSnake(s, vx0, vy0, vx1, vy1) {
       ctx.setTransform(dx, dy, -dy, dx, k * q.x + camT.e, k * q.y + camT.f);
       // мелкую змейку рисуем через бусину — тогда узор и цвета чередуем по нарисованным, иначе они застынут на одном
       const ci = step === 4 ? i >> 1 : i, c = segColor(s.skin, ci), v = beadVar(s.skin, ci);
-      if (edge) { const sp = beadSprite(s.skin, c, v, 2); ctx.drawImage(sp, -sp.e, -sp.e); continue; }
-      const sp = beadSprite(s.skin, c, v);
+      const bst = passAt(i) > 0.5 ? st : s.moltFrom; // за волной линьки — уже новый наряд
+      if (edge) { const sp = beadSprite(s.skin, c, v, 2, bst); ctx.drawImage(sp, -sp.e, -sp.e); continue; }
+      const sp = beadSprite(s.skin, c, v, 0, bst);
       ctx.drawImage(sp, -sp.e, -sp.e);
-      const lit = Math.max(boost ? boostWave(i) : 0, gwi);
-      if (lit > 0.25) { const sl = beadSprite(s.skin, c, v, 1); ctx.globalAlpha = a0 * lit; ctx.drawImage(sl, -sl.e, -sl.e); ctx.globalAlpha = a0; }
+      const lit = Math.max(boost ? boostWave(i) : 0, gwi, molting ? bumpAt(i) : 0, bst >= 4 ? shimmerAt(i) : 0);
+      if (lit > 0.25) { const sl = beadSprite(s.skin, c, v, 1, bst); ctx.globalAlpha = a0 * lit; ctx.drawImage(sl, -sl.e, -sl.e); ctx.globalAlpha = a0; }
     }
     ctx.setTransform(k, 0, 0, k, camT.e, camT.f);
-    drawHead(ctx, s.skin, h.x, h.y, s.a, s.ta, r, (1 + 0.22 * (gw ? gw(0) : 0)) * (s === me ? 1 + 0.13 * headBump() : 1), edge);
+    drawHead(ctx, s.skin, h.x, h.y, s.a, s.ta, baseR(0), (1 + 0.22 * (gw ? gw(0) : 0) + (charging ? 0 : 0.3 * bumpAt(0))) * (s === me ? 1 + 0.13 * headBump() : 1), edge);
   };
   // своя змейка — в светлой обводке: под бусинами их силуэты чуть шире (по форме вида — с гребнем, лапками, ушками)
   if (s === me) beads(1 / cam.z);
@@ -2191,6 +2334,7 @@ function draw() {
   const order = snakes.filter((s) => s !== me).sort((a, b) => b.mass - a.mass);
   for (const s of order) drawSnake(s, vx0, vy0, vx1, vy1);
   if (me && (mode === 'net' || me.alive)) drawSnake(me, vx0, vy0, vx1, vy1);
+  if (sheds.length) drawSheds(vx0, vy0, vx1, vy1);
   for (const f of sceneFlies()) if (f.x > vx0 - 40 && f.x < vx1 + 40 && f.y > vy0 - 40 && f.y < vy1 + 40) drawFly(f);
 
   if (lumps.length && time - lumps[0] > 3) lumps.shift();
