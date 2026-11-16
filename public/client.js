@@ -46,7 +46,7 @@ if (!SKINS[save.skin]) save.skin = 0;
 if (!DIFF[save.diff]) save.diff = 'easy';
 const persist = () => { try { localStorage.setItem('zmeigrad', JSON.stringify(save)); } catch { /* ничего */ } };
 const myName = () => save.name || 'Игрок';
-const soloName = () => save.name || 'Ты';
+const soloName = () => 'Ты'; // одному имя не нужно
 // токен сессии: при переподключении сервер отдаёт ту же змейку, а не создаёт вторую
 const TOKEN = (crypto.randomUUID ? crypto.randomUUID() : String(Math.random()).slice(2) + Date.now()).slice(0, 40);
 const hello = (o) => ({ ...o, name: myName(), skin: save.skin, token: TOKEN, v: VERSION });
