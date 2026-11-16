@@ -1,6 +1,6 @@
 // Клиент: отрисовка, управление, меню; одиночная игра считает мир сама, совместная — получает его с сервера.
 import {
-  World, SKINS, PAL, GOLD, DIFF, R, TAU, START_MASS, SNAKES_N, FOOD_N, VERSION, TITLES, titleOf, segColor,
+  World, SKINS, TYPES, SKINS_OF, PAL, GOLD, DIFF, R, TAU, START_MASS, SNAKES_N, FOOD_N, VERSION, TITLES, titleOf, segColor,
   radiusOf, spacingOf, countOf, bodyLenOf, foodRadiusOf, followChain, fitLength, clamp, angDiff, keepMass,
   FLY_MAX, flyK, flyScale,
 } from './core.js';
@@ -216,7 +216,8 @@ window.addEventListener('resize', resize);
 resize();
 
 const FIELD = '#161A16', GRID = '#202620', OUTSIDE = '#2B1715', EDGE = '#FFB4AB';
-const MINE_EDGE = 'rgba(255,255,255,0.6)'; // обводка своей змейки
+// обводка своей змейки: белая 60 % поверх поля; силуэты бусин накладываются друг на друга, поэтому цвет — уже смешанный с полем, плотный
+const MINE_RGB = 162;
 const ON = '#E1E3DE', PRIMARY = '#88D982', TERTIARY = '#A0CFD4', GOLD_C = '#FFD447', REVENGE = '#FF6B5E';
 function makeGrid() {
   const s = 2, t = 80;
@@ -239,37 +240,217 @@ function shade(hex, k) {
   if (k >= 0) { r += (255 - r) * k; g += (255 - g) * k; b += (255 - b) * k; } else { r *= 1 + k; g *= 1 + k; b *= 1 + k; }
   return `rgb(${r | 0},${g | 0},${b | 0})`;
 }
-const SPR = 64, BSPR = 96;
+const SPR = 64;
 // спрайты рисуются при первом обращении к цвету: цветов в палитре около сотни, на арене видна малая часть
 const lazy = (size, draw) => { const cache = []; return (k) => cache[k] || (cache[k] = (() => {
   const c = document.createElement('canvas'); c.width = c.height = size;
   draw(c.getContext('2d'), size / 2, PAL[k] || PAL[0]); return c;
 })()); };
-const headSprite = lazy(SPR, (g, m, col) => {
-  g.beginPath(); g.arc(m, m, m - 1, 0, TAU); g.fillStyle = shade(col, -0.55); g.fill();
-  const gr = g.createRadialGradient(m * 0.72, m * 0.62, m * 0.1, m, m, m - 3);
-  gr.addColorStop(0, shade(col, 0.45)); gr.addColorStop(0.55, col); gr.addColorStop(1, shade(col, -0.25));
-  g.beginPath(); g.arc(m, m, m - 3.5, 0, TAU); g.fillStyle = gr; g.fill();
-});
-// бусина-чешуйка: смотрит вдоль +x (к голове), тёмная дужка — по заднему краю
-function drawBead(g, m, col) {
-  const R = m - 1, w = R * 0.09;
-  g.beginPath(); g.arc(m, m, R, 0, TAU); g.fillStyle = shade(col, -0.5); g.fill();
-  const gr = g.createRadialGradient(m + R * 0.3, m, R * 0.1, m, m, R);
+// ---------- виды змеек: бусина и голова каждого вида ----------
+// Бусина рисуется в спрайт один раз на вид, цвет и узор; смотрит вдоль +x (к голове), радиус BR. Следующая бусина
+// перекрывает переднюю часть предыдущей — видна задняя дужка, поэтому узоры (пятна, лампочки) сдвинуты назад.
+const BR = 47, BEAD_U = 48, HU = 24, HE = 72; // бусина: радиус в спрайте; голова: радиус тела и половина спрайта
+// половина спрайта бусины по видам: бусинкам хватает самой бусины, гребню, лапкам и плавникам нужно место, свечению неона — ещё больше
+const BEAD_E = { beads: 48, neon: 92 };
+const circ = (g, x, y, r, fill) => { g.beginPath(); g.arc(x, y, r, 0, TAU); g.fillStyle = fill; g.fill(); };
+// BEAD_U — сколько точек спрайта на единицу радиуса при отрисовке (бусина чуть меньше, как раньше)
+// бусина-чешуйка (вид «Бусинки»), тёмная дужка — по заднему краю
+function ball(g, R, col, rear = true) {
+  const w = R * 0.09;
+  circ(g, 0, 0, R, shade(col, -0.5));
+  const gr = g.createRadialGradient(R * 0.3, 0, R * 0.1, 0, 0, R);
   gr.addColorStop(0, shade(col, 0.35)); gr.addColorStop(0.7, col); gr.addColorStop(1, shade(col, -0.3));
-  g.beginPath(); g.arc(m, m, R - w, 0, TAU); g.fillStyle = gr; g.fill();
-  g.beginPath(); g.arc(m, m, R * 0.62, Math.PI - 1, Math.PI + 1);
-  g.lineWidth = w; g.lineCap = 'round'; g.strokeStyle = shade(col, -0.35); g.stroke();
+  circ(g, 0, 0, R - w, gr);
+  if (rear) { g.beginPath(); g.arc(0, 0, R * 0.62, Math.PI - 1, Math.PI + 1); g.lineWidth = w; g.lineCap = 'round'; g.strokeStyle = shade(col, -0.35); g.stroke(); }
 }
-const beadSprite = lazy(BSPR, drawBead);
-// та же бусина, вспыхнувшая: для волны свечения при ускорении
-const beadLitSprite = lazy(BSPR, (g, m, col) => {
-  drawBead(g, m, col);
-  g.globalCompositeOperation = 'source-atop';
-  const gr = g.createRadialGradient(m + m * 0.2, m, 0, m, m, m);
-  gr.addColorStop(0, 'rgba(255,255,255,0.9)'); gr.addColorStop(0.6, 'rgba(255,255,255,0.45)'); gr.addColorStop(1, 'rgba(255,255,255,0.2)');
-  g.fillStyle = gr; g.fillRect(0, 0, m * 2, m * 2);
-});
+// v — вариант узора по номеру бусины (VARIANTS вида), acc — цвет узора
+const BEADS = {
+  beads: (g, R, col) => ball(g, R, col),
+  fish: (g, R, col) => { // чешуйка-капелька острым концом назад
+    const drop = (sc) => { g.beginPath(); g.arc(0, 0, R * sc, -2.25, 2.25); g.lineTo(-R * 1.4 * sc, 0); g.closePath(); };
+    drop(1); g.fillStyle = shade(col, -0.5); g.fill();
+    const gr = g.createRadialGradient(R * 0.35, 0, R * 0.1, 0, 0, R * 1.1);
+    gr.addColorStop(0, shade(col, 0.4)); gr.addColorStop(0.65, col); gr.addColorStop(1, shade(col, -0.25));
+    drop(0.88); g.fillStyle = gr; g.fill();
+    g.beginPath(); g.arc(0, 0, R * 0.74, -1.1, 1.1); g.lineWidth = R * 0.1; g.lineCap = 'round'; g.strokeStyle = shade(col, 0.55); g.stroke();
+  },
+  caterpillar: (g, R, col, v, acc) => { // лапки по бокам и блик
+    for (const sd of [-1, 1]) circ(g, -R * 0.12, sd * R * 0.96, R * 0.27, shade(acc || col, -0.5));
+    ball(g, R * 0.97, col, false);
+    circ(g, -R * 0.5, -R * 0.35, R * 0.16, 'rgba(255,255,255,0.5)');
+  },
+  dots: (g, R, col, v, acc) => { // пятна: через бусину одно и два
+    ball(g, R, col, false);
+    if (v) circ(g, -R * 0.52, 0, R * 0.26, acc);
+    else { circ(g, -R * 0.4, -R * 0.55, R * 0.2, acc); circ(g, -R * 0.4, R * 0.55, R * 0.2, acc); }
+  },
+  dragon: (g, R, col, v, acc) => { // гребень по спине
+    ball(g, R, col);
+    g.beginPath(); g.moveTo(R * 0.35, -R * 0.3); g.lineTo(-R * 1.12, 0); g.lineTo(R * 0.35, R * 0.3); g.closePath();
+    const gr = g.createLinearGradient(R * 0.35, 0, -R, 0); gr.addColorStop(0, shade(acc, 0.35)); gr.addColorStop(1, acc);
+    g.fillStyle = gr; g.fill(); g.lineWidth = R * 0.08; g.lineJoin = 'round'; g.strokeStyle = shade(acc, -0.55); g.stroke();
+  },
+  tiger: (g, R, col, v, acc) => { // полоска-уголок
+    ball(g, R, col, false);
+    g.save(); g.beginPath(); g.arc(0, 0, R * 0.91, 0, TAU); g.clip();
+    g.beginPath(); g.moveTo(-R * 0.05, -R); g.lineTo(-R * 0.42, 0); g.lineTo(-R * 0.05, R);
+    g.lineTo(-R * 0.4, R); g.lineTo(-R * 0.78, 0); g.lineTo(-R * 0.4, -R); g.closePath();
+    g.fillStyle = acc; g.fill(); g.restore();
+  },
+  robot: (g, R, col, v, acc) => { // кубик с заклёпками и лампочкой
+    const h = R * 0.88;
+    g.beginPath(); g.roundRect(-h, -h, h * 2, h * 2, R * 0.28); g.fillStyle = shade(col, -0.55); g.fill();
+    const gr = g.createLinearGradient(h, 0, -h, 0); gr.addColorStop(0, shade(col, 0.35)); gr.addColorStop(1, shade(col, -0.15));
+    g.beginPath(); g.roundRect(-h * 0.84, -h * 0.84, h * 1.68, h * 1.68, R * 0.2); g.fillStyle = gr; g.fill();
+    for (const y of [-1, 1]) circ(g, -h * 0.6, y * h * 0.62, R * 0.09, shade(col, -0.45));
+    g.save(); g.shadowBlur = R * 0.8; g.shadowColor = acc; circ(g, -h * 0.55, 0, R * (v ? 0.14 : 0.2), acc); g.restore();
+  },
+  neon: (g, R, col) => { // светящееся кольцо на тёмном
+    circ(g, 0, 0, R, '#0C100E');
+    g.save(); g.shadowBlur = R * 0.9; g.shadowColor = col;
+    g.beginPath(); g.arc(0, 0, R * 0.74, 0, TAU); g.lineWidth = R * 0.2; g.strokeStyle = col; g.stroke();
+    circ(g, -R * 0.5, 0, R * 0.14, col); g.restore();
+  },
+};
+const VARIANTS = { dots: 2, robot: 2 };
+const skinOf = (skin) => SKINS[skin] || SKINS[0];
+const typeId = (skin) => TYPES[skinOf(skin).type].id;
+// вариант узора бусины i (рисуются чётные сегменты): чередуется по бусинам
+const beadVar = (skin, i) => { const n = VARIANTS[typeId(skin)]; return n ? (i >> 1) % n : 0; };
+// спрайт бусины; у спрайта .e — половина размера: рисовать в (-e, -e). mode: 0 — бусина, 1 — вспыхнувшая, 2 — силуэт для обводки
+const beadCache = new Map();
+function beadSprite(skin, col, v, mode = 0) {
+  const sk = skinOf(skin), key = (((sk.type * 512 + sk.acc + 1) * 512 + col) * 4 + v) * 4 + mode;
+  let c = beadCache.get(key);
+  if (c) return c;
+  const t = TYPES[sk.type].id, E = BEAD_E[t] || 80;
+  c = document.createElement('canvas'); c.width = c.height = E * 2; c.e = E;
+  const g = c.getContext('2d');
+  g.translate(E, E);
+  BEADS[t](g, BR, PAL[col] || PAL[0], v, PAL[sk.acc]);
+  if (mode === 1) { // та же бусина, вспыхнувшая: для волны свечения при ускорении
+    g.globalCompositeOperation = 'source-atop';
+    const gr = g.createRadialGradient(BR * 0.2, 0, 0, 0, 0, BR * 1.2);
+    gr.addColorStop(0, 'rgba(255,255,255,0.9)'); gr.addColorStop(0.6, 'rgba(255,255,255,0.45)'); gr.addColorStop(1, 'rgba(255,255,255,0.2)');
+    g.fillStyle = gr; g.fillRect(-E, -E, E * 2, E * 2);
+  } else if (mode === 2) silhouette(g, E);
+  beadCache.set(key, c);
+  return c;
+}
+// силуэт для обводки своей змейки: форма бусины или головы целиком (с гребнем, лапками, ушками), залитая цветом обводки.
+// Свечение неона в силуэт не идёт — только плотная часть
+function silhouette(g, E) {
+  const d = g.getImageData(0, 0, E * 2, E * 2), a = d.data;
+  for (let i = 0; i < a.length; i += 4) { const on = a[i + 3] > 160; a[i] = a[i + 1] = a[i + 2] = MINE_RGB; a[i + 3] = on ? 255 : 0; }
+  g.putImageData(d, 0, 0);
+}
+
+// голова: в начале координат, смотрит вдоль +x, r — радиус тела. Глаза рисуются отдельно — они следят за курсом
+function roundHead(g, r, col, sc = 1.1) {
+  const R = r * sc; circ(g, 0, 0, R, shade(col, -0.55));
+  const gr = g.createRadialGradient(R * 0.25, -R * 0.2, R * 0.1, 0, 0, R);
+  gr.addColorStop(0, shade(col, 0.45)); gr.addColorStop(0.55, col); gr.addColorStop(1, shade(col, -0.25));
+  circ(g, 0, 0, R - r * 0.1, gr);
+}
+function antennae(g, r, line, tip) {
+  for (const sd of [-1, 1]) {
+    g.beginPath(); g.moveTo(r * 0.3, sd * r * 0.35); g.quadraticCurveTo(r * 1.1, sd * r * 0.55, r * 1.35, sd * r * 1.15);
+    g.lineWidth = r * 0.14; g.lineCap = 'round'; g.strokeStyle = line; g.stroke();
+    circ(g, r * 1.35, sd * r * 1.15, r * 0.22, tip);
+  }
+}
+const HEADS = {
+  beads: (g, r, hd) => roundHead(g, r, hd),
+  fish: (g, r, hd, acc) => { // плавники у головы
+    for (const sd of [-1, 1]) {
+      g.beginPath(); g.moveTo(-r * 0.1, sd * r * 0.7); g.lineTo(-r * 0.85, sd * r * 1.55); g.lineTo(-r * 0.25, sd * r * 1.55); g.lineTo(r * 0.3, sd * r * 0.8); g.closePath();
+      g.fillStyle = hexA(acc, 0.9); g.fill(); g.lineWidth = r * 0.07; g.strokeStyle = shade(acc, -0.45); g.stroke();
+    }
+    g.save(); g.scale(1.15, 1); roundHead(g, r, hd); g.restore();
+  },
+  caterpillar: (g, r, hd, acc) => { antennae(g, r, shade(hd, -0.5), acc); roundHead(g, r, hd, 1.18); },
+  dots: (g, r, hd) => { antennae(g, r * 0.8, hd, hd); roundHead(g, r, hd); },
+  dragon: (g, r, hd, acc) => { // рожки и ноздри
+    for (const sd of [-1, 1]) {
+      g.beginPath(); g.moveTo(-r * 0.1, sd * r * 0.5); g.quadraticCurveTo(-r * 1.0, sd * r * 1.25, -r * 1.75, sd * r * 1.2); g.lineTo(-r * 0.7, sd * r * 0.85); g.closePath();
+      g.fillStyle = acc; g.fill(); g.lineWidth = r * 0.09; g.strokeStyle = shade(acc, -0.55); g.stroke();
+    }
+    g.save(); g.scale(1.22, 1); roundHead(g, r, hd, 1.05); g.restore();
+    circ(g, r * 1.05, -r * 0.22, r * 0.08, shade(hd, -0.6)); circ(g, r * 1.05, r * 0.22, r * 0.08, shade(hd, -0.6));
+  },
+  tiger: (g, r, hd, acc) => { // ушки, полоски на лбу, носик
+    for (const sd of [-1, 1]) {
+      g.beginPath(); g.moveTo(-r * 0.55, sd * r * 0.45); g.lineTo(-r * 0.75, sd * r * 1.35); g.lineTo(r * 0.05, sd * r * 0.95); g.closePath();
+      g.fillStyle = hd; g.fill(); g.lineWidth = r * 0.1; g.lineJoin = 'round'; g.strokeStyle = shade(hd, -0.55); g.stroke();
+      g.beginPath(); g.moveTo(-r * 0.45, sd * r * 0.7); g.lineTo(-r * 0.55, sd * r * 1.1); g.lineTo(-r * 0.15, sd * r * 0.9); g.closePath(); g.fillStyle = '#FFB3C7'; g.fill();
+    }
+    roundHead(g, r, hd);
+    g.lineWidth = r * 0.13; g.lineCap = 'round'; g.strokeStyle = acc;
+    for (const y of [-0.35, 0, 0.35]) { g.beginPath(); g.moveTo(-r * 0.85, y * r); g.lineTo(-r * 0.35, y * r * 0.6); g.stroke(); }
+    circ(g, r * 0.95, 0, r * 0.15, '#FF8FA3');
+  },
+  robot: (g, r, hd, acc) => { // голова-экран с антенной; глаза — лампочки на экране
+    g.beginPath(); g.moveTo(-r * 0.3, 0); g.lineTo(-r * 1.4, -r * 0.9); g.lineWidth = r * 0.12; g.strokeStyle = shade(hd, -0.5); g.stroke();
+    g.save(); g.shadowBlur = r; g.shadowColor = acc; circ(g, -r * 1.4, -r * 0.9, r * 0.2, acc); g.restore();
+    const h = r * 1.08;
+    g.beginPath(); g.roundRect(-h, -h, h * 2, h * 2, r * 0.35); g.fillStyle = shade(hd, -0.55); g.fill();
+    const gr = g.createLinearGradient(h, 0, -h, 0); gr.addColorStop(0, shade(hd, 0.4)); gr.addColorStop(1, shade(hd, -0.1));
+    g.beginPath(); g.roundRect(-h * 0.86, -h * 0.86, h * 1.72, h * 1.72, r * 0.27); g.fillStyle = gr; g.fill();
+    g.beginPath(); g.roundRect(r * 0.2, -r * 0.78, r * 0.62, r * 1.56, r * 0.25); g.fillStyle = '#14181B'; g.fill();
+    g.save(); g.shadowBlur = r * 0.7; g.shadowColor = acc;
+    circ(g, r * 0.52, -r * 0.38, r * 0.16, acc); circ(g, r * 0.52, r * 0.38, r * 0.16, acc); g.restore();
+  },
+  neon: (g, r, hd) => {
+    circ(g, 0, 0, r * 1.1, '#0C100E');
+    g.save(); g.shadowBlur = r; g.shadowColor = hd;
+    g.beginPath(); g.arc(0, 0, r * 0.92, 0, TAU); g.lineWidth = r * 0.2; g.strokeStyle = hd; g.stroke(); g.restore();
+  },
+};
+// глаза по видам: d — как далеко от центра, big — размер, slit — зрачок-щёлочка, glow — светятся, none — нарисованы в голове
+const EYES = { dragon: { d: 0.45, slit: true }, fish: { big: 1.2 }, caterpillar: { big: 1.15 }, neon: { glow: true }, robot: { none: true } };
+// голова раскраски: спрайт, силуэт для обводки (лениво), глаза вида и цвет головы — один раз на раскраску
+const headCache = [];
+function headOf(skin) {
+  if (headCache[skin]) return headCache[skin];
+  const sk = skinOf(skin), t = TYPES[sk.type].id, c = document.createElement('canvas'); c.width = c.height = HE * 2;
+  const g = c.getContext('2d'); g.translate(HE, HE);
+  HEADS[t](g, HU, PAL[sk.head], PAL[sk.acc] || PAL[sk.head]);
+  return (headCache[skin] = { c, sil: null, eyes: EYES[t] || {}, col: PAL[sk.head] });
+}
+function headSil(skin) {
+  const h = headOf(skin);
+  if (!h.sil) {
+    const c = document.createElement('canvas'); c.width = c.height = HE * 2;
+    const g = c.getContext('2d'); g.drawImage(h.c, 0, 0); silhouette(g, HE); h.sil = c;
+  }
+  return h.sil;
+}
+// голова со взглядом: (x, y) — центр, a — куда смотрит, look — куда хочет повернуть, r — радиус тела, sc — раздувание волной;
+// edge > 0 — вместо головы её силуэт, шире на edge (обводка своей змейки)
+function drawHead(g, skin, x, y, a, look, r, sc = 1, edge = 0) {
+  const h = headOf(skin), c = Math.cos(a), s = Math.sin(a), k = (r * sc + edge) / HU;
+  const m = g.getTransform();
+  g.transform(c * k, s * k, -s * k, c * k, x, y);
+  g.drawImage(edge ? headSil(skin) : h.c, -HE, -HE);
+  g.setTransform(m);
+  const e = h.eyes;
+  if (edge || e.none) return;
+  const d = (e.d || 0.55) * r, er = (e.big || 1) * r * 0.36;
+  for (const side of [-1, 1]) {
+    const ex = x + Math.cos(a + side * 0.6) * d, ey = y + Math.sin(a + side * 0.6) * d;
+    if (e.glow) {
+      g.beginPath(); g.arc(ex, ey, er * 0.75, 0, TAU); g.fillStyle = h.col; g.fill();
+      g.beginPath(); g.arc(ex + Math.cos(look) * r * 0.1, ey + Math.sin(look) * r * 0.1, er * 0.32, 0, TAU); g.fillStyle = '#FFFFFF'; g.fill();
+      continue;
+    }
+    g.beginPath(); g.arc(ex, ey, er, 0, TAU); g.fillStyle = '#FFFFFF'; g.fill();
+    const px = ex + Math.cos(look) * r * 0.14, py = ey + Math.sin(look) * r * 0.14;
+    g.beginPath();
+    if (e.slit) g.ellipse(px, py, er * 0.3, er * 0.75, look, 0, TAU);
+    else g.arc(px, py, r * 0.2, 0, TAU);
+    g.fillStyle = '#1A1C19'; g.fill();
+  }
+}
 const foodSprite = lazy(SPR, (g, m, col) => {
   const gr = g.createRadialGradient(m, m, 0, m, m, m);
   gr.addColorStop(0, '#FFFFFF'); gr.addColorStop(0.18, shade(col, 0.4)); gr.addColorStop(0.36, col);
@@ -1148,8 +1329,32 @@ function hideHint() { clearTimeout(hintTimer); $('hint').hidden = true; }
 // ---------- главный экран ----------
 
 // раскраска: стрелками листаются все, играть можно только открытыми
+// Сначала вид (ряд голов), стрелки и свайп листают раскраски этого вида.
 let viewSkin = save.skin;
-const stepSkin = (d) => { viewSkin = (viewSkin + d + SKINS.length) % SKINS.length; if (unlocked(SKINS[viewSkin])) { save.skin = viewSkin; persist(); } renderHome(); };
+const viewAt = (k) => { viewSkin = k; if (unlocked(SKINS[k])) { save.skin = k; persist(); } renderHome(); };
+const stepSkin = (d) => { const l = SKINS_OF[SKINS[viewSkin].type], j = l.indexOf(viewSkin); viewAt(l[(j + d + l.length) % l.length]); };
+// значки видов: голова первой раскраски вида
+const typeBtns = TYPES.map((t, ti) => {
+  const b = document.createElement('button'), c = document.createElement('canvas'), k = SKINS_OF[ti][0];
+  b.setAttribute('role', 'tab'); b.setAttribute('aria-label', t.name); b.title = t.name;
+  c.width = c.height = Math.round(44 * DPR); b.appendChild(c);
+  const g = c.getContext('2d'); g.scale(c.width / 44, c.width / 44);
+  // значок: кусочек змейки — две бусины и голова, чтобы видно было и узор, и голову
+  for (const [x, i] of [[8, 4], [15, 2]]) {
+    g.save(); g.translate(x, 22); const sc = 7 / BEAD_U; g.scale(sc, sc);
+    const sp = beadSprite(k, segColor(k, i), beadVar(k, i)); g.drawImage(sp, -sp.e, -sp.e); g.restore();
+  }
+  drawHead(g, k, 27, 22, 0, 0, 7.5);
+  const lk = document.createElement('span'); lk.className = 'lk'; lk.innerHTML = icon('lock'); b.appendChild(lk);
+  // свой вид — к своей раскраске; иначе к последней открытой раскраске вида, а если закрыты все — к первой
+  b.addEventListener('click', () => {
+    if (SKINS[save.skin].type === ti) return viewAt(save.skin);
+    const open = SKINS_OF[ti].filter((i) => unlocked(SKINS[i]));
+    viewAt(open.length ? open[open.length - 1] : SKINS_OF[ti][0]);
+  });
+  $('types').appendChild(b);
+  return b;
+});
 $('skinPrev').addEventListener('click', () => stepSkin(-1));
 $('skinNext').addEventListener('click', () => stepSkin(1));
 // свайп по змейке тоже листает
@@ -1171,6 +1376,11 @@ function renderHome() {
   $('stars').innerHTML = `${icon('star')}${stars()}`;
   const sk = SKINS[viewSkin], open = unlocked(sk);
   $('skinName').textContent = sk.name;
+  typeBtns.forEach((b, ti) => {
+    const on = ti === sk.type, locked = !SKINS_OF[ti].some((i) => unlocked(SKINS[i]));
+    b.classList.toggle('on', on); b.classList.toggle('locked', locked); b.setAttribute('aria-selected', on);
+    b.lastChild.hidden = !locked;
+  });
   $('skinLock').innerHTML = open ? '' : `${icon('lock')}откроется за ${sk.stars - stars()} ★`;
   document.querySelectorAll('#diff button').forEach((b) => b.classList.toggle('on', b.dataset.d === save.diff));
   const v = save.best[save.diff] || 0;
@@ -1193,24 +1403,19 @@ function drawPreview() {
     pts.push({ x, y: cy + Math.sin(x / (r * 3.2) - time * 3) * ch * 0.2 });
   }
   g.globalAlpha = open ? 1 : 0.35;
-  const hb = BSPR / 2;
   for (let i = n - (n & 1); i >= 2; i -= 2) {
     const q = pts[i], p = pts[i - 1], o = pts[i + 1] || q;
     const rr = i > n - 6 ? r * (0.55 + 0.45 * (n - i) / 6) : r;
     let dx = p.x - o.x, dy = p.y - o.y;
-    const sc = DPR * rr / hb / (Math.hypot(dx, dy) || 1);
+    const sc = DPR * rr / BEAD_U / (Math.hypot(dx, dy) || 1);
     dx *= sc; dy *= sc;
     g.setTransform(dx, dy, -dy, dx, DPR * q.x, DPR * q.y);
-    g.drawImage(beadSprite(segColor(viewSkin, i)), -hb, -hb);
+    const sp = beadSprite(viewSkin, segColor(viewSkin, i), beadVar(viewSkin, i));
+    g.drawImage(sp, -sp.e, -sp.e);
   }
   g.setTransform(DPR, 0, 0, DPR, 0, 0);
-  const h = pts[0], a = Math.atan2(h.y - pts[1].y, h.x - pts[1].x), hr = r * 1.1;
-  g.drawImage(headSprite(sk.head), h.x - hr, h.y - hr, hr * 2, hr * 2);
-  for (const side of [-1, 1]) {
-    const ex = h.x + Math.cos(a + side * 0.6) * r * 0.55, ey = h.y + Math.sin(a + side * 0.6) * r * 0.55;
-    g.beginPath(); g.arc(ex, ey, r * 0.36, 0, TAU); g.fillStyle = '#FFFFFF'; g.fill();
-    g.beginPath(); g.arc(ex + Math.cos(a) * r * 0.14, ey + Math.sin(a) * r * 0.14, r * 0.2, 0, TAU); g.fillStyle = '#1A1C19'; g.fill();
-  }
+  const h = pts[0], a = Math.atan2(h.y - pts[1].y, h.x - pts[1].x);
+  drawHead(g, viewSkin, h.x, h.y, a, a, r);
   g.globalAlpha = 1;
 }
 
@@ -1300,7 +1505,7 @@ $('btnInfo').addEventListener('click', () => {
     : 'Змейка ползёт к курсору мыши. Левая кнопка или пробел — ускорение: каждая секунда сжигает 5 % длины, но не меньше 10. Можно стрелками ← →. Пауза — Esc.';
   const ih = installHint();
   dialog('Как играть', `<p>${ctl}</p><p>Подрежь соперника — пусть врежется в тебя головой. Золотая стрелка с короной у края экрана показывает, где лидер.</p>` +
-    `<p>Звёзды за еду, победы и места открывают новые раскраски.</p>` +
+    `<p>Звёзды за еду, победы и места открывают новых змеек и их раскраски.</p>` +
     `<div class="note ${offline.cls}">${icon(offline.ic)}<span>${offline.text}${ih ? ` ${ih}` : ''}</span></div>` + (IOS_PWA ? `<p class="muted">${screenInfo()}</p>` : ''),
   [{ label: 'Понятно', kind: 'filled', onClick: closeDialog }]);
 });
@@ -1354,7 +1559,7 @@ const camT = { k: 1, e: 0, f: 0 }; // матрица камеры текущег
 const boostWave = (i) => { const w = 0.5 + 0.5 * Math.sin(time * 16 - i * 0.22); return w * w; };
 const isMate = (s) => mode === 'net' && net.roomMode === 'team' && s.human && s.team && s.team === net.myTeam;
 function drawSnake(s, vx0, vy0, vx1, vy1) {
-  const segs = s.segs, r = s.r, sk = SKINS[s.skin] || SKINS[0];
+  const segs = s.segs, r = s.r;
   const h = segs[0], n = segs.length;
   const margin = bodyLenOf(s.mass) + r;
   if (h.x < vx0 - margin || h.x > vx1 + margin || h.y < vy0 - margin || h.y > vy1 + margin) return;
@@ -1384,49 +1589,37 @@ function drawSnake(s, vx0, vy0, vx1, vy1) {
     ctx.globalAlpha = a0;
   }
   // бусина повёрнута по ходу тела: матрица — мировая камера × поворот × масштаб
-  const k = camT.k, hb = BSPR / 2;
+  const k = camT.k;
   const tail = Math.min(10, n >> 2);
   // радиус бусины: хвост сужается; на гребне волны успеха — шире
   const radAt = (i, gwi) => (i > n - tail ? r * (0.55 + 0.45 * (n - i) / tail) : r) * (1 + 0.22 * gwi);
-  if (s === me) { // своя змейка — в светлой обводке: подложка чуть шире бусин, чтобы не спутать с похожей чужой
-    const ow = 1 / cam.z;
-    ctx.beginPath();
+  // edge > 0 — проход обводки: силуэты бусин шире на edge; иначе сами бусины
+  const beads = (edge) => {
     for (let i = (n - 1) & ~1; i >= 2; i -= step) {
       const q = segs[i];
       if (q.x < x0 || q.x > x1 || q.y < y0 || q.y > y1) continue;
-      const rr = radAt(i, gw ? gw(i) : 0) + ow;
-      ctx.moveTo(q.x + rr, q.y); ctx.arc(q.x, q.y, rr, 0, TAU);
+      const gwi = gw ? gw(i) : 0;
+      const rr = radAt(i, gwi);
+      const p = segs[i - 1], o = segs[i + 1] || q;
+      let dx = p.x - o.x, dy = p.y - o.y, d = Math.hypot(dx, dy);
+      if (d < 1e-6) { dx = Math.cos(s.a); dy = Math.sin(s.a); d = 1; } // соседи совпали (хвост при росте) — смотрим по ходу головы
+      const sc = k * (rr + edge) / BEAD_U / d;
+      dx *= sc; dy *= sc;
+      ctx.setTransform(dx, dy, -dy, dx, k * q.x + camT.e, k * q.y + camT.f);
+      // мелкую змейку рисуем через бусину — тогда узор и цвета чередуем по нарисованным, иначе они застынут на одном
+      const ci = step === 4 ? i >> 1 : i, c = segColor(s.skin, ci), v = beadVar(s.skin, ci);
+      if (edge) { const sp = beadSprite(s.skin, c, v, 2); ctx.drawImage(sp, -sp.e, -sp.e); continue; }
+      const sp = beadSprite(s.skin, c, v);
+      ctx.drawImage(sp, -sp.e, -sp.e);
+      const lit = Math.max(boost ? boostWave(i) : 0, gwi);
+      if (lit > 0.25) { const sl = beadSprite(s.skin, c, v, 1); ctx.globalAlpha = a0 * lit; ctx.drawImage(sl, -sl.e, -sl.e); ctx.globalAlpha = a0; }
     }
-    const hr = r * 1.1 * (1 + 0.22 * (gw ? gw(0) : 0)) + ow;
-    ctx.moveTo(h.x + hr, h.y); ctx.arc(h.x, h.y, hr, 0, TAU);
-    ctx.fillStyle = MINE_EDGE; ctx.fill();
-  }
-  for (let i = (n - 1) & ~1; i >= 2; i -= step) {
-    const q = segs[i];
-    if (q.x < x0 || q.x > x1 || q.y < y0 || q.y > y1) continue;
-    const gwi = gw ? gw(i) : 0;
-    const rr = radAt(i, gwi);
-    const p = segs[i - 1], o = segs[i + 1] || q;
-    let dx = p.x - o.x, dy = p.y - o.y, d = Math.hypot(dx, dy);
-    if (d < 1e-6) { dx = Math.cos(s.a); dy = Math.sin(s.a); d = 1; } // соседи совпали (хвост при росте) — смотрим по ходу головы
-    const sc = k * rr / hb / d;
-    dx *= sc; dy *= sc;
-    ctx.setTransform(dx, dy, -dy, dx, k * q.x + camT.e, k * q.y + camT.f);
-    const c = segColor(s.skin, i);
-    ctx.drawImage(beadSprite(c), -hb, -hb);
-    const lit = Math.max(boost ? boostWave(i) : 0, gwi);
-    if (lit > 0.25) { ctx.globalAlpha = a0 * lit; ctx.drawImage(beadLitSprite(c), -hb, -hb); ctx.globalAlpha = a0; }
-  }
-  ctx.setTransform(k, 0, 0, k, camT.e, camT.f);
-  const hr = r * 1.1 * (1 + 0.22 * (gw ? gw(0) : 0));
-  ctx.drawImage(headSprite(sk.head), h.x - hr, h.y - hr, hr * 2, hr * 2);
-  const a = s.a, look = s.ta;
-  for (const side of [-1, 1]) {
-    const ex = h.x + Math.cos(a + side * 0.6) * r * 0.55, ey = h.y + Math.sin(a + side * 0.6) * r * 0.55;
-    ctx.beginPath(); ctx.arc(ex, ey, r * 0.36, 0, TAU); ctx.fillStyle = '#FFFFFF'; ctx.fill();
-    ctx.beginPath(); ctx.arc(ex + Math.cos(look) * r * 0.14, ey + Math.sin(look) * r * 0.14, r * 0.2, 0, TAU);
-    ctx.fillStyle = '#1A1C19'; ctx.fill();
-  }
+    ctx.setTransform(k, 0, 0, k, camT.e, camT.f);
+    drawHead(ctx, s.skin, h.x, h.y, s.a, s.ta, r, 1 + 0.22 * (gw ? gw(0) : 0), edge);
+  };
+  // своя змейка — в светлой обводке: под бусинами их силуэты чуть шире (по форме вида — с гребнем, лапками, ушками)
+  if (s === me) beads(1 / cam.z);
+  beads(0);
   ctx.globalAlpha = 1;
 
   const rv = run && run.revenge && run.revenge.id === s.id;

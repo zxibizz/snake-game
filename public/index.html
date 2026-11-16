@@ -66,11 +66,19 @@ svg.i{width:24px;height:24px;fill:currentColor;flex:none}
 .stars svg.i{width:18px;height:18px}
 .pick{display:flex;flex-direction:column;align-items:center;gap:8px}
 #preview{width:100%;height:150px;display:block}
+@media (max-height:600px){#preview{height:96px}}
 .skin-row{display:flex;align-items:center;justify-content:space-between;width:100%}
 .skin-info{flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;min-height:44px;justify-content:center}
 .skin-info b{font-size:18px;font-weight:500}
 .skin-info small{font-size:13px;color:var(--on-var);display:flex;align-items:center;gap:4px}
 .skin-info small svg.i{width:14px;height:14px}
+.types{display:flex;justify-content:center;gap:4px;width:100%}
+.types button{flex:0 1 44px;min-width:0;aspect-ratio:1;max-width:44px;border:0;border-radius:50%;padding:0;background:none;position:relative;cursor:pointer}
+.types button canvas{width:100%;height:100%;display:block}
+.types button.on{background:var(--surf-highest);box-shadow:inset 0 0 0 2px var(--primary)}
+.types button.locked canvas{opacity:.35}
+.types .lk{position:absolute;right:0;bottom:0;display:flex;color:var(--on-var)}
+.types .lk svg.i{width:14px;height:14px}
 .icon-btn.flat{background:none;box-shadow:none;color:var(--on)}
 .icon-btn.flat:disabled{opacity:.25}
 .go{display:flex;flex-direction:column;gap:12px}
@@ -240,6 +248,7 @@ svg.i{width:24px;height:24px;fill:currentColor;flex:none}
 
     <section class="pick">
       <canvas id="preview"></canvas>
+      <div class="types" id="types" role="tablist" aria-label="Вид змейки"></div>
       <div class="skin-row">
         <button class="icon-btn flat" id="skinPrev" aria-label="Предыдущая раскраска" data-icon="left"></button>
         <div class="skin-info"><b id="skinName"></b><small id="skinLock"></small></div>

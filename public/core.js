@@ -2,7 +2,7 @@
 // Здесь нет DOM и сети — только мир, змейки, еда, боты и столкновения.
 
 // Версия протокола и файлов: при изменении любого файла в public/ поднять и здесь, и в sw.js (тест сверяет).
-export const VERSION = '21';
+export const VERSION = '22';
 export const TAU = Math.PI * 2;
 export const R = 7000;                  // радиус арены (координаты по сети — Int16 / 4, предел 8191)
 export const BASE_SPEED = 210;          // пикс/с — у «Малыша»; с каждым званием змейка быстрее, см. speedOf
@@ -98,10 +98,19 @@ export const FOOD_COLORS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 20, 21, 27, 28];
 // p — номера цветов по кругу, run — бусин подряд одного цвета, head — цвет головы, stars — сколько звёзд нужно накопить, чтобы открыть.
 // bounce — палитра идёт туда и обратно, чтобы цвета перетекали.
 const palIdx = (hex) => { let k = PAL.indexOf(hex); if (k < 0) { k = PAL.length; PAL.push(hex); } return k; };
-function skin(name, hexes, { bounce = false, head = hexes[0], stars = 0 } = {}) {
+// type — вид змейки (бусина и голова рисуются по-своему), acc — цвет узора: пятна, гребень, полоски, лампочки,
+// hd — цвет головы, если она не как тело (у «Пятнышек» тёмная головка).
+export const TYPES = [
+  { id: 'beads', name: 'Бусинки' }, { id: 'fish', name: 'Рыбка' }, { id: 'caterpillar', name: 'Гусеница' },
+  { id: 'dots', name: 'Пятнышки' }, { id: 'dragon', name: 'Дракончик' }, { id: 'tiger', name: 'Полосатая' },
+  { id: 'robot', name: 'Робот' }, { id: 'neon', name: 'Неон' },
+];
+const typeIdx = (id) => TYPES.findIndex((t) => t.id === id);
+function skin(name, hexes, { bounce = false, head = hexes[0], stars = 0, type = 'beads', acc = null, run = 2 } = {}) {
   const seq = bounce ? hexes.concat(hexes.slice(1, -1).reverse()) : hexes;
-  return { name, p: seq.map(palIdx), run: 2, head: palIdx(head), stars };
+  return { name, p: seq.map(palIdx), run, head: palIdx(head), stars, type: typeIdx(type), acc: acc ? palIdx(acc) : -1 };
 }
+// новые раскраски — только в конец списка: номер раскраски хранится в сохранении и уходит по сети
 export const SKINS = [
   skin('Радуга', ['#FF5A5F', '#FF8A3D', '#FFC93C', '#7ED957', '#2EC4B6', '#3D8BF5', '#8B5CF6']),
   skin('Пастельная радуга', ['#FFA8B5', '#FFC9A3', '#FFEFA3', '#C6F0A8', '#A8E6E0', '#B3CCFF', '#D4B8FF']),
@@ -115,7 +124,38 @@ export const SKINS = [
   skin('Ягоды', ['#3A0CA3', '#6A0DAD', '#9D1BB2', '#D61F8C', '#FF5D8F', '#FF9EBB'], { bounce: true, head: '#D61F8C', stars: 9600 }),
   skin('Северное сияние', ['#0E6B5C', '#1FAB89', '#62D2A2', '#A8F0C6', '#9A8CFF', '#6C4CD6'], { bounce: true, head: '#1FAB89', stars: 14250 }),
   skin('Павлин', ['#005F73', '#0A9396', '#94D2BD', '#E9D8A6', '#EE9B00', '#CA6702', '#9B2226'], { bounce: true, head: '#0A9396', stars: 21850 }),
+  // виды: первая раскраска вида открывается рано, остальные вперемешку с бусинками — новое открывается часто
+  skin('Золотая рыбка', ['#FFB020', '#FF8A00'], { type: 'fish', acc: '#FF5A5F', stars: 100 }),
+  skin('Морская рыбка', ['#48CAE4', '#0096C7', '#0077B6'], { type: 'fish', bounce: true, acc: '#CFF5FA', stars: 1200 }),
+  skin('Рыбка кои', ['#FFF4E6', '#FFF4E6', '#FF5A1F', '#FFF4E6', '#FF5A1F', '#FF5A1F'], { type: 'fish', acc: '#FF5A1F', stars: 4500 }),
+  skin('Тропическая рыбка', ['#2EC4B6', '#FFC93C', '#FF5D8F'], { type: 'fish', acc: '#FFC93C', stars: 12000 }),
+  skin('Гусеница-листик', ['#7ED957', '#A8E063'], { type: 'caterpillar', acc: '#FF5A5F', run: 1, stars: 400 }),
+  skin('Лимонная гусеница', ['#FFD447', '#FFB020'], { type: 'caterpillar', acc: '#8A5A3B', run: 1, stars: 1900 }),
+  skin('Лавандовая гусеница', ['#C7B6FF', '#9A84F5'], { type: 'caterpillar', acc: '#FF7EB6', run: 1, stars: 6500 }),
+  skin('Гусеница-апельсинка', ['#FF9F1C', '#FFBF69'], { type: 'caterpillar', acc: '#2EC4B6', run: 1, stars: 15000 }),
+  skin('Божья коровка', ['#E5383B'], { type: 'dots', acc: '#1A1A1A', head: '#1A1A1A', stars: 900 }),
+  skin('Солнышко', ['#FFC93C', '#FFB020'], { type: 'dots', acc: '#1A1A1A', head: '#1A1A1A', stars: 2600 }),
+  skin('Мухомор', ['#D62828'], { type: 'dots', acc: '#FFF4E0', head: '#F1E3C8', stars: 8000 }),
+  skin('Далматин', ['#F4F4F0'], { type: 'dots', acc: '#1A1A1A', head: '#2B2D42', stars: 18000 }),
+  skin('Изумрудный дракончик', ['#2D6A4F', '#40916C', '#52B788'], { type: 'dragon', bounce: true, acc: '#FFB020', head: '#40916C', stars: 1300 }),
+  skin('Огненный дракончик', ['#9D0208', '#D00000', '#E85D04', '#F48C06'], { type: 'dragon', bounce: true, acc: '#FFE066', head: '#D00000', stars: 3300 }),
+  skin('Ледяной дракончик', ['#A8EBFF', '#7DD3F5', '#3DB8F5'], { type: 'dragon', bounce: true, acc: '#F2FCFF', head: '#7DD3F5', stars: 10500 }),
+  skin('Ночной дракончик', ['#2B2D42', '#3A3F6B', '#5E2CA5'], { type: 'dragon', bounce: true, acc: '#22F0B4', head: '#3A3F6B', stars: 24000 }),
+  skin('Тигр', ['#FF8A1F'], { type: 'tiger', acc: '#1A1A1A', stars: 2000 }),
+  skin('Зебра', ['#F4F4F0'], { type: 'tiger', acc: '#1A1A1A', stars: 4200 }),
+  skin('Пчёлка', ['#FFC93C'], { type: 'tiger', acc: '#2B2D42', stars: 12500 }),
+  skin('Барс', ['#E8E6DC', '#D8D4C4'], { type: 'tiger', acc: '#6B6B6B', stars: 27000 }),
+  skin('Стальной робот', ['#9AA5B1', '#B8C2CC'], { type: 'robot', acc: '#3DB8F5', stars: 3000 }),
+  skin('Золотой робот', ['#E0B84C', '#C99A2E'], { type: 'robot', acc: '#FF5A5F', stars: 5200 }),
+  skin('Игрушечный робот', ['#FF5A5F', '#FFC93C', '#3D8BF5'], { type: 'robot', acc: '#FFFFFF', head: '#3D8BF5', run: 1, stars: 16500 }),
+  skin('Космический робот', ['#E8EEF5', '#C9D3DE'], { type: 'robot', acc: '#22F0B4', stars: 30000 }),
+  skin('Розовый неон', ['#FF3D7F'], { type: 'neon', stars: 4000 }),
+  skin('Бирюзовый неон', ['#22F0B4'], { type: 'neon', stars: 7000 }),
+  skin('Радужный неон', ['#FF5A5F', '#FFC93C', '#7ED957', '#2EC4B6', '#3D8BF5', '#8B5CF6'], { type: 'neon', stars: 20000 }),
+  skin('Неон-электрик', ['#4F7CFF', '#7DF9FF'], { type: 'neon', stars: 34000 }),
 ];
+// раскраски по видам: SKINS_OF[тип] — номера раскрасок этого вида по порядку открытия
+export const SKINS_OF = TYPES.map((_, t) => SKINS.map((_, i) => i).filter((i) => SKINS[i].type === t).sort((a, b) => SKINS[a].stars - SKINS[b].stars));
 // похожие раскраски: среднее расстояние до ближайшего цвета другой палитры в OKLab (обе стороны).
 // Ниже SKIN_NEAR_D глазом на арене не различить (Пастельная радуга ~ Мороженое ≈ 0,04, Радуга ~ Закат ≈ 0,09).
 // Бот не берёт раскраску человека и похожие на неё — иначе свою змейку легко спутать с чужой.
@@ -131,8 +171,8 @@ const oklab = (hex) => {
 const skinLab = SKINS.map((s) => [...new Set(s.p)].map((k) => oklab(PAL[k])));
 const coverOf = (A, B) => A.reduce((t, a) => t + Math.min(...B.map((b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]))), 0) / A.length;
 export const skinDist = (i, j) => (coverOf(skinLab[i], skinLab[j]) + coverOf(skinLab[j], skinLab[i])) / 2;
-// SKIN_NEAR[i] — раскраски, которые путаются с i (и сама i)
-export const SKIN_NEAR = SKINS.map((_, i) => SKINS.map((_, j) => j).filter((j) => skinDist(i, j) < SKIN_NEAR_D));
+// SKIN_NEAR[i] — раскраски, которые путаются с i (и сама i): тот же вид и близкие цвета; разные виды не путаются
+export const SKIN_NEAR = SKINS.map((_, i) => SKINS.map((_, j) => j).filter((j) => SKINS[j].type === SKINS[i].type && skinDist(i, j) < SKIN_NEAR_D));
 
 // цвет сегмента i: рисуется каждый второй сегмент («бусина»), цвета считаются по бусинам
 export const segColor = (skin, i) => { const s = SKINS[skin] || SKINS[0]; return s.p[Math.floor((i >> 1) / s.run) % s.p.length]; };
@@ -272,7 +312,7 @@ export class World {
     this.pending = [];
     this.events = [];
     this.nextSnakeId = 1;
-    this.humanSkins = new Set(); // раскраски людей: боты их и похожие не берут
+    this.humanSkins = new Set(); // раскраски людей: боты не берут их вид (и похожие раскраски)
     this.nextFoodId = 1;
     this.time = 0;
     this.byId = new Map();
@@ -622,12 +662,14 @@ export class World {
     return this.addSnake(new Snake(this.nextSnakeId++, segs[0].x, segs[0].y, mass,
       this.botSkin(), this.pickName(), false, 0, a, initial ? segs : coilBody(segs[0].x, segs[0].y, mass)));
   }
-  // раскраска бота: не как у людей и не похожая; если людей столько, что похожие закрыли всё, — хотя бы не такая же
+  // раскраска бота: другого вида, чем у людей; если людей столько, что виды кончились, — хотя бы не похожая,
+  // а если и похожие закрыли всё, — хотя бы не такая же
   botSkin() {
-    const near = new Set(), own = this.humanSkins;
+    const near = new Set(), own = this.humanSkins, types = new Set([...own].map((k) => SKINS[k].type));
     for (const k of own) for (const j of SKIN_NEAR[k] || [k]) near.add(j);
     const all = SKINS.map((_, i) => i);
-    let pool = all.filter((i) => !near.has(i));
+    let pool = all.filter((i) => !types.has(SKINS[i].type));
+    if (!pool.length) pool = all.filter((i) => !near.has(i));
     if (!pool.length) pool = all.filter((i) => !own.has(i));
     if (!pool.length) pool = all;
     return pool[randi(0, pool.length - 1)];
@@ -636,8 +678,10 @@ export class World {
   addHuman({ name, skin, team = 0, mass = START_MASS, inv = 2, keep = null }) {
     if (!this.humanSkins.has(skin)) {
       this.humanSkins.add(skin);
-      const near = new Set(SKIN_NEAR[skin] || [skin]);
-      for (const b of this.snakes) if (!b.human && near.has(b.skin) && !(keep && keep.has(b.id))) b.skin = this.botSkin();
+      // боты вида игрока перекрашиваются; если виды кончились (людей больше, чем видов), — только похожие раскраски
+      const type = (SKINS[skin] || SKINS[0]).type, types = new Set([...this.humanSkins].map((k) => SKINS[k].type));
+      const near = new Set(SKIN_NEAR[skin] || [skin]), twin = types.size < TYPES.length ? (k) => SKINS[k].type === type : (k) => near.has(k);
+      for (const b of this.snakes) if (!b.human && twin(b.skin) && !(keep && keep.has(b.id))) b.skin = this.botSkin();
     }
     let p = null;
     const mate = team ? this.humans().find((h) => h.team === team) : null;

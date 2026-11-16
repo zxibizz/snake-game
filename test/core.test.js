@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { World, Snake, countOf, spacingOf, SNAKES_N, DIFF, R, GOLD, SKINS, PAL, TITLES, titleOf,
   speedOf, turnOf, remainsOf, radiusOf, boostCostOf, BASE_SPEED, BOOST_SPEED, MIN_BOOST_MASS, layBody, angDiff, keepMass, START_MASS,
-  FLY_N, FLY_MAX, FLY_BASE, flyRadius, flyEase, flyGain, SKIN_NEAR, skinDist } from '../public/core.js';
+  FLY_N, FLY_MAX, FLY_BASE, flyRadius, flyEase, flyGain, SKIN_NEAR, skinDist, TYPES, SKINS_OF } from '../public/core.js';
 
 // змейка B лежит поперёк пути головы змейки A
 function crossing(teamA, teamB) {
@@ -392,14 +392,35 @@ test('похожие раскраски: пары, которые путаютс
   SKINS.forEach((_, i) => assert.ok(SKINS.length - SKIN_NEAR[i].length >= 6, SKINS[i].name));
 });
 
-test('боты не носят раскраску игрока и похожие на неё', () => {
+test('боты не носят вид игрока', () => {
   for (let skin = 0; skin < SKINS.length; skin++) {
     const w = new World({ diff: 'hard' });
     w.addHuman({ name: 'H', skin, inv: 999 });
     for (let i = 0; i < 20 * 40; i++) w.step(1 / 40); // и новички посреди игры
-    const bad = w.snakes.filter((s) => !s.human && SKIN_NEAR[skin].includes(s.skin));
+    const bad = w.snakes.filter((s) => !s.human && SKINS[s.skin].type === SKINS[skin].type);
     assert.equal(bad.length, 0, `${SKINS[skin].name}: ${bad.map((s) => SKINS[s.skin].name)}`);
   }
+});
+
+test('людей больше, чем видов: боты хотя бы не в похожих раскрасках', () => {
+  const w = new World({ diff: 'easy' });
+  const mine = SKINS_OF.map((l) => l[0]).concat([SKINS_OF[0][3]]);
+  for (const skin of mine) w.addHuman({ name: 'H', skin, inv: 999 });
+  for (const s of w.snakes) if (!s.human) assert.ok(mine.every((k) => !SKIN_NEAR[k].includes(s.skin)), SKINS[s.skin].name);
+});
+
+test('виды и раскраски: у каждого вида есть раскраски, номера цветов влезают в байт', () => {
+  assert.ok(PAL.length <= 256);
+  TYPES.forEach((t, ti) => {
+    assert.ok(SKINS_OF[ti].length >= 4, t.name);
+    for (const i of SKINS_OF[ti]) assert.equal(SKINS[i].type, ti);
+  });
+  assert.equal(SKINS_OF.flat().length, SKINS.length);
+  // узор нужен всем видам, кроме бусинок и неона
+  for (const s of SKINS) if (!['beads', 'neon'].includes(TYPES[s.type].id)) assert.ok(s.acc >= 0, s.name);
+  // первые раскраски — те же, что были до видов: номера в сохранениях не сдвинулись
+  assert.deepEqual(SKINS.slice(0, 12).map((s) => s.name), ['Радуга', 'Пастельная радуга', 'Мороженое', 'Океан', 'Тутти-фрутти', 'Конфетка',
+    'Закат', 'Лес', 'Осень', 'Ягоды', 'Северное сияние', 'Павлин']);
 });
 
 test('новый игрок не перекрашивает ботов, которых уже видят', () => {
@@ -409,5 +430,5 @@ test('новый игрок не перекрашивает ботов, кото
   b.skin = 3; // как у второго игрока
   w.addHuman({ name: 'B', skin: 3, inv: 999, keep: new Set([b.id]) });
   assert.equal(b.skin, 3);
-  assert.ok(w.snakes.filter((s) => !s.human && s !== b).every((s) => !SKIN_NEAR[3].includes(s.skin) && !SKIN_NEAR[0].includes(s.skin)));
+  assert.ok(w.snakes.filter((s) => !s.human && s !== b).every((s) => SKINS[s.skin].type !== SKINS[0].type));
 });
