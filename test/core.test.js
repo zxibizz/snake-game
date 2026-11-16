@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { World, Snake, countOf, spacingOf, SNAKES_N, DIFF, R, GOLD, SKINS, PAL, TITLES, titleOf,
   speedOf, turnOf, remainsOf, radiusOf, boostCostOf, BASE_SPEED, BOOST_SPEED, MIN_BOOST_MASS, layBody, angDiff, keepMass, START_MASS,
-  FLY_N, FLY_MAX, FLY_BASE, flyRadius, SKIN_NEAR, skinDist } from '../public/core.js';
+  FLY_N, FLY_MAX, FLY_BASE, flyRadius, flyEase, flyGain, SKIN_NEAR, skinDist } from '../public/core.js';
 
 // змейка B лежит поперёк пути головы змейки A
 function crossing(teamA, teamB) {
@@ -129,7 +129,8 @@ test('чем выше звание, тем быстрее змейка, но у�
 test('останки: у малышей три четверти длины, у гигантов доля меньше', () => {
   assert.equal(remainsOf(40), 30);
   assert.ok(Math.abs(remainsOf(100) - 75) < 1e-9, 'без скачка на стыке');
-  assert.ok(remainsOf(4000) / 4000 < 0.35);
+  assert.ok(remainsOf(1000) / 1000 < 0.33);
+  assert.ok(remainsOf(4000) / 4000 < 0.2, 'за гигантом не отожраться');
   for (let m = 20; m < 20000; m *= 1.3) assert.ok(remainsOf(m * 1.3) > remainsOf(m), 'больше змея — больше останков');
 });
 
@@ -345,6 +346,24 @@ test('голова ловит бабочку: собранное высыпае�
   assert.ok(Math.abs(drop.reduce((a, q) => a + q.v, 0) - (FLY_BASE + 40)) < 1e-6);
   for (let i = 0; i < 40 * 11; i++) w.step(1 / 40);
   assert.equal(w.flies.length, 1);
+});
+
+test('бабочки по званию: малышу-игроку ловить легче, крупным — вдвое больше еды', () => {
+  assert.equal(flyEase({ human: true, mass: 15 }), 1);
+  assert.equal(flyEase({ human: true, mass: 700 }), 0);
+  assert.equal(flyEase({ human: false, mass: 15 }), 0, 'ботам поблажки нет');
+  assert.equal(flyGain(300), 1);
+  assert.equal(flyGain(2000), 2);
+  const { w, f } = flyWorld();
+  for (let i = 0; i < 40; i++) w.flyEat(f, 1, 6);
+  f.cool = 99;
+  const s = w.addHuman({ name: 'H', skin: 0, mass: 2000, inv: 0 });
+  s.segs.forEach((p, i) => { p.x = -i * 5; p.y = 0; });
+  s.ta = s.a = 0;
+  const n0 = w.foods.length;
+  const e = w.step(1 / 40).find((x) => x.type === 'fly');
+  assert.ok(e && Math.abs(e.v - 2 * (FLY_BASE + 40)) < 1e-6);
+  assert.ok(Math.abs(w.foods.slice(n0).reduce((a, q) => a + q.v, 0) - 2 * (FLY_BASE + 40)) < 1e-6);
 });
 
 test('почти полная бабочка не съедает сверх вместимости, а проигравшая в этом шаге змея её не ловит', () => {

@@ -2,7 +2,7 @@
 // Здесь нет DOM и сети — только мир, змейки, еда, боты и столкновения.
 
 // Версия протокола и файлов: при изменении любого файла в public/ поднять и здесь, и в sw.js (тест сверяет).
-export const VERSION = '20';
+export const VERSION = '21';
 export const TAU = Math.PI * 2;
 export const R = 7000;                  // радиус арены (координаты по сети — Int16 / 4, предел 8191)
 export const BASE_SPEED = 210;          // пикс/с — у «Малыша»; с каждым званием змейка быстрее, см. speedOf
@@ -28,6 +28,11 @@ export const FLY_BASE = 3;              // столько стоит пуста�
 export const FLY_SPEED = 150;           // пикс/с — порхает (у полной на 30 % медленнее)
 export const FLY_DART = 600;            // пикс/с — увёртка у пустой (у полной на 35 % медленнее)
 export const FLY_SEE = 300;             // с какого расстояния до головы бабочка начинает увёртываться
+// по званию того, кто гонится: малышам ловить легче (бабочка позже замечает, медленнее и реже увёртывается,
+// ловится краем головы), крупным пойманная бабочка даёт больше еды — в полтора раза у «Полоза», вдвое с «Питона»
+// Поблажка малышам — только игрокам: боты-малыши и так часто проползают рядом и опустошали бы бабочек.
+export const flyEase = (s) => (s.human ? clamp((4 - titleOf(s.mass)) / 4, 0, 1) : 0);   // 1 у «Малыша», 0 с «Полоза»
+export const flyGain = (m) => (m >= 1300 ? 2 : m >= 700 ? 1.5 : 1);
 export const flyK = (n) => Math.sqrt(clamp(n, 0, FLY_MAX) / FLY_MAX);
 export const flyScale = (n) => 1.9 + 1.5 * flyK(n);   // рисунок: скобки радиусом 9,5 × масштаб
 export const flyRadius = (n) => 8 * flyScale(n);      // для столкновений и еды
@@ -153,7 +158,7 @@ export const turnOf = (r) => 7 / (1 + Math.max(0, r - 11) / 40);
 // во сколько длины в секунду обходится рывок
 export const boostCostOf = (m) => Math.max(BOOST_COST, m * BOOST_SHARE);
 // сколько длины остаётся едой после проигрыша: у малышей — три четверти, у гигантов — заметно меньшая доля
-export const remainsOf = (m) => (m <= 100 ? Math.max(4, m * 0.75) : 75 * Math.pow(m / 100, 0.75));
+export const remainsOf = (m) => (m <= 100 ? Math.max(4, m * 0.75) : 75 * Math.pow(m / 100, 0.62));
 
 export const BOT_NAMES = ['Шустрик', 'Пончик', 'Зигзаг', 'Кексик', 'Ракета', 'Бублик', 'Молния', 'Ириска',
   'Тортик', 'Шнурок', 'Пиксель', 'Фантик', 'Желейка', 'Комета', 'Бантик', 'Карамелька', 'Вжух',
@@ -375,9 +380,9 @@ export class World {
         if (free > bestFree) { bestFree = free; best = a; }
       }
     }
-    const v = FLY_DART * (1 - 0.35 * k);
+    const e = flyEase(s), v = FLY_DART * (1 - 0.35 * k) * (1 - 0.3 * e);
     f.vx = Math.cos(best) * v; f.vy = Math.sin(best) * v;
-    f.dart = 0.35; f.cool = rand(0.35, 0.5) * (1 + 0.5 * k);
+    f.dart = 0.35; f.cool = rand(0.35, 0.5) * (1 + 0.5 * k) * (1 + 0.8 * e);
   }
   // куда лететь: к богатой еде поблизости, а полной — просто порхать
   flyGoal(f) {
@@ -425,11 +430,11 @@ export class World {
       f.cool -= dt;
       // голова близко и смотрит на бабочку (или совсем рядом) — увернуться от самой близкой такой
       if (f.cool <= 0) {
-        let hs = null, hd = FLY_SEE + fr;
+        let hs = null, hd = Infinity;
         for (const s of snakes) {
           if (!s.alive) continue;
           const d = Math.hypot(s.x - f.x, s.y - f.y) - s.r;
-          if (d >= hd) continue;
+          if (d >= hd || d >= FLY_SEE * (1 - 0.4 * flyEase(s)) + fr) continue;
           if (d < fr * 2.5 || Math.abs(angDiff(s.a, Math.atan2(f.y - s.y, f.x - s.x))) < 1.3) { hd = d; hs = s; }
         }
         if (hs) this.flyDart(f, hs);
@@ -471,7 +476,7 @@ export class World {
       let by = null;
       for (const s of snakes) {
         if (!s.alive || s.inv > 0 || dying.has(s)) continue;
-        const rr = s.r * 0.8 + fr * 0.5;
+        const rr = s.r * 0.8 + fr * (0.5 + 0.4 * flyEase(s));
         if ((s.x - f.x) ** 2 + (s.y - f.y) ** 2 < rr * rr) { by = s; break; }
       }
       if (by) { this.catchFly(f, by); this.flies.splice(fi, 1); continue; }
@@ -495,7 +500,7 @@ export class World {
   }
   // поймали: всё собранное высыпается едой в цветах крошек
   catchFly(f, s) {
-    const total = FLY_BASE + f.n, m = clamp(Math.ceil(total / 6), 1, 16), v = total / m;
+    const total = (FLY_BASE + f.n) * flyGain(s.mass), m = clamp(Math.ceil(total / 6), 1, 24), v = total / m;
     const cols = f.top.length ? f.top : [GOLD], spread = 20 + total * 0.4;
     for (let i = 0; i < m; i++) {
       const a = Math.random() * TAU, d = Math.sqrt(Math.random()) * spread;
