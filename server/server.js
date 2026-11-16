@@ -5,7 +5,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { acceptUpgrade } from './ws.js';
-import { World, R, DIFF, SKINS, START_MASS, SNAKES_N, TAU, VERSION, FOOD_CELL, FOOD_CELLS } from '../public/core.js';
+import { World, R, DIFF, SKINS, SNAKES_N, TAU, VERSION, FOOD_CELL, FOOD_CELLS, keepMass } from '../public/core.js';
 
 const PORT = Number(process.env.PORT) || 8080;
 const PUBLIC = path.resolve(fileURLToPath(new URL('../public/', import.meta.url)));
@@ -227,7 +227,7 @@ function join(c, room) {
   c.room = room;
   room.clients.add(c);
   room.joined++;
-  c.kills = 0;
+  c.kills = 0; c.lastMass = 0; // в новой комнате — с начала; длину из прошлой не переносим
   if (old) {
     room.clients.delete(old);
     old.room = null;
@@ -238,7 +238,7 @@ function join(c, room) {
   }
   if (!c.snake) {
     c.snake = room.world.addHuman({ name: c.name, skin: c.skin, team: room.mode === 'team' ? TEAM : 0,
-      mass: Math.max(START_MASS, c.lastMass * 0.5), inv: 2 });
+      mass: keepMass(room.diff, c.lastMass), inv: 2 });
   }
   updateBots(room);
   const w = room.world;
@@ -419,7 +419,7 @@ server.on('upgrade', (req, socket, head) => {
         if (c.room && !c.snake) {
           c.snake = c.room.world.addHuman({
             name: c.name, skin: c.skin, team: c.room.mode === 'team' ? TEAM : 0,
-            mass: Math.max(START_MASS, c.lastMass * 0.5), inv: 3,
+            mass: keepMass(c.room.diff, c.lastMass), inv: 3,
           });
           c.send({ t: 'you', id: c.snake.id });
         }

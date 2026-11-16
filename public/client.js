@@ -1,7 +1,7 @@
 // Клиент: отрисовка, управление, меню; одиночная игра считает мир сама, совместная — получает его с сервера.
 import {
   World, SKINS, PAL, GOLD, DIFF, R, TAU, START_MASS, SNAKES_N, FOOD_N, VERSION, TITLES, titleOf, segColor,
-  radiusOf, spacingOf, countOf, bodyLenOf, foodRadiusOf, followChain, fitLength, clamp, angDiff,
+  radiusOf, spacingOf, countOf, bodyLenOf, foodRadiusOf, followChain, fitLength, clamp, angDiff, keepMass,
 } from './core.js';
 
 const TICK_MS = 25;        // сервер: 40 шагов в секунду
@@ -182,7 +182,7 @@ const glowSprite = lazy(SPR, (g, m, col) => {
 
 // ---------- общее состояние ----------
 let mode = null;         // null — демо за меню, 'solo', 'net'
-let ui = 'home';         // home | play | paused | dead | over | conn
+let ui = 'home';         // home | play | paused | dead | conn
 let world = null;        // мир одиночной игры и демо
 let me = null;           // своя змейка (в solo — из world, в net — из net.snakes)
 let diffKey = 'easy';
@@ -601,7 +601,7 @@ function onNetDeath(m) {
   const who = m.by ? `На пути была змейка «${esc(m.by)}»` : 'Это край арены';
   setTimeout(() => {
     if (ui !== 'dead' || mode !== 'net') return;
-    dialog('Ой!', oopsHtml(who, m.mass),
+    dialog('Ой!', oopsHtml(who, m.mass, net.diff),
       [{ label: 'Выйти', kind: 'text', onClick: leaveNet }, { label: 'Продолжить', kind: 'filled', icon: 'play', onClick: () => netSend({ t: 'respawn' }) }]);
   }, 700);
 }
@@ -666,26 +666,15 @@ function onSoloDeath(killer) {
   const who = killer ? `На пути была змейка «${esc(killer.name)}»` : 'Это край арены';
   const dead = me;
   onLifeEnd(dead.eaten, dead.maxMass);
-  if (DIFF[diffKey].respawn) {
-    recordBest();
-    ui = 'dead';
-    run.revenge = killer && killer.alive ? { id: killer.id, name: killer.name } : null;
-    dialog('Ой!', oopsHtml(who, dead.mass),
-    [{ label: 'В меню', kind: 'text', onClick: toHome }, { label: 'Продолжить', kind: 'filled', icon: 'play', onClick: () => {
-      me = world.addHuman({ name: soloName(), skin: save.skin, mass: Math.max(START_MASS, dead.mass * 0.5), inv: 3 });
-      ui = 'play'; closeDialog(); onRespawn();
-    } }]);
-  } else {
-    const isNew = recordBest();
-    ui = 'over';
-    const summary = finishRun();
-    setTimeout(() => {
-      if (ui !== 'over') return;
-      dialog('Игра окончена', `${summary}` +
-        `<p class="record">${icon('trophy')}${isNew ? 'Новый рекорд!' : `Рекорд: ${save.best[diffKey]}`}</p><p class="muted">${who}.</p>`,
-      [{ label: 'В меню', kind: 'text', onClick: toHome }, { label: 'Ещё раз', kind: 'filled', onClick: () => startSolo(diffKey) }]);
-    }, 900);
-  }
+  // продолжить можно на любом уровне: сколько длины останется — по уровню (keepMass)
+  const isNew = recordBest();
+  ui = 'dead';
+  run.revenge = killer && killer.alive ? { id: killer.id, name: killer.name } : null;
+  dialog('Ой!', oopsHtml(who, dead.mass, diffKey) + (isNew ? `<p class="record">${icon('trophy')}Новый рекорд!</p>` : ''),
+  [{ label: 'В меню', kind: 'text', onClick: toHome }, { label: 'Продолжить', kind: 'filled', icon: 'play', onClick: () => {
+    me = world.addHuman({ name: soloName(), skin: save.skin, mass: keepMass(diffKey, dead.mass), inv: 3 });
+    ui = 'play'; closeDialog(); onRespawn();
+  } }]);
 }
 
 // ---------- ход игры: звания, места, серии, пир, месть ----------
@@ -802,8 +791,11 @@ function unlockHtml(xp, fresh) {
   const got = fresh.length ? `<p class="record">${icon('star')}Открыта раскраска «${fresh.map(esc).join('», «')}»</p>` : '';
   return `<div class="unlock"><span class="xp">${icon('star')}+${xp}</span>${bar}</div>${got}`;
 }
-const oopsHtml = (who, mass) => `<p>${who}.</p><div class="big-num">${Math.floor(mass)}</div>` +
-  `<p class="muted">Продолжишь с половиной длины.</p>`;
+const oopsHtml = (who, mass, diff) => {
+  const keep = (DIFF[diff] || DIFF.easy).keep, left = Math.floor(keepMass(diff, mass));
+  return `<p>${who}.</p><div class="big-num">${Math.floor(mass)}</div>` +
+    `<p class="muted">${keep > 0 && left > START_MASS ? `Продолжишь с длиной ${left} (${Math.round(keep * 100)} %).` : 'Продолжишь с самого начала.'}</p>`;
+};
 function finishRun() {
   if (!run) return '';
   runTick();

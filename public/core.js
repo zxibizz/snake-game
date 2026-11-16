@@ -2,7 +2,7 @@
 // Здесь нет DOM и сети — только мир, змейки, еда, боты и столкновения.
 
 // Версия протокола и файлов: при изменении любого файла в public/ поднять и здесь, и в sw.js (тест сверяет).
-export const VERSION = '7';
+export const VERSION = '8';
 export const TAU = Math.PI * 2;
 export const R = 7000;                  // радиус арены (координаты по сети — Int16 / 4, предел 8191)
 export const BASE_SPEED = 210;          // пикс/с — у «Малыша»; с каждым званием змейка быстрее, см. speedOf
@@ -29,32 +29,43 @@ const GRID_OFF = R + 200;
 const GRID_N = Math.ceil((2 * GRID_OFF) / CELL);
 const G2 = GRID_N * GRID_N;
 
+// Крупный не охотится на мелкого: цель хотя бы на 30 % короче бота он не подрезает и засаду на неё не устраивает
+export const PREY_GAP = 1.3;
+export const preyFor = (b, s) => b.mass <= s.mass * PREY_GAP;
+// с какого места в таблице боты охотятся на игрока всерьёз (см. heatOf)
+export const RANK_HOT = 20;
+
 // mass — разброс масс ботов при создании мира; giants — сколько ботов не меньше giantMin держать на арене.
-// aggr — как часто бот ищет, кого подрезать; humanAggr — насколько охотно выбирает игрока;
-// maxHunters — сколько ботов сразу охотятся на одного игрока; grace — секунд после появления игрока без охоты;
+// aggr — как часто бот ищет, кого подрезать; grace — секунд после появления игрока без охоты.
+// Агрессия к игроку растёт с его местом в таблице: [ниже RANK_HOT, на месте RANK_HOT, на первом месте]
+//   humanAggr — насколько охотно бот выбирает игрока целью (больше 1 — всегда, если игрок рядом и подходит по размеру),
+//   maxHunters — сколько ботов сразу охотятся на одного игрока (засада тоже считается).
 // rest — средняя пауза бота между охотами, с; foresee — на сколько секунд вперёд крупный бот просчитывает чужие головы
 // (0 — только базовые 0,45 с): чем больше, тем труднее подрезать гиганта;
-// wary — как часто бот замечает, что ему перерезают путь, и уходит вдоль чужого пути.
+// wary — как часто бот замечает, что ему перерезают путь, и уходит вдоль чужого пути;
+// keep — какая доля длины остаётся после «Продолжить» (0 — с самого начала).
 export const DIFF = {
   easy: {
     label: 'Лёгкий', mass: [15, 2500], giants: 4, giantMin: 800,
     speed: 0.97, turn: 0.95, react: 0.2, look: 275,
-    aggr: 0.3, humanAggr: 0.45, maxHunters: 1, grace: 10, huntRange: 480, boost: 0.55, rest: 6, foresee: 0, wary: 0.35,
-    encircle: false, edgeKills: false, respawn: true,
+    aggr: 0.3, humanAggr: [0, 0.7, 1], maxHunters: [1, 1, 2], grace: 10, huntRange: 480, boost: 0.55, rest: 6, foresee: 0, wary: 0.35,
+    edgeKills: false, keep: 0.8,
   },
   medium: {
     label: 'Средний', mass: [15, 3500], giants: 5, giantMin: 1100,
     speed: 1, turn: 1, react: 0.13, look: 335,
-    aggr: 0.55, humanAggr: 0.85, maxHunters: 2, grace: 6, huntRange: 640, boost: 0.8, rest: 4, foresee: 0.4, wary: 0.6,
-    encircle: true, edgeKills: true, respawn: false,
+    aggr: 0.55, humanAggr: [0.4, 0.85, 1.2], maxHunters: [1, 2, 3], grace: 6, huntRange: 640, boost: 0.8, rest: 4, foresee: 0.4, wary: 0.6,
+    edgeKills: true, keep: 0.4,
   },
   hard: {
     label: 'Сложный', mass: [20, 6000], giants: 6, giantMin: 1800,
     speed: 1.03, turn: 1.08, react: 0.08, look: 410,
-    aggr: 0.9, humanAggr: 1.3, maxHunters: 4, grace: 3, huntRange: 820, boost: 0.95, rest: 2, foresee: 0.9, wary: 0.85,
-    encircle: true, edgeKills: true, respawn: false,
+    aggr: 0.9, humanAggr: [0.9, 1.3, 1.7], maxHunters: [2, 4, 5], grace: 3, huntRange: 820, boost: 0.95, rest: 2, foresee: 0.9, wary: 0.85,
+    edgeKills: true, keep: 0,
   },
 };
+// длина после «Продолжить»
+export const keepMass = (diff, mass) => Math.max(START_MASS, mass * (DIFF[diff] || DIFF.easy).keep);
 
 // Палитра: еда и сегменты змей ссылаются на цвет по номеру (так их дёшево передавать по сети).
 export const PAL = [
@@ -187,7 +198,6 @@ export class Snake {
     this.hunt = 0; this.huntTarget = 0; this.huntCd = rand(0, 3);
     this.pers = rand(0.4, 1.6);      // характер бота: насколько он задира
     this.goFeast = false;
-    this.side = Math.random() < 0.5 ? -1 : 1;
     this.wander = this.a; this.kills = 0;
     // память бота: с какой стороны заходит на цель, куда ползёт за едой, кого заметил и на чьи останки идёт
     this.cau = rand(0.6, 1.3);       // осторожность: как часто замечает, что его подрезают
@@ -469,19 +479,27 @@ export class World {
     }
     return out;
   }
-  // кого подрезать: ближайшую змейку в радиусе охоты; на игрока — не больше maxHunters ботов сразу
+  // насколько боты злы на игрока: чем выше он в таблице, тем охотнее на него охотятся и тем больше охотников сразу
+  heatOf(s) {
+    const D = this.D, [p0, p1, p2] = D.humanAggr, [n0, n1, n2] = D.maxHunters, rk = s.rank || 99;
+    if (rk > RANK_HOT) return { p: p0, n: n0 };
+    const t = (RANK_HOT - rk) / (RANK_HOT - 1); // 0 — на месте RANK_HOT, 1 — на первом
+    return { p: p1 + (p2 - p1) * t, n: Math.round(n1 + (n2 - n1) * t) };
+  }
+  // кого подрезать: ближайшую змейку в радиусе охоты, не намного короче себя; на игрока — не больше охотников, чем по heatOf
   pickTarget(b) {
     const D = this.D;
     let best = null, bs = Infinity;
     const feud = Math.random() < BOT_FEUD;
     for (const s of this.snakes) {
-      if (s === b || !s.alive || s.inv > 0 || (!s.human && !feud)) continue;
+      if (s === b || !s.alive || s.inv > 0 || (!s.human && !feud) || !preyFor(b, s)) continue;
       const d = Math.hypot(s.x - b.x, s.y - b.y);
       if (d > D.huntRange) continue;
       const n = this.hunted.get(s.id) || 0;
       let w;
       if (s.human) {
-        if (s.age <= D.grace || n >= D.maxHunters || Math.random() > D.humanAggr) continue;
+        const h = this.heatOf(s);
+        if (s.age <= D.grace || n >= h.n || Math.random() > h.p) continue;
         w = 1;
       } else {
         if (n >= 1) continue;
@@ -510,15 +528,17 @@ export class World {
     const D = this.D, bvx = Math.cos(b.a) * vb, bvy = Math.sin(b.a) * vb, body = bodyLenOf(b.mass) / vb;
     for (const o of heads) {
       const s = o.s;
+      if (!preyFor(b, s)) continue;
       const mine = b.ambUntil > this.time && b.ambTarget === s.id ? 1 : 0;
-      if (s.human ? s.age <= D.grace || (this.hunted.get(s.id) || 0) - mine >= D.maxHunters : s.mass < 30) continue;
+      const h = s.human ? this.heatOf(s) : null;
+      if (h ? s.age <= D.grace || h.p <= 0 || (this.hunted.get(s.id) || 0) - mine >= h.n : s.mass < 30) continue;
       const c = crossing(b.x, b.y, bvx, bvy, o.x, o.y, o.vx, o.vy);
       if (!c) continue;
       const [t1, t2] = c;
       if (t2 > 1.6 || t2 < t1 + 0.08 || t2 > t1 + body * 0.8) continue;
-      // на бота — редко (как и охота друг на друга), на игрока — по задиристости уровня и характеру бота
-      if (!this.decide(b, 'm' + o.id, s.human ? D.aggr * b.pers : BOT_FEUD * 3)) continue;
-      // засада считается охотой: на игрока — не больше maxHunters ботов сразу
+      // на бота — редко (как и охота друг на друга), на игрока — по задиристости уровня, месту игрока и характеру бота
+      if (!this.decide(b, 'm' + o.id, h ? D.aggr * b.pers * Math.min(1.5, h.p / Math.max(0.1, D.humanAggr[1])) : BOT_FEUD * 3)) continue;
+      // засада считается охотой: на игрока — не больше охотников, чем по heatOf
       if (!mine) this.hunted.set(s.id, (this.hunted.get(s.id) || 0) + 1);
       b.ambTarget = s.id; b.ambUntil = this.time + 0.6;
       return { o, t1, t2 };
@@ -607,7 +627,8 @@ export class World {
     let P = null;
     if (b.hunt > 0) {
       P = this.byId.get(b.huntTarget) || null;
-      if (P && (!P.alive || P.inv > 0 || Math.hypot(P.x - hx, P.y - hy) > D.huntRange * 1.8)) P = null;
+      // цель пропала, ушла далеко или стала намного короче бота — бросаем
+      if (P && (!P.alive || P.inv > 0 || !preyFor(b, P) || Math.hypot(P.x - hx, P.y - hy) > D.huntRange * 1.8)) P = null;
       // погоня без толку: за 3 с так и не поравнялись — бросаем
       if (P && this.time - b.huntT0 > 3) {
         const along = (hx - P.x) * Math.cos(P.a) + (hy - P.y) * Math.sin(P.a);
@@ -639,9 +660,7 @@ export class World {
       const lat = dx * ps - dy * pc;          // с какой стороны от цели бот
       const side = b.hside || (lat >= 0 ? 1 : -1);
       const canBoost = b.mass > 60 && Math.random() < D.boost;
-      if (D.encircle && b.age > 8 && b.mass > P.mass * 3 && dist < 320 && bodyLenOf(b.mass) > TAU * Math.max(dist, 80) * 1.15) {
-        desired = Math.atan2(dy, dx) + b.side * (Math.PI / 2 - 0.35); // кружим и сжимаем кольцо
-      } else if (along < 40) {
+      if (along < 40) {
         // догоняем сбоку с упреждением и обгоняем
         const gap = b.r + P.r + 50, lead = clamp(dist * 0.6, 90, 320);
         desired = Math.atan2(P.y + ps * lead + pc * side * gap - hy, P.x + pc * lead - ps * side * gap - hx);
@@ -772,6 +791,13 @@ export class World {
     this.buildGrids();
     const { segHead, segNext, segS, segK } = this;
 
+    // место игроков в таблице: от него зависит злость ботов (heatOf)
+    for (const h of snakes) {
+      if (!h.human || !h.alive) continue;
+      let rk = 1;
+      for (const s of snakes) if (s.alive && s.mass > h.mass) rk++;
+      h.rank = rk;
+    }
     this.hunted.clear(); this.huntSide.clear();
     for (const s of snakes) {
       if (s.human || !s.alive) continue;

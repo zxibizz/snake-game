@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { World, Snake, countOf, spacingOf, SNAKES_N, DIFF, R, GOLD, SKINS, PAL, TITLES, titleOf,
-  speedOf, turnOf, remainsOf, radiusOf, boostCostOf, BASE_SPEED, BOOST_SPEED, MIN_BOOST_MASS, layBody, angDiff } from '../public/core.js';
+  speedOf, turnOf, remainsOf, radiusOf, boostCostOf, BASE_SPEED, BOOST_SPEED, MIN_BOOST_MASS, layBody, angDiff, keepMass, START_MASS } from '../public/core.js';
 
 // змейка B лежит поперёк пути головы змейки A
 function crossing(teamA, teamB) {
@@ -201,15 +201,52 @@ test('бот замечает, что ему перерезают путь, и �
   }
 });
 
-test('засада: игрок сам ползёт поперёк тела бота — бот не сворачивает к еде', () => {
-  for (const aggr of [0, 5]) {
-    const { w, b } = duel('hard', { x: 0, y: 0, a: 0, mass: 400, D: { aggr } }, { x: 250, y: -300, a: Math.PI / 2, mass: 100 });
+test('засада: игрок сам ползёт поперёк тела бота — бот не сворачивает к еде; на мелкого засаду не устраивает', () => {
+  for (const [aggr, mass, ambush] of [[0, 320, false], [5, 320, true], [5, 100, false]]) {
+    const { w, b } = duel('hard', { x: 0, y: 0, a: 0, mass: 400, D: { aggr } }, { x: 250, y: -300, a: Math.PI / 2, mass });
     w.addFood(60, 250, 20, 0, 0);
     w.buildGrids();
     w.think(b, 0);
-    if (aggr) assert.ok(Math.abs(angDiff(b.ta, 0)) < 0.2, `свернул из засады: ${b.ta.toFixed(2)}`);
-    else assert.ok(angDiff(b.ta, 0) > 0.6, `без засады — к еде: ${b.ta.toFixed(2)}`);
+    if (ambush) assert.ok(Math.abs(angDiff(b.ta, 0)) < 0.2, `свернул из засады: ${b.ta.toFixed(2)}`);
+    else assert.ok(angDiff(b.ta, 0) > 0.6, `без засады — к еде (aggr ${aggr}, игрок ${mass}): ${b.ta.toFixed(2)}`);
   }
+});
+
+test('крупный бот не охотится на того, кто короче его на 30 % и больше, и бросает такую цель', () => {
+  for (const [mass, ok] of [[100, false], [300, false], [320, true], [2000, true]]) {
+    const { w, b, h } = duel('hard', { x: 0, y: 0, a: 0, mass: 400, D: { humanAggr: [9, 9, 9] } }, { x: 300, y: 100, a: 0, mass });
+    assert.equal(w.pickTarget(b) === h, ok, `игрок ${mass} при боте 400`);
+  }
+  const { w, b, h } = duel('hard', { x: 0, y: 0, a: 0, mass: 400 }, { x: 300, y: 100, a: 0, mass: 350 });
+  w.startHunt(b, h);
+  h.mass = 250;
+  w.think(b, 0);
+  assert.equal(b.hunt, 0, 'цель похудела — охота брошена');
+});
+
+test('злость ботов растёт с местом игрока: на лёгком ниже 20-го места не охотятся, в двадцатке — да', () => {
+  const w = new World({ diff: 'easy', foodN: 0, bots: 0 });
+  const h = w.addHuman({ name: 'H', skin: 0 });
+  h.rank = 35; assert.equal(w.heatOf(h).p, 0);
+  h.rank = 20; const at20 = w.heatOf(h); assert.ok(at20.p > 0.2 && at20.n === 1, `20-е место: ${at20.p}`);
+  h.rank = 1; const top = w.heatOf(h); assert.ok(top.p > at20.p && top.n === 2, `первое место: ${top.p}, охотников ${top.n}`);
+  for (const d of ['easy', 'medium', 'hard']) {
+    const D = DIFF[d];
+    assert.ok(D.humanAggr[0] <= D.humanAggr[1] && D.humanAggr[1] <= D.humanAggr[2], d);
+  }
+  assert.ok(DIFF.easy.humanAggr[2] < DIFF.medium.humanAggr[2] && DIFF.medium.humanAggr[2] < DIFF.hard.humanAggr[2]);
+  // место считается на каждом шаге
+  const w2 = new World({ diff: 'hard', foodN: 0 });
+  const p = w2.addHuman({ name: 'P', skin: 0, mass: 1e6, inv: 0 });
+  w2.step(1 / 40);
+  assert.equal(p.rank, 1);
+});
+
+test('после «Продолжить» остаётся 80 % длины на лёгком, 40 % на среднем, на сложном — с начала', () => {
+  assert.equal(keepMass('easy', 1000), 800);
+  assert.equal(keepMass('medium', 1000), 400);
+  assert.equal(keepMass('hard', 1000), START_MASS);
+  assert.equal(keepMass('easy', 10), START_MASS);
 });
 
 test('охота: вдвоём заходят с разных сторон, у края — со стороны центра', () => {
