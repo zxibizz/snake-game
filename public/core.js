@@ -2,7 +2,7 @@
 // Здесь нет DOM и сети — только мир, змейки, еда, боты и столкновения.
 
 // Версия протокола и файлов: при изменении любого файла в public/ поднять и здесь, и в sw.js (тест сверяет).
-export const VERSION = '29';
+export const VERSION = '30';
 export const TAU = Math.PI * 2;
 export const R = 7000;                  // радиус арены (координаты по сети — Int16 / 4, предел 8191)
 export const BASE_SPEED = 210;          // пикс/с — у «Малыша»; с каждым званием змейка быстрее, см. speedOf
@@ -72,20 +72,22 @@ const HEAD_K = Math.ceil(2 / 0.42); // голова с шеей — стольк
 // cutNear — насколько под носом (px от края до края) такой хвост застаёт бота врасплох.
 // Хаос: feud — доля попыток охоты, в которых бот согласен подрезать другого бота (меньше — спокойнее арена);
 // slip — сколько раз в минуту бот «зевает» в толкотне (у еды, останков, в погоне): SLIP_T с он видит только
-// под самым носом (SLIP_LOOK от обычного), не замечает подрезки и чужих голов — и может врезаться.
+// под самым носом (SLIP_LOOK от обычного), не замечает подрезки и чужих голов и раздумывает в SLIP_REACT раз реже —
+// очнётся только на следующем раздумье, так что на медленных уровнях зевок длится до SLIP_REACT·react·1,3 с;
+// slipAny — зевает где угодно, а не только в толкотне: въезжает и в лежащие тела. У края арены не зевают.
 export const DIFF = {
   easy: {
     label: 'Лёгкий', mass: [15, 2500], giants: 4, giantMin: 800,
-    speed: 0.97, turn: 0.85, react: 0.5, look: 275,
-    aggr: 0.3, humanAggr: [0, 0.7, 1], maxHunters: [1, 1, 2], grace: 10, huntRange: 480, boost: 0.55, rest: 6, foresee: 0, wary: 0.2, fresh: 0.5, cutNear: 200,
-    feud: 0.3, slip: 6,
+    speed: 0.95, turn: 0.75, react: 0.7, look: 220,
+    aggr: 0.3, humanAggr: [0, 0.7, 1], maxHunters: [1, 1, 2], grace: 10, huntRange: 480, boost: 0.55, rest: 6, foresee: 0, wary: 0.1, fresh: 0.8, cutNear: 200,
+    feud: 0.5, slip: 12, slipAny: true,
     edgeKills: false, keep: 0.8,
   },
   medium: {
     label: 'Средний', mass: [15, 3500], giants: 5, giantMin: 1100,
-    speed: 1, turn: 0.9, react: 0.33, look: 335,
-    aggr: 0.55, humanAggr: [0.4, 0.85, 1.2], maxHunters: [1, 2, 3], grace: 6, huntRange: 640, boost: 0.8, rest: 4, foresee: 0.4, wary: 0.4, fresh: 0.4, cutNear: 170,
-    feud: 0.15, slip: 2.5,
+    speed: 0.97, turn: 0.85, react: 0.5, look: 275,
+    aggr: 0.55, humanAggr: [0.4, 0.85, 1.2], maxHunters: [1, 2, 3], grace: 6, huntRange: 640, boost: 0.8, rest: 4, foresee: 0, wary: 0.2, fresh: 0.5, cutNear: 200,
+    feud: 0.3, slip: 6,
     edgeKills: true, keep: 0.4,
   },
   hard: {
@@ -954,8 +956,8 @@ export class World {
     b.boost = false;
     const heads = this.nearHeads(b, Math.max(look0 * 1.4, 600));
     const vb = speedOf(b.mass, false) * D.speed;
-    // зевок: в толкотне (рядом чужие головы или погоня) бот иногда засматривается — D.slip раз в минуту
-    if (this.time >= b.slipT && (heads.length || b.hunt > 0) && Math.random() < D.slip / 60 * D.react) { // раз в D.react с — вероятность за раздумье
+    // зевок: в толкотне (рядом чужие головы или погоня; со slipAny — где угодно) бот иногда засматривается — D.slip раз в минуту
+    if (this.time >= b.slipT && (heads.length || b.hunt > 0 || D.slipAny) && Math.random() < D.slip / 60 * D.react) { // раз в D.react с — вероятность за раздумье
       b.slipT = this.time + rand(SLIP_T[0], SLIP_T[1]);
     }
     if (hx * hx + hy * hy > (R * 0.85) ** 2) b.slipT = 0; // о край арены не зевают: врезаться в стену — не столкновение, а глупость
@@ -1177,6 +1179,8 @@ export class World {
       if (b.human || !b.alive) continue;
       if (b.hunt > 0) { b.hunt -= dt; if (b.hunt <= 0) this.stopHunt(b); }
       b.thinkT -= dt;
+      // зевнувший у края арены сразу очнётся: врезаться в стену — не столкновение, а глупость
+      if (b.slipT > this.time && b.x * b.x + b.y * b.y > (R * 0.85) ** 2) { b.slipT = 0; b.thinkT = 0; }
       if (b.thinkT <= 0) { this.think(b, i); b.thinkT = this.D.react * rand(0.7, 1.3) * (this.time < b.slipT ? SLIP_REACT : 1); }
     }
 

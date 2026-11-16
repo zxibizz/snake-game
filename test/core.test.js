@@ -73,7 +73,8 @@ test('боты подрезают друг друга, ускоряются и �
     if (i % 40 === 0) boosting += w.snakes.filter((s) => s.isBoosting).length;
   }
   assert.ok(botKills >= 2, `побед ботов за 90 с: ${botKills}`);
-  assert.ok(botKills <= 90, `арена спокойная, а не свалка: побед ботов за 90 с: ${botKills}`);
+  // на лёгком хаос задуман (feud, slip), но арена не вымирает: гиганты остаются (ниже)
+  assert.ok(botKills <= 180, `не сплошная бойня: побед ботов за 90 с: ${botKills}`);
   assert.ok(boosting >= 30, `ускорялись ${boosting}`);
   const giants = w.snakes.filter((s) => s.mass >= DIFF.easy.giantMin).length;
   assert.ok(giants >= 2, `гигантов через 90 с: ${giants}`);
@@ -182,7 +183,7 @@ test('игрок и новые боты выползают из точки, а �
 // пустая арена: бот и игрок с телами, уложенными прямо назад от головы
 function duel(diff, bot, human) {
   const w = new World({ diff, foodN: 0, bots: 0, flies: 0 }); // бабочки отвлекали бы бота от того, что проверяем
-  w.D = { ...DIFF[diff], ...(bot.D || {}) };
+  w.D = { ...DIFF[diff], slip: 0, ...(bot.D || {}) }; // без случайных «зевков»: сценка должна быть одинаковой
   const mk = (o, isHuman) => {
     const s = new Snake(w.nextSnakeId++, o.x, o.y, o.mass, 0, isHuman ? 'H' : 'B', isHuman, 0, o.a, layBody(o.x, o.y, o.a, o.mass, 0, 0, 0));
     s.age = 30; s.inv = 0; s.huntCd = 99; s.pers = 1; s.cau = 1;
@@ -436,6 +437,7 @@ test('новый игрок не перекрашивает ботов, кото
 // пустой мир, бот в (0, by) смотрит на восток; рядом — тело other (массой m), уложенное по точкам pts
 function rayWorld(m, pts, human = false, by = 50, oa = 0) {
   const w = new World({ diff: 'easy', bots: 0, foodN: 0, flies: 0 });
+  w.D = { ...w.D, slip: 0 }; // без случайных «зевков»
   w.snakes = []; w.byId.clear();
   const b = w.addSnake(new Snake(1, 0, by, 15, 0, 'бот', false, 0, 0));
   const o = w.addSnake(new Snake(2, pts[0].x, pts[0].y, m, 1, 'другой', human, 0, oa, pts.map((p) => ({ ...p }))));
@@ -476,7 +478,8 @@ test('тело игрока бот видит целиком, а на хвост
   cut.w.time += cut.w.D.fresh * 1.31;
   cut.w.think(cut.b, 0);
   assert.ok(cut.danger() < cut.straight, 'через D.fresh — отворачивает');
-  // свежий хвост, легший далеко впереди (250 px), хвост, который лежит давно, и хвост бота — объезжает сразу
+  // свежий хвост, легший далеко впереди (дальше cutNear уровня, но в поле зрения), хвост, который лежит давно,
+  // и хвост бота — объезжает сразу
   for (const [name, r] of [['далеко', run(line(250, 110, 0, -spacingOf(60), countOf(60)), true)],
     ['давно', run(line(80, 50 + countOf(60) * spacingOf(60) - 40, 0, -spacingOf(60), countOf(60)), true)],
     ['бот', run(pts, false)]]) {
@@ -492,6 +495,7 @@ test('тело игрока бот видит целиком, а на хвост
 
 test('сытый бот (длиннее giantMin) за едой не гоняется', () => {
   const w = new World({ diff: 'easy', bots: 0, flies: 0, foodN: 0 });
+  w.D = { ...w.D, slip: 0 };
   w.snakes = []; w.byId.clear();
   const full = w.addSnake(new Snake(1, 0, 0, DIFF.easy.giantMin + 100, 0, 'сытый', false, 0, 0));
   const hungry = w.addSnake(new Snake(2, 0, 3000, 300, 0, 'голодный', false, 0, 0));
