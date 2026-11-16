@@ -1,10 +1,9 @@
 // Клиент: отрисовка, управление, меню; одиночная игра считает мир сама, совместная — получает его с сервера.
 import {
-  World, SKINS, DIFF, R, TAU, START_MASS, radiusOf, spacingOf, countOf, bodyLenOf, followChain, fitLength,
-  clamp, angDiff,
+  World, SKINS, DIFF, R, TAU, START_MASS, VERSION, radiusOf, spacingOf, countOf, bodyLenOf, foodRadiusOf,
+  followChain, fitLength, clamp, angDiff,
 } from './core.js';
 
-const VERSION = '2';
 const TICK_MS = 25;        // сервер: 40 шагов в секунду
 const INTERP_MS = 110;     // рисуем мир с задержкой на два снимка — так движение плавное
 const JOY_R = 64;          // радиус джойстика
@@ -44,6 +43,9 @@ const save = { best: { easy: 0, medium: 0, hard: 0 }, name: '', skin: 0, sound: 
 try { Object.assign(save, JSON.parse(localStorage.getItem('zmeigrad') || '{}')); } catch { /* приватный режим */ }
 const persist = () => { try { localStorage.setItem('zmeigrad', JSON.stringify(save)); } catch { /* ничего */ } };
 const myName = () => save.name || 'Игрок';
+// токен сессии: при переподключении сервер отдаёт ту же змейку, а не создаёт вторую
+const TOKEN = (crypto.randomUUID ? crypto.randomUUID() : String(Math.random()).slice(2) + Date.now()).slice(0, 40);
+const hello = (o) => ({ ...o, name: myName(), skin: save.skin, token: TOKEN, v: VERSION });
 
 // ---------- звук (синтез, без файлов) ----------
 let actx = null, lastEatSound = 0;
@@ -224,6 +226,7 @@ function netOpen(firstMsg, isRetry) {
     else if (m.t === 'ev') onEvents(m);
     else if (m.t === 'dead') onNetDeath(m);
     else if (m.t === 'you') { net.youId = m.id; me = null; ui = 'play'; closeDialog(); }
+    else if (m.t === 'sync') onSync(m);
     else if (m.t === 'err') onNetError(m.code);
   };
   ws.onclose = () => {
@@ -251,10 +254,28 @@ function netReconnect() {
   net.retryTimer = setTimeout(() => {
     if (mode !== 'net') return;
     netReset();
-    netOpen({ t: 'join', code: net.code, name: myName(), skin: save.skin }, true);
+    netOpen(hello({ t: 'join', code: net.code }), true);
   }, net.retry === 1 ? 300 : 2000);
 }
+async function updateApp() {
+  try {
+    const reg = await navigator.serviceWorker.getRegistration();
+    if (reg) {
+      await reg.update();
+      await new Promise((res) => { navigator.serviceWorker.addEventListener('controllerchange', res); setTimeout(res, 2500); });
+    }
+  } catch { /* перезагрузим как есть */ }
+  location.reload();
+}
 function onNetError(code) {
+  if (code === 'version') {
+    net.leaving = true;
+    if (net.ws) net.ws.close();
+    mode = null;
+    dialog('Вышло обновление', '<p>На сервере новая версия игры. Обнови её на устройстве, чтобы играть вместе.</p>',
+      [{ label: 'Позже', kind: 'text', onClick: toHome }, { label: 'Обновить', kind: 'filled', onClick: updateApp }]);
+    return;
+  }
   const text = {
     no_room: 'Комнаты с таким кодом нет. Проверь код или создай новую комнату.',
     full: 'В комнате уже 8 игроков.',
@@ -291,7 +312,13 @@ function onWelcome(m) {
   hudT = 0;
 }
 function addNetFood(id, x, y, v, c, life) {
-  net.foods.set(id, { id, x, y, v, c, r: Math.min(13, 3.2 + Math.sqrt(v) * 2), ph: Math.random() * TAU, life, age: 0 });
+  net.foods.set(id, { id, x, y, v, c, r: foodRadiusOf(v), ph: Math.random() * TAU, life, age: 0 });
+}
+function onSync(m) { // догнали после пропущенных снимков: еда целиком заново
+  for (const s of m.snakes) if (!net.snakes.has(s.id)) net.snakes.set(s.id, makeNetSnake(s));
+  net.foods.clear();
+  for (const f of m.foods) addNetFood(...f);
+  for (const s of net.buf) s.applied = true;
 }
 function onEvents(m) {
   for (const s of m.spawn || []) if (!net.snakes.has(s.id)) net.snakes.set(s.id, makeNetSnake(s));
@@ -335,6 +362,8 @@ function onSnapshot(buf) {
   const sample = performance.now() - tick * TICK_MS;
   net.offset = net.offset === null ? sample : Math.min(sample, net.offset + 2);
   net.buf.push({ tick, snakes, added, removed, applied: false });
+  // вкладка свёрнута — кадры не рисуются и буфер не разбирается; старое не копим
+  while (net.buf.length > 40) { applyFood(net.buf[0]); net.buf.shift(); }
 
   const mine = snakes.get(net.youId);
   if (mine) { if (mine.mass > net.myMass + 0.5 && !mine.boost && net.myMass > 0) sfx.eat(); net.myMass = mine.mass; }
@@ -373,14 +402,22 @@ function netUpdate(now, dt) {
   }
   const last = buf[buf.length - 1];
   for (const [id, sn] of net.snakes) if (sn.seen && !sn.visible && !last.snakes.has(id)) net.snakes.delete(id);
-  // еда притягивается к головам, как на сервере, — иначе исчезает раньше, чем до неё доползли
+  // еда притягивается к головам, как на сервере, — иначе исчезает раньше, чем до неё доползли.
+  // Только в видимой области: за экраном это никто не увидит.
+  const hw = W / 2 / cam.z + 80, hh = H / 2 / cam.z + 80, k = Math.min(1, dt * 7);
+  const heads = [];
   for (const sn of net.snakes.values()) {
     if (!sn.visible) continue;
-    const h = sn.segs[0], reach = sn.r + 40, reach2 = reach * reach, k = Math.min(1, dt * 7);
-    for (const f of net.foods.values()) {
-      const dx = h.x - f.x, dy = h.y - f.y;
+    const h = sn.segs[0];
+    if (Math.abs(h.x - cam.x) < hw && Math.abs(h.y - cam.y) < hh) heads.push(sn);
+  }
+  for (const f of net.foods.values()) {
+    if (f.life > 0) f.age += dt;
+    if (!heads.length || Math.abs(f.x - cam.x) > hw || Math.abs(f.y - cam.y) > hh) continue;
+    for (const sn of heads) {
+      const h = sn.segs[0], reach = sn.r + 40, dx = h.x - f.x, dy = h.y - f.y;
       if (dx > reach || dx < -reach || dy > reach || dy < -reach) continue;
-      if (dx * dx + dy * dy < reach2) { f.x += dx * k; f.y += dy * k; }
+      if (dx * dx + dy * dy < reach * reach) { f.x += dx * k; f.y += dy * k; }
     }
   }
   const mine = net.snakes.get(net.youId);
@@ -596,7 +633,7 @@ function openCreate() {
     `<div class="sub">Боты</div>${segHtml('diff', [['easy', 'Лёгкие'], ['medium', 'Средние'], ['hard', 'Сложные']])}` +
     '<p class="hint">После проигрыша в комнате всегда можно продолжить.</p>',
     [{ label: 'Отмена', kind: 'text', onClick: closeDialog },
-      { label: 'Создать', kind: 'filled', onClick: () => startNet({ t: 'create', name: myName(), skin: save.skin, ...createOpts }) }]);
+      { label: 'Создать', kind: 'filled', onClick: () => startNet(hello({ t: 'create', ...createOpts })) }]);
   const hint = () => {
     $('modeHint').textContent = createOpts.mode === 'team'
       ? 'Свои змейки проходят друг сквозь друга — играете вместе против ботов.'
@@ -620,7 +657,7 @@ const joinByCode = () => {
   const code = codeInput.value.trim();
   if (!/^\d{4}$/.test(code)) { snackHome('Код комнаты — 4 цифры'); codeInput.focus(); return; }
   codeInput.blur();
-  startNet({ t: 'join', code, name: myName(), skin: save.skin });
+  startNet(hello({ t: 'join', code }));
 };
 $('btnJoin').addEventListener('click', joinByCode);
 codeInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') joinByCode(); });
@@ -758,7 +795,7 @@ function draw() {
   for (const f of sceneFoods()) {
     if (f.x < vx0 || f.x > vx1 || f.y < vy0 || f.y > vy1) continue;
     if (f.c !== lastC) { ctx.fillStyle = SKINS[f.c][0]; lastC = f.c; }
-    ctx.globalAlpha = f.life > 0 && f.life > 1 && f.life - f.age < 3 ? Math.max(0, (f.life - f.age) / 3) : 1;
+    ctx.globalAlpha = f.life > 0 && f.life - f.age < 3 ? Math.max(0, (f.life - f.age) / 3) : 1;
     ctx.beginPath(); ctx.arc(f.x, f.y, f.r * (1 + 0.1 * Math.sin(time * 3 + f.ph)), 0, TAU); ctx.fill();
   }
   ctx.globalAlpha = 1;
@@ -857,7 +894,7 @@ const inviteCode = new URLSearchParams(location.search).get('room');
 if (inviteCode && /^\d{4}$/.test(inviteCode)) {
   codeInput.value = inviteCode;
   dialog(`Комната ${inviteCode}`, '<p>Тебя зовут играть вместе. Проверь имя и цвет змейки на главном экране или заходи сразу.</p>',
-    [{ label: 'Позже', kind: 'text', onClick: closeDialog }, { label: 'Войти', kind: 'filled', onClick: () => startNet({ t: 'join', code: inviteCode, name: myName(), skin: save.skin }) }]);
+    [{ label: 'Позже', kind: 'text', onClick: closeDialog }, { label: 'Войти', kind: 'filled', onClick: () => startNet(hello({ t: 'join', code: inviteCode })) }]);
 }
 
 // для автотестов

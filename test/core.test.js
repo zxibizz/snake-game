@@ -44,3 +44,10 @@ test('длина тела растёт с массой', () => {
   const s = new Snake(1, 0, 0, 50, 0, 'x', false, 0);
   assert.equal(s.segs.length, countOf(50));
 });
+
+test('версия в core.js и sw.js совпадает', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const { VERSION } = await import('../public/core.js');
+  const sw = await readFile(new URL('../public/sw.js', import.meta.url), 'utf8');
+  assert.equal(sw.match(/const VERSION = '([^']+)'/)[1], VERSION);
+});

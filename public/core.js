@@ -1,6 +1,8 @@
 // Общая логика игры: одиночная игра в браузере и комнаты на сервере используют один и тот же код.
 // Здесь нет DOM и сети — только мир, змейки, еда, боты и столкновения.
 
+// Версия протокола и файлов: при изменении любого файла в public/ поднять и здесь, и в sw.js (тест сверяет).
+export const VERSION = '2';
 export const TAU = Math.PI * 2;
 export const R = 2400;                  // радиус арены
 export const BASE_SPEED = 165;          // пикс/с
@@ -65,6 +67,7 @@ export const radiusOf = (m) => Math.min(40, 9 + Math.sqrt(m) * 0.95);
 export const spacingOf = (m) => radiusOf(m) * 0.42;
 export const bodyLenOf = (m) => 38 * Math.pow(m, 0.55);
 export const countOf = (m) => Math.max(6, Math.round(bodyLenOf(m) / spacingOf(m)));
+export const foodRadiusOf = (v) => Math.min(13, 3.2 + Math.sqrt(v) * 2);
 
 // каждый сегмент тянется за предыдущим на расстоянии sp
 export function followChain(segs, sp) {
@@ -143,7 +146,7 @@ export class World {
   addFood(x, y, v, skin, life) {
     const d2 = x * x + y * y, lim = R - 15;
     if (d2 > lim * lim) { const k = lim / Math.sqrt(d2); x *= k; y *= k; }
-    const f = { id: this.nextFoodId++, x, y, v, r: Math.min(13, 3.2 + Math.sqrt(v) * 2), c: skin,
+    const f = { id: this.nextFoodId++, x, y, v, r: foodRadiusOf(v), c: skin,
       ph: Math.random() * TAU, life: life || 0, age: 0, dead: false };
     this.foods.push(f);
     if (this.track) this.foodAdded.push(f);

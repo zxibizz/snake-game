@@ -5,7 +5,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { acceptUpgrade } from './ws.js';
-import { World, DIFF, SKINS, START_MASS, TAU } from '../public/core.js';
+import { World, DIFF, SKINS, START_MASS, TAU, VERSION } from '../public/core.js';
 
 const PORT = Number(process.env.PORT) || 8080;
 const PUBLIC = path.resolve(fileURLToPath(new URL('../public/', import.meta.url)));
@@ -15,6 +15,8 @@ const MAX_ROOMS = 20;
 const MAX_HUMANS = 8;
 const MAX_CONN = 120;
 const ROOM_IDLE_MS = 60_000;    // пустая комната живёт минуту — на случай переподключения
+const MAX_CREATES = 5;          // комнат на одно соединение
+const MSG_RATE = 30, MSG_BURST = 60; // сообщений в секунду на соединение
 const TEAM = 1;
 
 const log = (...a) => console.log(new Date().toISOString(), ...a);
@@ -68,7 +70,7 @@ function createRoom(mode, diff) {
   if (!code) return null;
   const world = new World({ diff });
   world.track = true;
-  const room = { code, mode, diff, world, clients: new Set(), tick: 0, emptySince: Date.now(), kills: [] };
+  const room = { code, mode, diff, world, clients: new Set(), tick: 0, emptySince: Date.now(), kills: [], joined: 0 };
   rooms.set(code, room);
   log(`room ${code} created: ${mode}/${diff}, rooms=${rooms.size}`);
   return room;
@@ -82,7 +84,9 @@ const flatSegs = (s) => {
   return out;
 };
 const metaOf = (s) => ({ id: s.id, name: s.name, skin: s.skin, team: s.team, human: s.human, segs: flatSegs(s) });
-const foodOf = (f) => [f.id, Math.round(f.x), Math.round(f.y), Math.round(f.v * 100) / 100, f.c, f.life ? 1 : 0];
+// оставшаяся жизнь временной еды в секундах (0 — обычная еда, живёт всегда)
+const lifeLeft = (f) => (f.life ? Math.max(1, Math.min(255, Math.ceil(f.life - f.age))) : 0);
+const foodOf = (f) => [f.id, Math.round(f.x), Math.round(f.y), Math.round(f.v * 100) / 100, f.c, lifeLeft(f)];
 
 function cleanName(n) {
   const s = String(n || '').replace(/[\u0000-\u001f\u007f<>]/g, '').trim().slice(0, 12);
@@ -91,11 +95,25 @@ function cleanName(n) {
 const cleanSkin = (k) => (Number.isInteger(k) && k >= 0 && k < SKINS.length ? k : 0);
 
 function join(c, room) {
-  if (room.clients.size >= MAX_HUMANS) { c.send({ t: 'err', code: 'full' }); return; }
+  // переподключение: тот же токен уже в комнате (старое соединение ещё не отвалилось) — забираем его змейку
+  const old = c.token ? [...room.clients].find((x) => x.token === c.token) : null;
+  if (!old && room.clients.size >= MAX_HUMANS) { c.send({ t: 'err', code: 'full' }); return; }
   c.room = room;
   room.clients.add(c);
+  room.joined++;
   c.kills = 0;
-  c.snake = room.world.addHuman({ name: c.name, skin: c.skin, team: room.mode === 'team' ? TEAM : 0, inv: 2 });
+  if (old) {
+    room.clients.delete(old);
+    old.room = null;
+    c.kills = old.kills; c.lastMass = old.lastMass;
+    if (old.snake && old.snake.alive) { c.snake = old.snake; old.snake.name = c.name; }
+    old.snake = null;
+    old.ws.close(1000);
+  }
+  if (!c.snake) {
+    c.snake = room.world.addHuman({ name: c.name, skin: c.skin, team: room.mode === 'team' ? TEAM : 0,
+      mass: Math.max(START_MASS, c.lastMass * 0.5), inv: 2 });
+  }
   updateBots(room);
   const w = room.world;
   c.send({
@@ -103,7 +121,7 @@ function join(c, room) {
     snakes: w.snakes.filter((s) => s.alive).map(metaOf),
     foods: w.foods.filter((f) => !f.dead).map(foodOf),
   });
-  log(`room ${room.code}: join, players=${room.clients.size}`);
+  log(`room ${room.code}: ${old ? 'rejoin' : 'join'}, players=${room.clients.size}`);
 }
 function leave(c) {
   const room = c.room;
@@ -113,8 +131,10 @@ function leave(c) {
   room.clients.delete(c);
   c.room = null;
   updateBots(room);
-  if (!room.clients.size) room.emptySince = Date.now();
   log(`room ${room.code}: leave, players=${room.clients.size}`);
+  if (room.clients.size) return;
+  room.emptySince = Date.now();
+  if (room.joined <= 1) { rooms.delete(room.code); log(`room ${room.code} closed (creator left), rooms=${rooms.size}`); }
 }
 const clientOf = (room, snake) => [...room.clients].find((c) => c.snake === snake);
 
@@ -151,7 +171,7 @@ function buildSnapshot(room) {
     o = buf.writeInt16LE(q4(f.y), o);
     o = buf.writeUInt16LE(Math.min(65535, Math.round(f.v * 100)), o);
     o = buf.writeUInt8(f.c, o);
-    o = buf.writeUInt8(f.life ? 1 : 0, o);
+    o = buf.writeUInt8(lifeLeft(f), o);
   }
   o = buf.writeUInt16LE(removed.length, o);
   for (const id of removed) o = buf.writeUInt32LE(id, o);
@@ -188,7 +208,14 @@ function stepRoom(room) {
   }
   const snap = buildSnapshot(room);
   for (const c of room.clients) {
-    if (c.ws.buffered > 512 * 1024) continue; // медленный клиент пропускает снимок, а не копит очередь
+    // медленный клиент пропускает снимки, а не копит очередь; когда догонит — получит всю еду заново,
+    // иначе изменения еды из пропущенных снимков у него потеряются
+    if (c.ws.buffered > 256 * 1024) { c.lagging = true; continue; }
+    if (c.lagging) {
+      if (c.ws.buffered > 32 * 1024) continue;
+      c.lagging = false;
+      c.send({ t: 'sync', snakes: w.snakes.filter((s) => s.alive).map(metaOf), foods: w.foods.filter((f) => !f.dead).map(foodOf) });
+    }
     c.ws.sendBinary(snap);
   }
 }
@@ -220,15 +247,26 @@ server.on('upgrade', (req, socket, head) => {
   if (!ws) return;
   conns++;
   const c = {
-    ws, room: null, snake: null, name: 'Игрок', skin: 0, kills: 0, lastMass: 0, tokens: 100,
+    ws, room: null, snake: null, name: 'Игрок', skin: 0, kills: 0, lastMass: 0, token: '', creates: 0, lagging: false,
+    tokens: MSG_BURST, refilled: Date.now(),
     send: (o) => ws.sendText(JSON.stringify(o)),
+  };
+  // общее для create и join: имя, цвет, токен сессии, версия клиента
+  const hello = (m) => {
+    c.name = cleanName(m.name); c.skin = cleanSkin(m.skin);
+    c.token = typeof m.token === 'string' ? m.token.slice(0, 40) : '';
+    if (m.v !== VERSION) { c.send({ t: 'err', code: 'version' }); return false; }
+    return true;
   };
   const keepalive = setInterval(() => {
     if (Date.now() - ws.lastSeen > 45_000) ws.close(1001); else ws.ping();
   }, 15_000);
   ws.on('message', (txt) => {
-    c.tokens = Math.min(120, c.tokens + 1);
-    if (c.tokens-- <= 0) return;
+    const now = Date.now();
+    c.tokens = Math.min(MSG_BURST, c.tokens + (now - c.refilled) / 1000 * MSG_RATE);
+    c.refilled = now;
+    if (c.tokens < 1) return;
+    c.tokens -= 1;
     let m;
     try { m = JSON.parse(txt); } catch { return; }
     if (!m || typeof m !== 'object') return;
@@ -240,17 +278,16 @@ server.on('upgrade', (req, socket, head) => {
         }
         break;
       case 'create': {
-        if (c.room) return;
-        c.name = cleanName(m.name); c.skin = cleanSkin(m.skin);
-        if (rooms.size >= MAX_ROOMS) { c.send({ t: 'err', code: 'limit' }); return; }
-        const room = createRoom(m.mode === 'ffa' ? 'ffa' : 'team', DIFF[m.diff] ? m.diff : 'easy');
+        if (c.room || !hello(m)) return;
+        if (rooms.size >= MAX_ROOMS || c.creates >= MAX_CREATES) { c.send({ t: 'err', code: 'limit' }); return; }
+        c.creates++;
+        const room = createRoom(m.mode === 'ffa' ? 'ffa' : 'team', Object.hasOwn(DIFF, m.diff) ? m.diff : 'easy');
         if (!room) { c.send({ t: 'err', code: 'limit' }); return; }
         join(c, room);
         break;
       }
       case 'join': {
-        if (c.room) return;
-        c.name = cleanName(m.name); c.skin = cleanSkin(m.skin);
+        if (c.room || !hello(m)) return;
         const room = rooms.get(String(m.code));
         if (!room) { c.send({ t: 'err', code: 'no_room' }); return; }
         join(c, room);
