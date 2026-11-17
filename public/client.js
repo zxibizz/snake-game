@@ -55,13 +55,17 @@ const hexA = (hex, a) => {
 
 // ---------- save data ----------
 // xp — accumulated stars (the key name is left over from levels)
-const save = { best: { easy: 0, medium: 0, hard: 0 }, name: '', skin: 0, sound: true, vol: 1, haptic: true, xp: 0, diff: 'easy', hinted: false,
+// first-launch volume: half the slider (gain is squared, so about -12 dB) — full volume through the compressor is harshly loud
+const VOL_DEF = 0.5;
+const save = { best: { easy: 0, medium: 0, hard: 0 }, name: '', skin: 0, sound: true, vol: VOL_DEF, haptic: true, xp: 0, diff: 'easy', hinted: false,
   stats: { games: 0, kills: 0, eaten: 0, best: 0 } };
 try { Object.assign(save, JSON.parse(localStorage.getItem('zmeigrad') || '{}')); } catch { /* private mode */ }
 delete save.daily; // daily tasks were removed
 if (!SKINS[save.skin]) save.skin = 0;
 if (!DIFF[save.diff]) save.diff = 'easy';
-if (!(save.vol >= 0 && save.vol <= 1)) save.vol = 1;
+if (!(save.vol >= 0 && save.vol <= 1)) save.vol = VOL_DEF;
+// up to 0.23 the default was 100% and it was saved as is: lower an untouched full volume once (volV marks it as done)
+if (save.volV !== 1) { if (save.vol === 1) save.vol = VOL_DEF; save.volV = 1; }
 // chosen food, crash and molt sounds — indices into the sets in sounds.js (picked in the pause menu, "Sounds")
 if (!save.snd || typeof save.snd !== 'object') save.snd = {};
 // in 0.21.0 food sounds were synthesized (0 — "Yum", the rest sounded "pixelated" and were dropped): keep "Yum", move the others to the first recording
@@ -1656,7 +1660,7 @@ function bindVol() {
   const check = () => { unlockHtmlAudio(); quiet(sfx.title); setTimeout(() => snack(audioStatus()), 500); }; // you hear right away whether sound works
   btn.addEventListener('click', () => {
     if (soundOn()) save.sound = false;
-    else { save.sound = true; if (save.vol < 0.05) save.vol = 0.6; }
+    else { save.sound = true; if (save.vol < 0.05) save.vol = VOL_DEF; }
     persist(); show();
     if (soundOn()) check(); else unlockHtmlAudio(); // the global gesture listener has already fired before the toggle
   });
