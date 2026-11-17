@@ -2,7 +2,7 @@
 // No DOM and no network here — only the world, snakes, food, bots and collisions.
 
 // Protocol and file version: whenever any file in public/ changes, bump it both here and in sw.js (a test checks they match).
-export const VERSION = '46';
+export const VERSION = '47';
 export const TAU = Math.PI * 2;
 export const R = 7000;                  // arena radius (network coordinates are Int16 / 4, limit 8191)
 export const BASE_SPEED = 210;          // px/s at the first stage; each stage (molt) makes the snake faster, see speedOf
@@ -50,6 +50,29 @@ export const PREY_GAP = 1.3;
 export const preyFor = (b, s) => b.mass <= s.mass * PREY_GAP;
 // from which leaderboard place the bots hunt a player seriously (see heatOf)
 export const RANK_HOT = 20;
+// Places on the leaderboard (and the crowns, and the stars for places) don't flicker between snakes of almost the same
+// length: a snake takes the place above only once it is longer than that one's length plus RANK_HOLD of it plus RANK_HOLD_MIN
+export const RANK_HOLD = 0.03;
+export const RANK_HOLD_MIN = 10;
+const overtakes = (lo, hi) => lo.mass > hi.mass * (1 + RANK_HOLD) + RANK_HOLD_MIN;
+// list — [{id, mass}] in any order, prev — ids in the order shown last time; returns the list in the new order.
+// Known snakes keep their old order, newcomers are put in by length, then a snake moves up past each one it overtakes
+export function stickyRank(list, prev = []) {
+  const at = new Map(prev.map((id, i) => [id, i]));
+  const out = list.filter((s) => at.has(s.id)).sort((a, b) => at.get(a.id) - at.get(b.id));
+  for (const s of list.filter((s) => !at.has(s.id)).sort((a, b) => b.mass - a.mass)) {
+    let i = out.findIndex((o) => o.mass < s.mass);
+    if (i < 0) i = out.length;
+    out.splice(i, 0, s);
+  }
+  // each snake goes up above the highest one it overtakes. Afterwards no snake overtakes anyone above it:
+  // whoever stays in between doesn't overtake that one either, so it's shorter than the one moving up
+  for (let i = 1; i < out.length; i++) {
+    const k = out.findIndex((o, j) => j < i && overtakes(out[i], o));
+    if (k >= 0 && k < i) out.splice(k, 0, out.splice(i, 1)[0]);
+  }
+  return out;
+}
 // Cutting off: the player's tail laid during the last CUT_NEW s has "only just been laid". If it lies across a bot's path
 // closer than D.cutNear pixels to its nose (edge to edge), the bot notices it with a delay of D.fresh. Farther away it sees it at once
 export const CUT_NEW = 1;

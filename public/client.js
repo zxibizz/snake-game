@@ -3,7 +3,7 @@
 import {
   World, SKINS, TYPES, SKINS_OF, PAL, foodLookOf, GOLD, DIFF, R, TAU, START_MASS, SNAKES_N, FOOD_N, VERSION, segColor, STAGE_R, growR, setStage, MOLT_WAIT,
   radiusOf, spacingOf, countOf, bodyLenOf, foodRadiusOf, followChain, fitLength, clamp, angDiff, keepMass,
-  FLY_MAX, flyK, flyScale, flyRadius, flyEase, MIN_BOOST_MASS, Snake, safeCourse,
+  FLY_MAX, flyK, flyScale, flyRadius, flyEase, MIN_BOOST_MASS, Snake, safeCourse, stickyRank,
 } from './core.js';
 import { Room, runRoom, encodeSelf, FR, FLR, readFood } from './room.js';
 import { host, join, loopback } from './rtc.js';
@@ -778,6 +778,8 @@ let wasBoost = false;
 const REDUCED = !!(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches);
 let leaderId = 0;        // who wears the golden crown
 let podium = [];         // ids of the top three: gold, silver, bronze crown
+let standRows = [];      // the leaderboard as shown, from the top; in a room — the host's top 10
+let standIds = [];       // ids in that order: in solo the next count keeps it until someone clearly overtakes
 const cam = { x: 0, y: 0, z: 1 };
 
 function newRun(diff) {
@@ -1469,7 +1471,7 @@ function startSolo(diff) {
   cam.x = me.x; cam.y = me.y;
   cam.z = baseZoom() * 1.3;
   playTime = 0; sessionBest = START_MASS; hudT = 0; lastSoloMass = me.mass;
-  run = newRun(diff); feast = null; clearFx(); clearGlow();
+  run = newRun(diff); feast = null; clearFx(); clearGlow(); standIds = []; // ids of the old world mean nothing here
   pickBackdrop();
   world.track = true; // eaten food — for the crumbs flying into the mouth
   $('roomBox').hidden = true;
@@ -1554,9 +1556,11 @@ const RANK_STEPS = [[SNAKES_N >> 1, 10, false], [10, 40, true], [3, 80, true], [
 // place and the number of snakes in the arena
 function myRank() {
   if (!me) return null;
+  const myId = mode === 'net' ? net.youId : me.id, at = standRows.findIndex((s) => s.id === myId);
   if (mode === 'net') {
     const lb = net.lb;
     if (!lb) return null;
+    if (at >= 0) return { rank: at + 1, n: lb.n }; // in the host's top 10 — the place as shown
     let r = 1;
     for (let i = 2; i < lb.mm.length; i += 3) if (lb.mm[i] > me.mass) r++;
     // mm includes us too — with the old mass; don't count ourselves
@@ -1564,6 +1568,7 @@ function myRank() {
     if (self && self[4] > me.mass) r--;
     return { rank: Math.max(1, r), n: lb.n };
   }
+  if (at >= 0) return { rank: at + 1, n: world.snakes.length };
   let r = 1;
   for (const s of world.snakes) if (s !== me && s.alive && s.mass > me.mass) r++;
   return { rank: r, n: world.snakes.length };
@@ -2375,8 +2380,8 @@ function leaderTarget() {
   if (mode === 'solo') { const s = world.byId.get(leaderId); return s && s.alive ? s.segs[0] : null; }
   const s = net.snakes.get(leaderId);
   if (s && s.visible) return s.segs[0];
-  const mm = net.lb && net.lb.mm;
-  return mm && mm.length >= 2 && net.lb.top[0] && net.lb.top[0][0] === leaderId ? { x: mm[0] * 25, y: mm[1] * 25 } : null;
+  const mm = net.lb && net.lb.mm, i = net.lb ? net.lb.top.findIndex((t) => t[0] === leaderId) : -1;
+  return mm && i >= 0 && mm.length >= i * 3 + 2 ? { x: mm[i * 3] * 25, y: mm[i * 3 + 1] * 25 } : null;
 }
 function drawPointer(tx, ty, color, crown = false) {
   const sx = W / 2 + (tx - cam.x) * cam.z, sy = H / 2 + (ty - cam.y) * cam.z;
@@ -2535,21 +2540,30 @@ function curLen() {
   if (mode === 'net') return Math.floor(me ? me.mass : (net.deadInfo ? net.deadInfo.mass : 0));
   return 0;
 }
+// places for the leaderboard, crowns and the leader arrow. Order — stickyRank, so near-equal snakes don't swap places
+// every count: in solo it's kept here, in a room — by the host (Room.leaderboard), so everyone sees the same crowns
+function standings() {
+  if (mode === 'net') {
+    standRows = net.lb ? net.lb.top.map((t) => ({ id: t[0], name: t[1], mass: t[2], human: t[3], team: t[4] })) : [];
+    const self = me && standRows.find((s) => s.id === net.youId);
+    if (self) self.mass = me.mass; // our own number as it is here (the host's lags behind), the place — as the host has it
+  } else standRows = stickyRank(sceneSnakes().filter((s) => s.alive), standIds);
+  standIds = standRows.map((s) => s.id);
+  leaderId = standRows.length ? standRows[0].id : 0;
+  podium = standIds.slice(0, 3);
+}
 function updateHud(dt) {
   hudT -= dt;
   if (hudT > 0) return;
   hudT = 0.25;
+  standings();
   runTick();
   const rk = myRank();
   $('score').innerHTML = `<b>${curLen()}</b>${rk ? `<small>#${rk.rank}</small>` : ''}`;
   if (pzSnake) { $('pzLen').textContent = curLen(); $('pzRank').textContent = rk ? rk.rank : ''; $('pzRank').parentNode.hidden = !rk; } // room menu: the game goes on
 
-  // top 3 and your own row: in solo — the whole world, in a room — from the host
-  let rows;
-  if (mode === 'net') rows = net.lb ? net.lb.top.map((t) => ({ id: t[0], name: t[1], mass: t[2], human: t[3], team: t[4] })) : [];
-  else rows = sceneSnakes().filter((s) => s.alive).sort((a, b) => b.mass - a.mass).slice(0, 3);
-  leaderId = rows.length ? rows[0].id : 0;
-  podium = rows.slice(0, 3).map((s) => s.id);
+  // top 3 and your own row
+  const rows = standRows;
   const myId = mode === 'net' ? net.youId : me && me.id;
   const row = (s, i) => {
     const cls = s.id === myId ? ' me' : (mode === 'net' && net.roomMode === 'team' && s.human && s.team === net.myTeam) ? ' mate' : '';

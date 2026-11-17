@@ -203,3 +203,18 @@ test('a guest without a name gets the host\'s fallback name, in the host\'s lang
   assert.equal(room.world.byId.get(a.w.me.id).name, 'Guest');
   assert.equal(new Room({ code: '2', mode: 'ffa', diff: 'easy' }).playerName, 'Player');
 });
+
+test('leaderboard: the host keeps places through a near tie, so every player sees the same crowns', () => {
+  const room = new Room({ code: '1234', mode: 'team', diff: 'easy' });
+  room.world.targetBots = 0; room.world.snakes = []; room.world.byId.clear();
+  const a = room.world.addHuman({ name: 'A', skin: 0, inv: 0, mass: 1000 });
+  const b = room.world.addHuman({ name: 'B', skin: 1, inv: 0, mass: 900 });
+  const order = () => room.leaderboard().top.map((t) => t[0]);
+  assert.deepEqual(order(), [a.id, b.id]);
+  b.mass = 1020; // a bit longer — still second
+  assert.deepEqual(order(), [a.id, b.id]);
+  const lb = room.leaderboard(); // the minimap points follow the same order
+  assert.equal(lb.mm[2], 1000); assert.equal(lb.mm[5], 1020);
+  b.mass = 1100; // clearly longer — first
+  assert.deepEqual(order(), [b.id, a.id]);
+});

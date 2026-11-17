@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { World, Snake, safeCourse, rand, countOf, spacingOf, SNAKES_N, DIFF, R, GOLD, SKINS, PAL, STAGES, STAGE_R, MOLT_T, MOLT_WAIT, stageOf, growStage,
   speedOf, turnOf, remainsOf, radiusOf, boostCostOf, BASE_SPEED, BOOST_SPEED, MIN_BOOST_MASS, layBody, angDiff, keepMass, START_MASS,
-  FLY_N, FLY_MAX, FLY_BASE, flyRadius, flyEase, flyGain, SKIN_NEAR, skinDist, TYPES, SKINS_OF } from '../public/core.js';
+  FLY_N, FLY_MAX, FLY_BASE, flyRadius, flyEase, flyGain, SKIN_NEAR, skinDist, TYPES, SKINS_OF, stickyRank, RANK_HOLD, RANK_HOLD_MIN } from '../public/core.js';
 
 // snake B lies across the path of snake A's head
 function crossing(teamA, teamB) {
@@ -575,4 +575,37 @@ test('autopilot: a wall ahead ends at the bottom — goes around it below, not v
   const walls = [wallAt(260, -900, 60)];
   const ta = safeCourse(me, walls, []);
   assert.ok(Math.sin(ta) > 0.3, `heading for the gap: ${ta.toFixed(2)}`);
+});
+
+// places don't flicker: near-equal snakes keep their order, a clearly longer one moves up
+test('places: a near tie keeps the old order, newcomers go in by length', () => {
+  const ids = (l) => l.map((s) => s.id);
+  assert.deepEqual(ids(stickyRank([{ id: 1, mass: 100 }, { id: 2, mass: 300 }, { id: 3, mass: 200 }])), [2, 3, 1]);
+  // 2 is a bit longer than 1, but 1 was above — stays above
+  assert.deepEqual(ids(stickyRank([{ id: 1, mass: 1000 }, { id: 2, mass: 1030 }], [1, 2])), [1, 2]);
+  // clearly longer — overtakes
+  const lead = 1000 * (1 + RANK_HOLD) + RANK_HOLD_MIN + 1;
+  assert.deepEqual(ids(stickyRank([{ id: 1, mass: 1000 }, { id: 2, mass: lead }], [1, 2])), [2, 1]);
+  // the gap is the same in small snakes too: at least RANK_HOLD_MIN
+  assert.deepEqual(ids(stickyRank([{ id: 1, mass: 20 }, { id: 2, mass: 20 + RANK_HOLD_MIN - 1 }], [1, 2])), [1, 2]);
+  // a dead one drops out, a newcomer is put in by length
+  assert.deepEqual(ids(stickyRank([{ id: 2, mass: 500 }, { id: 4, mass: 700 }, { id: 3, mass: 100 }], [1, 2, 3])), [4, 2, 3]);
+});
+test('places: nobody ends up below a snake it clearly overtakes', () => {
+  // a chain of near ties: 3 isn't far ahead of 2, but is clearly ahead of 1 — goes up past both
+  const out = stickyRank([{ id: 1, mass: 1000 }, { id: 2, mass: 1035 }, { id: 3, mass: 1070 }], [1, 2, 3]);
+  assert.equal(out[0].id, 3);
+  let seed = 7; const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647); // seeded — a failure repeats
+  for (let n = 0; n < 200; n++) {
+    let prev = [];
+    const list = Array.from({ length: 30 }, (_, i) => ({ id: i + 1, mass: 50 + rnd() * 3000 }));
+    for (let k = 0; k < 20; k++) {
+      for (const s of list) s.mass = Math.max(10, s.mass * (0.9 + rnd() * 0.2));
+      const o = stickyRank(list, prev);
+      prev = o.map((s) => s.id);
+      assert.equal(o.length, list.length);
+      for (let i = 0; i < o.length; i++) for (let j = 0; j < i; j++)
+        assert.ok(o[i].mass <= o[j].mass * (1 + RANK_HOLD) + RANK_HOLD_MIN, `${o[i].mass} is below ${o[j].mass}`);
+    }
+  }
 });

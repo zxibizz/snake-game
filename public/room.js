@@ -4,7 +4,7 @@
 // A connection to a player (conn) is a direct WebRTC channel (rtc.js) or a loopback inside the host's page:
 //   conn.send(obj) — JSON, reliable; conn.bin(u8) — binary, reliable; conn.fast(u8) — binary without retransmits;
 //   conn.buffered() — how much hasn't gone out on the reliable channel yet; conn.close().
-import { World, R, SKINS, SNAKES_N, TAU, VERSION, FOOD_CELL, FOOD_CELLS, FLY_MAX, keepMass } from './core.js';
+import { World, R, SKINS, SNAKES_N, TAU, VERSION, FOOD_CELL, FOOD_CELLS, FLY_MAX, keepMass, stickyRank } from './core.js';
 
 export const TICK = 1 / 40;      // world steps per second: 40; a snapshot every step: cheap over a direct link, and rendering can stay closer to "now"
 const LB_EVERY = 40;             // leaderboard: once a second
@@ -116,6 +116,7 @@ export class Room {
     this.conns = new Set();     // all connections, including those that haven't said hello yet
     this.tick = 0;
     this.kills = []; this.feast = null; this.flies = [];
+    this.lbIds = [];            // leaderboard order last sent (stickyRank): the same places and crowns for everyone
   }
 
   // ---------- who sees whom ----------
@@ -153,7 +154,8 @@ export class Room {
   }
   seen() { const ids = new Set(); for (const o of this.clients) for (const id of o.known) ids.add(id); return ids; }
   leaderboard() {
-    const list = this.world.snakes.filter((s) => s.alive).sort((a, b) => b.mass - a.mass);
+    const list = stickyRank(this.world.snakes.filter((s) => s.alive), this.lbIds);
+    this.lbIds = list.map((s) => s.id);
     const mm = [];
     for (const s of list) mm.push(Math.round(s.x / 25), Math.round(s.y / 25), Math.floor(s.mass));
     return {
