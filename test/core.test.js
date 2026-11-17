@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { World, Snake, safeCourse, rand, countOf, spacingOf, SNAKES_N, DIFF, R, GOLD, SKINS, PAL, STAGES, STAGE_R, MOLT_T, MOLT_WAIT, stageOf, growStage,
   speedOf, turnOf, remainsOf, radiusOf, boostCostOf, BASE_SPEED, BOOST_SPEED, MIN_BOOST_MASS, layBody, angDiff, keepMass, START_MASS,
-  FLY_N, FLY_MAX, FLY_BASE, flyRadius, flyEase, flyGain, SKIN_NEAR, skinDist, TYPES, SKINS_OF, stickyRank, RANK_HOLD, RANK_HOLD_MIN } from '../public/core.js';
+  FLY_N, FLY_MAX, FLY_BASE, flyRadius, flyEase, flyGain, SKIN_NEAR, skinDist, TYPES, SKINS_OF, stickyRank, RANK_HOLD, RANK_HOLD_MIN, carefulOf } from '../public/core.js';
 
 // snake B lies across the path of snake A's head
 function crossing(teamA, teamB) {
@@ -608,4 +608,37 @@ test('places: nobody ends up below a snake it clearly overtakes', () => {
         assert.ok(o[i].mass <= o[j].mass * (1 + RANK_HOLD) + RANK_HOLD_MIN, `${o[i].mass} is below ${o[j].mass}`);
     }
   }
+});
+
+test('the crowned bot is careful: a sharper brain than its level, never sharper than hard; others think as usual', () => {
+  const e = DIFF.easy, c = carefulOf(e), h = DIFF.hard, ch = carefulOf(h);
+  assert.ok(c.react < e.react && c.wary > e.wary && c.look > e.look && c.slip < e.slip && c.feud < e.feud);
+  assert.ok(c.react >= h.react && c.wary <= h.wary && !c.slipAny);
+  assert.equal(c.speed, e.speed); assert.equal(c.turn, e.turn); assert.deepEqual(c.humanAggr, e.humanAggr);
+  for (const k of ['react', 'look', 'wary', 'fresh', 'cutNear', 'foresee']) assert.equal(ch[k], h[k], k);
+  const w = new World({ diff: 'easy' });
+  const brains = new Map(), think = w.think.bind(w);
+  w.think = (b, i) => { brains.set(b, w.D); think(b, i); };
+  for (let i = 0; i < 40; i++) w.step(1 / 40);
+  brains.clear();
+  for (const s of w.snakes) s.thinkT = 0; // everyone thinks on the next step
+  w.step(1 / 40);
+  const lead = w.crowned;
+  assert.ok(lead && !lead.human && lead.alive);
+  assert.equal(brains.get(lead), w.carefulD);
+  for (const [b, D] of brains) if (b !== lead) assert.equal(D, DIFF.easy);
+  assert.equal(w.D, DIFF.easy);
+});
+
+test('the crown passes with the leaderboard\'s hold: a near tie keeps it, a clear lead takes it', () => {
+  const w = new World({ diff: 'easy', foodN: 0 });
+  w.targetBots = 0; w.snakes = []; w.byId.clear();
+  const a = w.spawnBot(true), b = w.spawnBot(true);
+  a.mass = 1000; b.mass = 900; a.inv = b.inv = 99;
+  w.step(1 / 40);
+  assert.equal(w.crowned, a);
+  b.mass = a.mass * 1.02; w.step(1 / 40);
+  assert.equal(w.crowned, a);
+  b.mass = a.mass * (1 + RANK_HOLD) + RANK_HOLD_MIN + 5; w.step(1 / 40);
+  assert.equal(w.crowned, b);
 });

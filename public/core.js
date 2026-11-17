@@ -53,6 +53,19 @@ export const RANK_HOT = 20;
 // Places on the leaderboard (and the crowns, and the stars for places) don't flicker between snakes of almost the same
 // length: a snake takes the place above only once it is longer than that one's length plus RANK_HOLD of it plus RANK_HOLD_MIN
 export const RANK_HOLD = 0.03;
+// The bot with the golden crown (the longest snake in the arena) is careful: its eyes, reactions, lapses and fights with
+// other bots move CAREFUL of the way from its level toward the hard level's best — so the crown lives longer and you can
+// crawl up to it. Speed, turning and its anger at players stay those of the level. Measured over 6 worlds × 5 min:
+// the crown holds ~40 s on easy and medium instead of ~15 s; at 1 it held for minutes, and the leader grew too long to catch
+export const CAREFUL = 0.5;
+const mix = (a, b) => a + (b - a) * CAREFUL;
+export const carefulOf = (D) => {
+  const H = DIFF.hard;
+  return { ...D, react: Math.min(D.react, mix(D.react, H.react)), look: Math.max(D.look, mix(D.look, H.look)),
+    wary: Math.max(D.wary, mix(D.wary, H.wary)), fresh: Math.min(D.fresh, mix(D.fresh, H.fresh)),
+    cutNear: Math.min(D.cutNear, mix(D.cutNear, H.cutNear)), foresee: Math.max(D.foresee, mix(D.foresee, H.foresee)),
+    slip: mix(D.slip, 0), slipAny: false, feud: Math.min(D.feud, mix(D.feud, H.feud)) };
+};
 export const RANK_HOLD_MIN = 10;
 const overtakes = (lo, hi) => lo.mass > hi.mass * (1 + RANK_HOLD) + RANK_HOLD_MIN;
 // list — [{id, mass}] in any order, prev — ids in the order shown last time; returns the list in the new order.
@@ -447,6 +460,8 @@ export class World {
     this.diffKey = diff;
     this.botNames = botNames.length ? botNames : BOT_NAMES;
     this.D = DIFF[diff];
+    this.carefulD = carefulOf(this.D); // the crowned bot's brain
+    this.crowned = null;               // who wears the golden crown: the longest, with the same hold as the leaderboard
     this.targetBots = bots;
     this.foodN = foodN;
     this.snakes = [];
@@ -1331,6 +1346,14 @@ export class World {
       if (!this.huntSide.has(s.huntTarget)) this.huntSide.set(s.huntTarget, s.hside);
     }
     while (this.deaths.length && this.time - this.deaths[0].t > 3) this.deaths.shift();
+    // the crown passes like on the leaderboard (stickyRank): to the longest, once it clearly overtakes the holder.
+    // A bot that just got it comes out of a lapse and thinks at once
+    let top = null;
+    for (const s of snakes) if (s.alive && (!top || s.mass > top.mass)) top = s;
+    const was = this.crowned;
+    if (!was || !was.alive || !snakes.includes(was) || (top && top !== was && overtakes(top, was))) this.crowned = top;
+    const crowned = this.crowned;
+    if (crowned && crowned !== was && !crowned.human) { crowned.slipT = 0; crowned.thinkT = 0; }
     for (let i = 0; i < snakes.length; i++) {
       const b = snakes[i];
       if (b.human || !b.alive) continue;
@@ -1338,7 +1361,12 @@ export class World {
       b.thinkT -= dt;
       // a bot that lapsed at the arena edge comes to at once: crashing into the wall isn't a collision, it's just silly
       if (b.slipT > this.time && b.x * b.x + b.y * b.y > (R * 0.85) ** 2) { b.slipT = 0; b.thinkT = 0; }
-      if (b.thinkT <= 0) { this.think(b, i); b.thinkT = this.D.react * rand(0.7, 1.3) * (this.time < b.slipT ? SLIP_REACT : 1); }
+      if (b.thinkT <= 0) {
+        const D = this.D;
+        if (b === crowned) { this.D = this.carefulD; b.slipT = 0; }
+        try { this.think(b, i); b.thinkT = this.D.react * rand(0.7, 1.3) * (this.time < b.slipT ? SLIP_REACT : 1); }
+        finally { this.D = D; }
+      }
     }
 
     // head into another body (the grid holds only snakes without invulnerability — maxR from buildGrids)
