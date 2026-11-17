@@ -7,6 +7,7 @@ import {
 } from './core.js';
 import { Room, runRoom, encodeSelf, FR, FLR, readFood } from './room.js';
 import { host, join, loopback } from './rtc.js';
+import { BACKDROPS, makeBackdrop, drawBackdrop } from './backdrop.js';
 
 const TICK_MS = 25;        // комната: 40 шагов и снимков в секунду
 const INTERP_MS = 70;      // чужих змей рисуем с задержкой на пару-тройку снимков — так движение плавное и потеря снимка незаметна
@@ -154,6 +155,7 @@ document.addEventListener('visibilitychange', () => {
   } else wakeAudio(); // до первого касания — хоть старым контекстом: после звонка iOS часто будит и без жеста
 });
 const soundOn = () => save.sound && save.vol > 0;
+const canSound = () => soundOn() && actx && (actx.state === 'running' || resumeBusy);
 const EAT_STEPS = [0, 2, 4, 7, 9, 12, 14, 16]; // полутоны от ре второй октавы
 // голос вида своей змейки: тот же лад, свой тембр (еда и щелчок молнии)
 const VOICES = {
@@ -171,7 +173,7 @@ const VOICES = {
 const voiceOf = (skin) => VOICES[typeId(skin)] || VOICES.beads;
 // pan — где звучит: −1 слева … 1 справа (события на арене — с той стороны экрана, где случились)
 function tone(f0, f1, dur, vol, type = 'sine', delay = 0, pan = 0) {
-  if (!soundOn() || !actx || (actx.state !== 'running' && !resumeBusy)) return; // спящему контексту не копить звуки
+  if (!canSound()) return; // спящему контексту не копить звуки
   vol *= save.vol * save.vol; // громкость из настройки — по квадрату, так ползунок ощущается ровнее
   const t = actx.currentTime + delay;
   const o = actx.createOscillator(), g = actx.createGain();
@@ -186,6 +188,53 @@ function tone(f0, f1, dur, vol, type = 'sine', delay = 0, pan = 0) {
   out.connect(bus || actx.destination);
   o.start(t); o.stop(t + dur + 0.02);
 }
+// общее короткое эхо-«комната» (одно на контекст): часть звука уходит туда и тихо повторяется
+function roomOf(c) {
+  if ('room' in c) return c.room; // null — не вышло, не пробовать на каждой ноте
+  try {
+    const d = c.createDelay(1), fb = c.createGain(), wet = c.createGain(), lp = c.createBiquadFilter();
+    d.delayTime.value = 0.09; fb.gain.value = 0.32; wet.gain.value = 0.35; lp.type = 'lowpass'; lp.frequency.value = 3000;
+    d.connect(lp); lp.connect(fb); fb.connect(d); lp.connect(wet); wet.connect(bus || c.destination);
+    c.room = d;
+  } catch { c.room = null; }
+  return c.room;
+}
+function sendOut(g, wet) {
+  g.connect(bus || actx.destination);
+  const r = wet && roomOf(actx);
+  if (r) { const w = actx.createGain(); w.gain.value = wet; g.connect(w); w.connect(r); }
+}
+// нота с атакой a и спадом до dur; to — куда скользит высота; wet — доля в эхо
+function note(f, { type = 'sine', vol = 0.2, a = 0.004, dur = 0.2, delay = 0, to = 0, wet = 0, detune = 0 } = {}) {
+  if (!canSound()) return;
+  vol *= save.vol * save.vol;
+  const t = actx.currentTime + delay, o = actx.createOscillator(), g = actx.createGain();
+  o.type = type; o.detune.value = detune; o.frequency.setValueAtTime(f, t);
+  if (to) o.frequency.exponentialRampToValueAtTime(to, t + dur);
+  g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(vol, t + a); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  o.connect(g); sendOut(g, wet);
+  o.start(t); o.stop(t + dur + 0.05);
+}
+function noiseBuffer() {
+  if (!noiseBuf || noiseBuf.sampleRate !== actx.sampleRate) {
+    const n = actx.sampleRate; noiseBuf = actx.createBuffer(1, n, n);
+    const d = noiseBuf.getChannelData(0);
+    for (let i = 0; i < n; i++) d[i] = Math.random() * 2 - 1;
+  }
+  return noiseBuf;
+}
+// шорох: шум через фильтр (f → f1 за dur)
+function hiss({ vol = 0.2, dur = 0.05, delay = 0, type = 'bandpass', f = 2000, f1 = 0, q = 1, a = 0.002 } = {}) {
+  if (!canSound()) return;
+  vol *= save.vol * save.vol;
+  const t = actx.currentTime + delay, src = actx.createBufferSource(), fl = actx.createBiquadFilter(), g = actx.createGain();
+  src.buffer = noiseBuffer(); fl.type = type; fl.Q.value = q; fl.frequency.setValueAtTime(f, t);
+  if (f1) fl.frequency.exponentialRampToValueAtTime(f1, t + dur);
+  g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(vol, t + a); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  src.connect(fl); fl.connect(g); sendOut(g, 0);
+  src.start(t, Math.random() * 0.5); src.stop(t + dur + 0.05);
+}
+const semi = (f, n) => f * Math.pow(2, n / 12);
 const sfx = {
   // еда подряд — каждая крошка на ступень выше (пентатоника), пауза полсекунды — снова снизу
   eat() {
@@ -194,6 +243,8 @@ const sfx = {
     eatStep = now - lastEatSound < 500 ? Math.min(eatStep + 1, EAT_STEPS.length - 1) : 0;
     lastEatSound = now;
     const f = 587 * Math.pow(2, EAT_STEPS[eatStep] / 12);
+    // «хрум» (выбор владельца): два зёрнышка хруста, а нота — голосом вида своей змейки
+    hiss({ f: 2600, q: 1.2, vol: 0.22, dur: 0.03 }); hiss({ f: 1800, q: 1.5, vol: 0.16, dur: 0.035, delay: 0.035 });
     voiceOf(save.skin).eat(f);
     haptic('eat');
   },
@@ -205,14 +256,25 @@ const sfx = {
   // чужую бабочку поймали на экране — тихий перезвон с той стороны
   chime(pan, k) { [1175, 1568].forEach((f, i) => tone(f, f * 1.2, 0.08, 0.06 * k, 'sine', i * 0.05, pan)); },
   // громкости — до компрессора; частоты не ниже ~150 Гц: ниже динамик телефона почти не играет
-  die() { tone(640, 150, 0.6, 0.3, 'sawtooth'); haptic('die'); },
+  // своя змейка разбилась — «бум и бусины» (выбор владельца): удар, шорох и раскатившиеся бусинки
+  die() {
+    note(330, { type: 'triangle', to: 150, vol: 0.32, dur: 0.28, a: 0.003 });
+    hiss({ type: 'lowpass', f: 3000, f1: 300, q: 0.7, vol: 0.35, dur: 0.35 });
+    [1760, 1568, 2093, 1319, 1976, 1175, 1568, 1047].forEach((f, i) =>
+      note(f, { vol: 0.12 * (1 - i / 10), dur: 0.06, delay: 0.12 + i * 0.055 + Math.random() * 0.02, wet: 0.3 }));
+    haptic('die');
+  },
   win() { tone(520, 1040, 0.14, 0.25, 'triangle'); tone(780, 1560, 0.18, 0.22, 'triangle', 0.12); haptic('kill'); },
   combo(n) { for (let i = 0; i < n + 1; i++) tone(600 + i * 150, 1200 + i * 200, 0.12, 0.22, 'triangle', i * 0.08); haptic('combo'); },
   title() { [523, 659, 784, 1047].forEach((f, i) => tone(f, f * 1.01, 0.18, 0.22, 'triangle', i * 0.09)); haptic('title'); },
-  // своя линька: подъём, пока свечение бежит к голове, и аккорд, когда змейка раздувается
-  molt() {
-    tone(200, 900, 0.36, 0.12, 'triangle');
-    [523, 659, 784, 1047, 1319].forEach((f, i) => tone(f, f * 1.01, 0.24, 0.2, 'triangle', MOLT_CHARGE + i * 0.06));
+  // своя линька — «волшебство» (выбор владельца): шорох нарастает, пока свечение бежит к голове, потом колокольный
+  // аккорд и искры; каждая следующая ступень — на тон выше
+  molt(st = 1) {
+    const k = semi(1, (Math.max(1, st) - 1) * 2), w = MOLT_CHARGE;
+    hiss({ f: 600, f1: 5000, q: 2, vol: 0.12, dur: w + 0.05, a: w * 0.8 });
+    note(300 * k, { to: 1200 * k, dur: w, vol: 0.1, a: w * 0.7, detune: 8 }); note(300 * k, { to: 1200 * k, dur: w, vol: 0.1, a: w * 0.7, detune: -8 });
+    [523, 659, 784, 988].forEach((f) => { note(f * k, { vol: 0.12, dur: 1.1, delay: w, a: 0.003, wet: 0.5 }); note(f * k * 4, { vol: 0.02, dur: 0.3, delay: w, a: 0.002 }); });
+    for (let i = 0; i < 9; i++) note(semi(2093 * k, EAT_STEPS[(Math.random() * EAT_STEPS.length) | 0]), { vol: 0.05, dur: 0.1, delay: w + 0.1 + i * 0.08 + Math.random() * 0.04, wet: 0.6 });
     haptic('molt');
   },
   // чужая линька на экране — то же тихо и с её стороны
@@ -240,13 +302,8 @@ function setWhoosh(on) {
     return;
   }
   try {
-    if (!noiseBuf || noiseBuf.sampleRate !== actx.sampleRate) {
-      const n = actx.sampleRate; noiseBuf = actx.createBuffer(1, n, n);
-      const d = noiseBuf.getChannelData(0);
-      for (let i = 0; i < n; i++) d[i] = Math.random() * 2 - 1;
-    }
     const t = actx.currentTime;
-    const src = actx.createBufferSource(); src.buffer = noiseBuf; src.loop = true;
+    const src = actx.createBufferSource(); src.buffer = noiseBuffer(); src.loop = true;
     const flt = actx.createBiquadFilter(); flt.type = 'bandpass'; flt.Q.value = 1.4;
     flt.frequency.setValueAtTime(500, t); flt.frequency.exponentialRampToValueAtTime(2400, t + 1.5);
     const g = actx.createGain(); g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(vol, t + 0.06);
@@ -388,26 +445,21 @@ if (window.visualViewport) visualViewport.addEventListener('resize', relayout);
 window.addEventListener('pageshow', relayout);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) setTimeout(relayout, 300); });
 
-const FIELD = '#161A16', GRID = '#202620', OUTSIDE = '#2B1715', EDGE = '#FFB4AB';
+const OUTSIDE = '#2B1715', EDGE = '#FFB4AB';
 // обводка своей змейки: белая 60 % поверх поля; силуэты бусин накладываются друг на друга, поэтому цвет — уже смешанный с полем, плотный
 const MINE_RGB = 162;
 const ON = '#E3E8F5', PRIMARY = '#8EB8FF', TERTIARY = '#DDBCE0', GOLD_C = '#FFD447', REVENGE = '#FF6B5E';
 // короны тройки лидеров: золото, серебро, бронза — [заливка, обводка, размер от золотой]
 const CROWNS = [[GOLD_C, '#8a5a00', 1], ['#DCE3EC', '#5E6B7A', 0.9], ['#E0975A', '#6E3A12', 0.82]];
-function makeGrid() {
-  const s = 2, t = 80;
-  const c = document.createElement('canvas');
-  c.width = c.height = t * s;
-  const g = c.getContext('2d');
-  g.scale(s, s);
-  g.fillStyle = FIELD; g.fillRect(0, 0, t, t);
-  g.fillStyle = GRID; g.fillRect(0, 0, t, 1.5); g.fillRect(0, 0, 1.5, t);
-  const p = ctx.createPattern(c, 'repeat');
-  if (p.setTransform && window.DOMMatrix) p.setTransform(new DOMMatrix().scale(1 / s));
-  return p;
+// фон арены: при каждом старте игры случайный, не тот же, что в прошлый раз (?bg=<вид> — закрепить, для проверок)
+const BG_Q = new URLSearchParams(location.search).get('bg'), BG_FORCED = BACKDROPS.includes(BG_Q) ? BG_Q : null;
+let backdrop = null;
+function pickBackdrop() {
+  const prev = backdrop && backdrop.kind, pool = BACKDROPS.filter((k) => k !== prev);
+  const kind = BG_FORCED || pool[Math.floor(Math.random() * pool.length)];
+  backdrop = makeBackdrop(ctx, kind, Math.floor(Math.random() * 1e9), R);
+  return backdrop;
 }
-const gridPattern = makeGrid();
-
 // спрайты: бусины змейки, голова, светящаяся еда — по одному на цвет палитры
 function shade(hex, k) {
   const n = parseInt(hex.slice(1), 16);
@@ -1356,6 +1408,7 @@ function onNetDeath(m, dead) {
 function startNet(firstMsg) {
   mode = 'net'; ui = 'conn'; me = null; world = null; net.kills = 0; net.retry = 0; net.eaten = 0;
   run = null; feast = null; clearFx();
+  pickBackdrop();
   netReset();
   net.leaving = false;
   stopHosting();
@@ -1398,6 +1451,7 @@ function startSolo(diff) {
   cam.z = baseZoom() * 1.3;
   playTime = 0; sessionBest = START_MASS; hudT = 0; lastSoloMass = me.mass;
   run = newRun(diff); feast = null; clearFx(); clearGlow();
+  pickBackdrop();
   world.track = true; // съеденная еда — для крошек, летящих в рот
   $('roomBox').hidden = true;
   showHome(false);
@@ -2062,7 +2116,7 @@ function moltCheck(s) {
   if (st <= s.seenSt) return;
   s.moltFrom = s.seenSt; s.seenSt = st; s.moltT = time;
   const segs = s.segs, h = segs[0];
-  if (s === me) { sfx.molt(); s.moltKick = true; }
+  if (s === me) { sfx.molt(st); s.moltKick = true; }
   else if (inView(h.x, h.y)) placed(h.x, h.y, sfx.moltFar);
   if (!inView(h.x, h.y, bodyLenOf(s.mass)) || REDUCED) return;
   const stride = Math.max(2, Math.ceil(segs.length / 160) * 2), pts = [];
@@ -2330,8 +2384,8 @@ function draw() {
   const ox = sh ? sh * Math.sin(kt * 71) : 0, oy = sh ? sh * Math.cos(kt * 53) : 0;
   camT.k = DPR * z; camT.e = DPR * (W / 2 + ox - cam.x * z); camT.f = DPR * (H / 2 + oy - cam.y * z);
   ctx.setTransform(camT.k, 0, 0, camT.k, camT.e, camT.f);
+  drawBackdrop(ctx, backdrop || pickBackdrop(), R, cam, z, W, H, time);
   ctx.beginPath(); ctx.arc(0, 0, R, 0, TAU);
-  ctx.fillStyle = gridPattern; ctx.fill();
   ctx.lineWidth = 10; ctx.strokeStyle = EDGE; ctx.stroke();
 
   const hw = W / 2 / z, hh = H / 2 / z;
@@ -2516,6 +2570,6 @@ if (inviteCode && /^\d{4}$/.test(inviteCode)) {
 // для автотестов
 window.__snake = {
   get mode() { return mode; }, get ui() { return ui; }, get me() { return me; }, get world() { return world; },
-  get net() { return net; }, auto, safeCourse, get joy() { return joy; }, get run() { return run; }, get save() { return save; }, get cam() { return cam; }, startSolo,
+  get net() { return net; }, auto, safeCourse, get joy() { return joy; }, get run() { return run; }, get save() { return save; }, get cam() { return cam; }, startSolo, sfx, get bg() { return backdrop && backdrop.kind; },
   get fx() { return { gulps: gulps.length, sparks: sparks.length, lumps: lumps.length, kick: kick.t, whoosh: !!whoosh, time }; },
 };
