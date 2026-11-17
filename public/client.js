@@ -958,6 +958,7 @@ canvas.addEventListener('pointermove', (e) => {
   joyMove();
 });
 function joyMove() {
+  if (joyFinger()) { ctlDirty = true; return; } // the course is taken every frame in steer: the head moves, the finger may not
   const r = joyR();
   let dx = joy.x - joy.bx, dy = joy.y - joy.by;
   const len = Math.hypot(dx, dy);
@@ -1025,7 +1026,19 @@ const numIn = (v, lo, hi, def) => { const n = Number(v); return Number.isFinite(
 const joyR = () => numIn(save.joy.r, JOY_MIN, JOY_MAX, JOY_DEF);
 const joyDead = () => numIn(save.joy.dead, DEAD_MIN, DEAD_MAX, DEAD_DEF) / 100;
 const joySmooth = () => numIn(save.joy.smooth, 0, SMOOTH_MAX, SMOOTH_DEF);
-const joyFree = () => save.joy.free !== false;
+const JOY_MODES = ['free', 'fixed', 'finger'];
+// the joystick kind: 'free' — appears under the finger, 'fixed' — stands in its spot, 'finger' — no stick, the snake crawls toward the finger
+const joyMode = () => (JOY_MODES.includes(save.joy.mode) ? save.joy.mode : save.joy.free === false ? 'fixed' : 'free');
+const joyFree = () => joyMode() !== 'fixed'; // grabbed anywhere on the field
+const joyFinger = () => joyMode() === 'finger';
+const FINGER_DEAD = 24; // px around the head on screen: a finger right on it doesn't turn the snake
+// "follow the finger": the angle from your head on screen to the finger, or null when the finger is on the head
+function fingerAngle() {
+  if (!me || !me.segs.length) return null;
+  const [sx, sy] = headOnScreen(), dx = joy.x - sx, dy = joy.y - sy;
+  return dx * dx + dy * dy > FINGER_DEAD * FINGER_DEAD ? Math.atan2(dy, dx) : null;
+}
+const headOnScreen = () => [W / 2 + (me.segs[0].x - cam.x) * cam.z, H / 2 + (me.segs[0].y - cam.y) * cam.z];
 const knobR = (r) => 22 + r * 0.1; // the knob stays finger-sized: 26 px at the default size
 function clampJoy(x, y) {
   const r = joyR() + FAB_PAD;
@@ -1093,7 +1106,9 @@ function startFabEdit() {
 }
 function showCtl() {
   for (const [id, lo, hi, get] of CTL_RANGES) { const rng = $(id); rng.min = lo; rng.max = hi; rng.value = get(); showRange(rng); }
-  $('joyFree').checked = joyFree();
+  const m = joyMode();
+  for (const b of $('joyMode').children) { b.classList.toggle('on', b.dataset.v === m); b.setAttribute('aria-checked', b.dataset.v === m); }
+  $('joySizeRow').hidden = $('joyDeadRow').hidden = m === 'finger'; // no stick — nothing to size, the dead zone is around the head
   setCtlTab(ctlTab);
 }
 function setCtlTab(k) {
@@ -1101,7 +1116,7 @@ function setCtlTab(k) {
   $('ctlTabJoy').classList.toggle('on', k === 'joy'); $('ctlTabFab').classList.toggle('on', k === 'fab');
   $('ctlTabJoy').setAttribute('aria-selected', k === 'joy'); $('ctlTabFab').setAttribute('aria-selected', k === 'fab');
   $('ctlJoy').hidden = k !== 'joy'; $('ctlFab').hidden = k !== 'fab';
-  $('joyText').textContent = t(joyFree() ? 'joy.textFree' : 'joy.textFixed');
+  $('joyText').textContent = t({ free: 'joy.textFree', fixed: 'joy.textFixed', finger: 'joy.textFinger' }[joyMode()]);
   fab.classList.toggle('edit', k === 'fab');
   applyFab(); placeFabPanel(); ctlDirty = true;
 }
@@ -1121,7 +1136,12 @@ for (const [id, k] of [['joySize', 'r'], ['joyDead', 'dead'], ['joySmooth', 'smo
   $(id).addEventListener('input', () => { save.joy[k] = Number($(id).value); showRange($(id)); placeFabPanel(); ctlDirty = true; });
   $(id).addEventListener('change', persist);
 }
-$('joyFree').addEventListener('change', () => { save.joy.free = $('joyFree').checked; joy.active = false; joy.pid = null; setCtlTab('joy'); persist(); });
+$('joyMode').addEventListener('click', (e) => {
+  const b = e.target.closest('button');
+  if (!b) return;
+  save.joy.mode = b.dataset.v; delete save.joy.free;
+  joy.active = false; joy.pid = null; ctlTab = 'joy'; showCtl(); persist();
+});
 $('ctlTabJoy').addEventListener('click', () => setCtlTab('joy'));
 $('ctlTabFab').addEventListener('click', () => setCtlTab('fab'));
 $('fabSize').addEventListener('change', persist);
@@ -1155,10 +1175,16 @@ function steer() {
   const left = keys.has('ArrowLeft') || keys.has('KeyA'), right = keys.has('ArrowRight') || keys.has('KeyD');
   if (inputKind === 'keys') a = left !== right ? me.a + (right ? 0.9 : -0.9) : me.a;
   else if (inputKind === 'mouse' && mouse.has) {
-    const sx = W / 2 + (me.segs[0].x - cam.x) * cam.z, sy = H / 2 + (me.segs[0].y - cam.y) * cam.z;
+    const [sx, sy] = headOnScreen();
     const dx = mouse.x - sx, dy = mouse.y - sy;
     if (dx * dx + dy * dy > 144) a = Math.atan2(dy, dx);
-  } else if (inputKind === 'touch') a = joyCourse();
+  } else if (inputKind === 'touch') {
+    if (joyFinger() && joy.active) {
+      const f = fingerAngle();
+      if (f !== null) { joy.angle = f; if (joy.fresh) { joy.fresh = false; joy.sa = f; } }
+    }
+    a = joyCourse();
+  }
   return { a, b };
 }
 
@@ -2646,6 +2672,7 @@ function drawCrown(x, y, w, lw = 2 / cam.z, place = 0) {
 // and a free one is shown as a sample in the open part of the screen
 function drawJoystick() {
   if (mode === null || !isTouch && !joy.active) return;
+  if (joyFinger()) { drawFinger(); return; }
   const r = joyR(), free = joyFree();
   let bx = joy.bx, by = joy.by, dx = 0, dy = 0, idle = !joy.active;
   if (joy.active) {
@@ -2675,6 +2702,19 @@ function drawJoystick() {
     ctx.lineWidth = 4; ctx.lineCap = 'round'; ctx.strokeStyle = hexA(PRIMARY, 0.9); ctx.stroke();
   }
   ctx.globalAlpha = 1;
+}
+// "follow the finger": a faint ring under the finger; in the setup also a line from the head to show the course
+function drawFinger() {
+  if (!joy.active) return;
+  const edit = fabEdit && ctlTab === 'joy';
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  if (edit && me && me.segs.length && fingerAngle() !== null) {
+    const [sx, sy] = headOnScreen();
+    ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(joy.x, joy.y);
+    ctx.lineWidth = 3; ctx.lineCap = 'round'; ctx.strokeStyle = hexA(PRIMARY, 0.7); ctx.setLineDash([8, 8]); ctx.stroke(); ctx.setLineDash([]);
+  }
+  ctx.beginPath(); ctx.arc(joy.x, joy.y, 26, 0, TAU);
+  ctx.lineWidth = 2; ctx.strokeStyle = hexA(PRIMARY, edit ? 0.9 : 0.45); ctx.stroke();
 }
 // a sample of the free joystick during the setup: the middle of the part of the screen the panel leaves open
 function joySample() {

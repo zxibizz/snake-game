@@ -1,6 +1,6 @@
 // Offline: every game file goes into the cache on install and is served from it from then on.
 // When any file changes, bump VERSION — otherwise devices stay on the old version.
-const VERSION = '54';
+const VERSION = '55';
 const CACHE = `zmeigrad-v${VERSION}`;
 const MUSIC_CACHE = 'snake-music-1'; // survives version bumps; bump only if a track file changes (activate then drops the old one)
 const ASSETS = [

@@ -190,6 +190,9 @@ svg.i{width:24px;height:24px;fill:currentColor;flex:none}
 /* "Controls": joystick / boost tabs on top; sliders in rows "label — slider" so the panel fits a phone in landscape */
 .ctl-tabs{margin:0 0 10px}
 .ctl-tabs button{flex:1;min-width:0;padding:0 8px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* joystick kind: anywhere / fixed / the snake crawls toward the finger; long words wrap to two lines */
+.joy-mode{margin:0 0 6px}
+.joy-mode button{min-width:0;height:auto;min-height:40px;padding:4px 6px;line-height:16px;text-align:center;overflow-wrap:anywhere;hyphens:auto}
 #fabPanel .sw-row{margin:0;min-height:44px;font-size:15px}
 #fabPanel .ctl-row{margin:0;gap:12px;min-height:44px;font-size:15px;color:var(--on)}
 .ctl-row span{flex:0 0 38%;overflow-wrap:anywhere;hyphens:auto;line-height:1.15}
@@ -396,9 +399,9 @@ svg.i{width:24px;height:24px;fill:currentColor;flex:none}
     <div class="tabs ctl-tabs" role="tablist"><button id="ctlTabJoy" role="tab" data-t="ctl.joy">Joystick</button><button id="ctlTabFab" role="tab" data-t="ctl.fab">Boost</button></div>
     <div id="ctlJoy">
       <p id="joyText"></p>
-      <label class="sw-row"><span data-t="joy.free">Anywhere on the screen</span><input type="checkbox" class="m3-switch" id="joyFree"></label>
-      <label class="vol ctl-row"><span data-t="joy.size">Size</span><input type="range" id="joySize" step="2"></label>
-      <label class="vol ctl-row"><span data-t="joy.dead">Dead zone</span><input type="range" id="joyDead" step="1"></label>
+      <div class="seg joy-mode" id="joyMode" role="radiogroup"><button data-v="free" role="radio" data-t="joy.mFree">Anywhere</button><button data-v="fixed" role="radio" data-t="joy.mFixed">Fixed</button><button data-v="finger" role="radio" data-t="joy.mFinger">Follow finger</button></div>
+      <label class="vol ctl-row" id="joySizeRow"><span data-t="joy.size">Size</span><input type="range" id="joySize" step="2"></label>
+      <label class="vol ctl-row" id="joyDeadRow"><span data-t="joy.dead">Dead zone</span><input type="range" id="joyDead" step="1"></label>
       <label class="vol ctl-row"><span data-t="joy.smooth">Smoothing</span><input type="range" id="joySmooth" step="5"></label>
     </div>
     <div id="ctlFab">
