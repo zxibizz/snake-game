@@ -539,7 +539,9 @@ let W = 0, H = 0, DPR = 1, tall = false, redraw = false; // tall — the page is
 const IS_PWA = navigator.standalone === true ||
   (window.matchMedia && matchMedia('(display-mode: standalone), (display-mode: fullscreen)').matches);
 const IOS_PWA = IS_PWA && /iPhone|iPod/.test(navigator.userAgent || '');
-if (IS_PWA) document.documentElement.classList.add('pwa');
+// the status bar overlays the page only on iPhone and in the old fullscreen install on Android; with standalone (the manifest since 0.28.1)
+// Android puts it above the page, painted in theme_color — no extra gap at the top there
+if (navigator.standalone === true || (window.matchMedia && matchMedia('(display-mode: fullscreen)').matches)) document.documentElement.classList.add('pwa');
 // screen height in the current orientation (iOS reports screen in portrait)
 function screenHeight() {
   return window.innerHeight >= window.innerWidth ? Math.max(screen.width, screen.height) : Math.min(screen.width, screen.height);

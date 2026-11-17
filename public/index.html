@@ -146,8 +146,9 @@ svg.i{width:24px;height:24px;fill:currentColor;flex:none}
 
 /* --- in-game UI: pause, length and place, top 3 --- */
 :root{--hud-top:env(safe-area-inset-top)}
-/* installed game (the script sets the pwa class: navigator.standalone or display-mode standalone/fullscreen —
-   the manifest says fullscreen, and standalone alone in a media query isn't enough): the status bar overlays the page and shades the edge */
+/* installed game where the status bar overlays the page (the script sets the pwa class: navigator.standalone on iPhone, or
+   display-mode fullscreen of old Android installs; the manifest says standalone since 0.28.1 — in fullscreen an Android tablet left an
+   empty light strip at the top): the bar shades the edge, so the HUD steps down */
 :root.pwa{--hud-top:calc(env(safe-area-inset-top) + 16px)}
 #hud{position:fixed;inset:0;pointer-events:none}
 .hud-tl{position:absolute;top:calc(12px + var(--hud-top));left:calc(12px + env(safe-area-inset-left));
