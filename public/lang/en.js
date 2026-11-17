@@ -108,7 +108,7 @@ export default {
   'pause.place': (b) => `place ${b}`,
   'pause.out': 'Back to menu',
   'set.haptic': 'Vibration',
-  'set.fab': 'Boost button',
+  'set.controls': 'Controls',
   'set.sounds': 'Sounds',
   'set.bg': 'Backdrop',
   'bg.random': 'Random',
@@ -122,6 +122,14 @@ export default {
   'bg.hueRandom': 'Random every game',
   'fab.text': 'Drag the lightning bolt or tap wherever is comfortable',
   'fab.reset': 'Reset',
+  'ctl.joy': 'Joystick',
+  'ctl.fab': 'Boost',
+  'joy.free': 'Anywhere on the screen',
+  'joy.size': 'Size',
+  'joy.dead': 'Dead zone',
+  'joy.smooth': 'Smoothing',
+  'joy.textFree': 'Touch the field to try it. Bigger means finer aim',
+  'joy.textFixed': 'Tap where it should stand and drag. Inside the ring — try it out',
   'snd.eat': 'Food',
   'snd.boost': 'Boost',
   'snd.crash': 'Crash',
@@ -227,7 +235,7 @@ export default {
 
   // how to play and offline
   'help.touch': 'Touch anywhere and drag — that’s your joystick. Hold the lightning bolt to speed up: ' +
-    'each second burns 5% of your length, at least 10. Move and resize the bolt from the pause menu.',
+    'each second burns 5% of your length, at least 10. Set up the joystick and the bolt in the pause menu, “Controls”.',
   'help.mouse': 'Your snake crawls toward the mouse cursor. Left button or Space to speed up: each second burns 5% of your length, ' +
     'at least 10. The ← → arrow keys work too. Esc pauses.',
   'help.cut': 'Cut off a rival so they crash their head into you. The golden arrow with a crown at the screen edge shows where the leader is.',

@@ -98,7 +98,7 @@ export default {
   'pause.place': (b) => `${b}. sıra`,
   'pause.out': 'Menüye dön',
   'set.haptic': 'Titreşim',
-  'set.fab': 'Turbo düğmesi',
+  'set.controls': 'Kontroller',
   'set.sounds': 'Sesler',
   'set.bg': 'Arka plan',
   'bg.random': 'Rastgele',
@@ -112,6 +112,14 @@ export default {
   'bg.hueRandom': 'Her oyunda rastgele',
   'fab.text': 'Şimşeği sürükle ya da rahat ettiğin yere dokun',
   'fab.reset': 'Sıfırla',
+  'ctl.joy': 'Joystick',
+  'ctl.fab': 'Turbo',
+  'joy.free': 'Ekranın her yerinde',
+  'joy.size': 'Boyut',
+  'joy.dead': 'Ölü bölge',
+  'joy.smooth': 'Yumuşatma',
+  'joy.textFree': 'Denemek için alana dokun. Büyük olan daha hassas',
+  'joy.textFixed': 'Durması gereken yere dokun ve sürükle. Çemberin içinde dene',
   'snd.eat': 'Yem',
   'snd.boost': 'Turbo',
   'snd.crash': 'Çarpma',
@@ -217,7 +225,7 @@ export default {
 
   // how to play and offline
   'help.touch': 'Herhangi bir yere dokun ve sürükle — bu senin joystick’in. Hızlanmak için şimşeği basılı tut: ' +
-    'her saniye uzunluğunun %5’ini, en az 10 yakar. Şimşeğin yerini ve boyutunu duraklatma menüsünden ayarla.',
+    'her saniye uzunluğunun %5’ini, en az 10 yakar. Joystick’i ve şimşeği duraklatma menüsündeki “Kontroller”den ayarla.',
   'help.mouse': 'Yılan fare imlecine doğru sürünür. Hızlanmak için sol tuş veya Boşluk: her saniye uzunluğunun %5’ini, ' +
     'en az 10 yakar. ← → ok tuşları da çalışır. Esc duraklatır.',
   'help.cut': 'Rakibin önünü kes ki kafasını sana çarpsın. Ekranın kenarındaki taçlı altın ok, liderin nerede olduğunu gösterir.',

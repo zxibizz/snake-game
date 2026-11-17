@@ -98,7 +98,7 @@ export default {
   'pause.place': (b) => `${b}° posto`,
   'pause.out': 'Torna al menu',
   'set.haptic': 'Vibrazione',
-  'set.fab': 'Pulsante turbo',
+  'set.controls': 'Comandi',
   'set.sounds': 'Suoni',
   'set.bg': 'Sfondo',
   'bg.random': 'Casuale',
@@ -112,6 +112,14 @@ export default {
   'bg.hueRandom': 'Casuale a ogni partita',
   'fab.text': 'Trascina il fulmine o tocca dove ti è più comodo',
   'fab.reset': 'Ripristina',
+  'ctl.joy': 'Joystick',
+  'ctl.fab': 'Turbo',
+  'joy.free': 'Ovunque sullo schermo',
+  'joy.size': 'Dimensione',
+  'joy.dead': 'Zona morta',
+  'joy.smooth': 'Fluidità',
+  'joy.textFree': 'Tocca il campo per provarlo. Più grande, più preciso',
+  'joy.textFixed': 'Tocca dove deve stare e trascina. Dentro il cerchio: provalo',
   'snd.eat': 'Cibo',
   'snd.boost': 'Turbo',
   'snd.crash': 'Scontro',
@@ -217,7 +225,7 @@ export default {
 
   // how to play and offline
   'help.touch': 'Tocca ovunque e trascina: è il tuo joystick. Tieni premuto il fulmine per accelerare: ' +
-    'ogni secondo consuma il 5% della tua lunghezza, almeno 10. Sposta e ridimensiona il fulmine dal menu di pausa.',
+    'ogni secondo consuma il 5% della tua lunghezza, almeno 10. Regola joystick e fulmine dal menu di pausa, «Comandi».',
   'help.mouse': 'Il serpente striscia verso il cursore del mouse. Tasto sinistro o Spazio per accelerare: ogni secondo consuma il 5% della tua lunghezza, ' +
     'almeno 10. Funzionano anche le frecce ← →. Esc mette in pausa.',
   'help.cut': 'Taglia la strada a un rivale perché sbatta la testa contro di te. La freccia dorata con la corona sul bordo dello schermo indica dov’è il leader.',

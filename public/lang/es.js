@@ -98,7 +98,7 @@ export default {
   'pause.place': (b) => `puesto ${b}`,
   'pause.out': 'Volver al menú',
   'set.haptic': 'Vibración',
-  'set.fab': 'Botón turbo',
+  'set.controls': 'Controles',
   'set.sounds': 'Sonidos',
   'set.bg': 'Fondo',
   'bg.random': 'Aleatorio',
@@ -112,6 +112,14 @@ export default {
   'bg.hueRandom': 'Aleatorio cada partida',
   'fab.text': 'Arrastra el rayo o toca donde te resulte cómodo',
   'fab.reset': 'Restablecer',
+  'ctl.joy': 'Joystick',
+  'ctl.fab': 'Turbo',
+  'joy.free': 'En cualquier parte de la pantalla',
+  'joy.size': 'Tamaño',
+  'joy.dead': 'Zona muerta',
+  'joy.smooth': 'Suavizado',
+  'joy.textFree': 'Toca el campo para probarlo. Más grande, más preciso',
+  'joy.textFixed': 'Toca donde debe quedarse y arrastra. Dentro del círculo, pruébalo',
   'snd.eat': 'Comida',
   'snd.boost': 'Turbo',
   'snd.crash': 'Choque',
@@ -217,7 +225,7 @@ export default {
 
   // how to play and offline
   'help.touch': 'Toca en cualquier sitio y arrastra: ese es tu joystick. Mantén el rayo para acelerar: ' +
-    'cada segundo gasta el 5 % de tu longitud, como mínimo 10. Mueve y cambia el tamaño del rayo desde el menú de pausa.',
+    'cada segundo gasta el 5 % de tu longitud, como mínimo 10. Ajusta el joystick y el rayo en el menú de pausa, «Controles».',
   'help.mouse': 'La serpiente repta hacia el cursor del ratón. Botón izquierdo o Espacio para acelerar: cada segundo gasta el 5 % de tu longitud, ' +
     'como mínimo 10. Las flechas ← → también sirven. Esc pausa.',
   'help.cut': 'Córtale el paso a un rival para que choque con la cabeza contra ti. La flecha dorada con corona en el borde de la pantalla indica dónde está el líder.',

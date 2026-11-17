@@ -98,7 +98,7 @@ export default {
   'pause.place': (b) => `Platz ${b}`,
   'pause.out': 'Zum Menü',
   'set.haptic': 'Vibration',
-  'set.fab': 'Turboknopf',
+  'set.controls': 'Steuerung',
   'set.sounds': 'Klänge',
   'set.bg': 'Hintergrund',
   'bg.random': 'Zufällig',
@@ -112,6 +112,14 @@ export default {
   'bg.hueRandom': 'Jedes Spiel zufällig',
   'fab.text': 'Ziehe den Blitz oder tippe dorthin, wo es bequem ist',
   'fab.reset': 'Zurücksetzen',
+  'ctl.joy': 'Joystick',
+  'ctl.fab': 'Turbo',
+  'joy.free': 'Überall auf dem Bildschirm',
+  'joy.size': 'Größe',
+  'joy.dead': 'Totzone',
+  'joy.smooth': 'Glättung',
+  'joy.textFree': 'Tippe aufs Feld, um es zu testen. Größer heißt genauer',
+  'joy.textFixed': 'Tippe dorthin, wo er stehen soll, und ziehe. Im Kreis — ausprobieren',
   'snd.eat': 'Futter',
   'snd.boost': 'Turbo',
   'snd.crash': 'Crash',
@@ -217,7 +225,7 @@ export default {
 
   // how to play and offline
   'help.touch': 'Berühre eine beliebige Stelle und ziehe — das ist dein Joystick. Halte den Blitz für den Turbo: ' +
-    'jede Sekunde kostet 5 % deiner Länge, mindestens 10. Größe und Position des Blitzes stellst du im Pausenmenü ein.',
+    'jede Sekunde kostet 5 % deiner Länge, mindestens 10. Joystick und Blitz stellst du im Pausenmenü unter „Steuerung“ ein.',
   'help.mouse': 'Die Schlange kriecht zum Mauszeiger. Linke Maustaste oder Leertaste für den Turbo: jede Sekunde kostet 5 % deiner Länge, ' +
     'mindestens 10. Die Pfeiltasten ← → gehen auch. Esc pausiert.',
   'help.cut': 'Schneide Gegnern den Weg ab, damit sie mit dem Kopf in dich krachen. Der goldene Pfeil mit Krone am Bildschirmrand zeigt, wo der Anführer ist.',

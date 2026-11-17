@@ -98,7 +98,7 @@ export default {
   'pause.place': (b) => `第 ${b} 名`,
   'pause.out': '返回菜单',
   'set.haptic': '振动',
-  'set.fab': '加速按钮',
+  'set.controls': '操作',
   'set.sounds': '音效',
   'set.bg': '背景',
   'bg.random': '随机',
@@ -112,6 +112,14 @@ export default {
   'bg.hueRandom': '每局随机',
   'fab.text': '拖动闪电，或点按你觉得顺手的位置',
   'fab.reset': '恢复默认',
+  'ctl.joy': '摇杆',
+  'ctl.fab': '加速',
+  'joy.free': '屏幕任意位置',
+  'joy.size': '大小',
+  'joy.dead': '死区',
+  'joy.smooth': '平滑',
+  'joy.textFree': '触碰场地试一试。越大越精准',
+  'joy.textFixed': '点按要放的位置并拖动。在圆圈内可以试一试',
   'snd.eat': '食物',
   'snd.boost': '加速',
   'snd.crash': '撞击',
@@ -217,7 +225,7 @@ export default {
 
   // how to play and offline
   'help.touch': '在任意位置触摸并拖动——这就是你的摇杆。按住闪电加速：' +
-    '每秒消耗长度的 5%，至少 10。闪电的位置和大小可以在暂停菜单中调整。',
+    '每秒消耗长度的 5%，至少 10。摇杆和闪电可以在暂停菜单的“操作”中调整。',
   'help.mouse': '蛇会朝鼠标光标爬去。按左键或空格键加速：每秒消耗长度的 5%，至少 10。' +
     '方向键 ← → 也可以用。按 Esc 暂停。',
   'help.cut': '拦住对手的去路，让它一头撞上你。屏幕边缘带皇冠的金色箭头指向排行榜第一名。',

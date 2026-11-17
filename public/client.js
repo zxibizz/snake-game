@@ -18,7 +18,10 @@ const typeName = (ti) => t('type.' + TYPES[ti].id);
 const TICK_MS = 25;        // room: 40 steps and snapshots per second
 const INTERP_MS = 70;      // other snakes are drawn a couple of snapshots behind — this keeps motion smooth and hides a lost snapshot
 const SELF_MS = 25;        // how often we tell the host where our snake is
-const JOY_R = 44;          // joystick radius: the smaller it is, the shorter the finger movement for a U-turn
+// joystick (the player tunes it in the pause menu, "Controls"): radius — the smaller, the shorter the finger movement for a U-turn,
+// the bigger, the finer the aim; dead zone — a share of the radius the finger may wander without turning; smoothing — how long
+// a jittery finger is averaged, in ms
+const JOY_DEF = 44, JOY_MIN = 32, JOY_MAX = 120, DEAD_DEF = 18, DEAD_MIN = 5, DEAD_MAX = 60, SMOOTH_DEF = 0, SMOOTH_MAX = 150;
 
 // ---------- icons (Material Icons, Apache 2.0) ----------
 const ICONS = {
@@ -27,6 +30,7 @@ const ICONS = {
   play: '<path d="M8 5v14l11-7z"/>',
   vol: '<path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/>',
   volOff: '<path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z"/>',
+  gamepad: '<path d="M15 7.5V2H9v5.5l3 3 3-3zM7.5 9H2v6h5.5l3-3-3-3zM9 16.5V22h6v-5.5l-3-3-3 3zM16.5 9l-3 3 3 3H22V9h-5.5z"/>',
   bolt: '<path d="M11 21h-1l1-7H7.5c-.58 0-.57-.32-.38-.66.19-.34.05-.08.07-.12C8.48 10.94 10.42 7.54 13 3h1l-1 7h3.5c.49 0 .56.33.47.51l-.07.15C12.96 17.55 11 21 11 21z"/>',
   group: '<path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/>',
   share: '<path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81 1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9c-1.66 0-3 1.34-3 3s1.34 3 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.16c-.05.21-.08.43-.08.65 0 1.61 1.31 2.92 2.92 2.92 1.61 0 2.92-1.31 2.92-2.92s-1.31-2.92-2.92-2.92z"/>',
@@ -75,6 +79,8 @@ if (save.snd.v !== 2) { if ('eat' in save.snd) save.snd.eat = Number(save.snd.ea
 for (const [k, set] of [['eat', EAT], ['boost', BOOST], ['crash', CRASH], ['molt', MOLT]]) { const i = Number(save.snd[k]); save.snd[k] = Number.isInteger(i) && set[i] ? i : 0; }
 // boost button: size and position (fractions of the screen, separately for portrait and landscape) — the player sets them in the pause menu
 if (!save.fab || typeof save.fab !== 'object') save.fab = {};
+// joystick: size, dead zone, smoothing; free — appears where the finger lands (default), otherwise it stays at its spot (as fab)
+if (!save.joy || typeof save.joy !== 'object') save.joy = {};
 // arena backdrop (pause menu, "Backdrop"): a kind or 'random'; hue turn in degrees or 'random' — slightly different every game
 if (save.bg !== 'random' && !BACKDROPS.includes(save.bg)) save.bg = BACKDROPS[0];
 if (save.hue !== 'random' && !(typeof save.hue === 'number' && Math.abs(save.hue) <= 180)) save.hue = 'random';
@@ -801,39 +807,58 @@ function newRun(diff) {
 }
 // ---------- input ----------
 const isTouch = ('ontouchstart' in window) || (window.matchMedia && matchMedia('(pointer: coarse)').matches);
-const joy = { active: false, pid: null, bx: 0, by: 0, x: 0, y: 0, angle: null };
+const joy = { active: false, pid: null, bx: 0, by: 0, x: 0, y: 0, angle: null, sa: null, st: 0, drag: null, fresh: false };
+let ctlDirty = false; // the controls setup over a paused game: redraw the field only when something there changed
 const mouse = { x: 0, y: 0, has: false, down: false };
 let inputKind = isTouch ? 'touch' : 'mouse';
 let fabDown = false;
 const keys = new Set();
 
 canvas.addEventListener('pointerdown', (e) => {
-  if (fabEdit) { fabDragStart(e, true); return; } // button setup: touching the field moves the button here
-  if (e.pointerType === 'mouse') {
+  if (fabEdit && ctlTab === 'fab') { // button setup: touching the field moves the button here (or grabs a fixed joystick)
+    if (!joyFree() && joyHit(e.clientX, e.clientY, 1)) { setCtlTab('joy'); joyDragStart(e); } else fabDragStart(e, true);
+    return;
+  }
+  if (fabEdit && !joyFree() && !joyHit(e.clientX, e.clientY, 1)) { joyDragStart(e); return; } // setup: tap where it should stand and drag; inside the ring — try it
+  if (e.pointerType === 'mouse' && !fabEdit) {
     inputKind = 'mouse'; mouse.down = e.button === 0; mouse.x = e.clientX; mouse.y = e.clientY; mouse.has = true;
     return;
   }
   if (joy.active) return; // a second finger on the field is ignored
-  inputKind = 'touch';
-  joy.active = true; joy.pid = e.pointerId;
-  joy.bx = joy.x = e.clientX; joy.by = joy.y = e.clientY;
+  let bx = e.clientX, by = e.clientY;
+  if (!joyFree()) { // a fixed joystick is grabbed near its spot; touches elsewhere don't steer
+    if (!joyHit(bx, by, 2.2)) return;
+    [bx, by] = joySpot();
+  }
+  if (!fabEdit) inputKind = 'touch'; // in the setup it's a try-out, the snake isn't steered
+  joy.active = true; joy.pid = e.pointerId; joy.fresh = true;
+  joy.bx = bx; joy.by = by; joy.x = e.clientX; joy.y = e.clientY;
+  joyMove();
   try { canvas.setPointerCapture(e.pointerId); } catch { /* */ }
 });
 canvas.addEventListener('pointermove', (e) => {
-  if (e.pointerType === 'mouse') { mouse.x = e.clientX; mouse.y = e.clientY; mouse.has = true; inputKind = 'mouse'; return; }
+  if (e.pointerType === 'mouse' && !joy.active) { if (!fabEdit) { mouse.x = e.clientX; mouse.y = e.clientY; mouse.has = true; inputKind = 'mouse'; } return; }
   if (!joy.active || e.pointerId !== joy.pid) return;
   joy.x = e.clientX; joy.y = e.clientY;
+  joyMove();
+});
+function joyMove() {
+  const r = joyR();
   let dx = joy.x - joy.bx, dy = joy.y - joy.by;
   const len = Math.hypot(dx, dy);
-  if (len > JOY_R) { // the base follows the finger
-    joy.bx = joy.x - dx / len * JOY_R; joy.by = joy.y - dy / len * JOY_R;
+  if (len > r && joyFree()) { // the base follows the finger; a fixed one stays put, the knob stops at the rim
+    joy.bx = joy.x - dx / len * r; joy.by = joy.y - dy / len * r;
     dx = joy.x - joy.bx; dy = joy.y - joy.by;
   }
-  if (len > 8) joy.angle = Math.atan2(dy, dx);
-});
+  if (len > r * joyDead()) {
+    joy.angle = Math.atan2(dy, dx);
+    if (joy.fresh) { joy.fresh = false; joy.sa = joy.angle; } // a new touch turns at once, smoothing is for the jitter within it
+  }
+  ctlDirty = true;
+}
 const endPointer = (e) => {
-  if (e.pointerType === 'mouse') { mouse.down = false; return; }
-  if (e.pointerId === joy.pid) { joy.active = false; joy.pid = null; }
+  if (e.pointerType === 'mouse') mouse.down = false;
+  if (e.pointerId === joy.pid) { joy.active = false; joy.pid = null; ctlDirty = true; }
 };
 canvas.addEventListener('pointerup', endPointer);
 canvas.addEventListener('pointercancel', endPointer);
@@ -844,7 +869,7 @@ document.addEventListener('dblclick', (e) => e.preventDefault());
 const fab = $('fab');
 fab.addEventListener('pointerdown', (e) => {
   e.preventDefault();
-  if (fabEdit) { fabDragStart(e, false); return; }
+  if (fabEdit) { setCtlTab('fab'); fabDragStart(e, false); return; }
   fabDown = true; fab.classList.add('on');
   if (me && me.mass > MIN_BOOST_MASS) haptic('boost'); // right on touch, without waiting for the network
   try { fab.setPointerCapture(e.pointerId); } catch { /* */ }
@@ -880,11 +905,45 @@ function applyFab() {
   } else fab.style.left = fab.style.top = fab.style.right = fab.style.bottom = ''; // by default — the bottom-right corner (CSS)
   if (fabEdit) placeFabPanel();
 }
+// --- joystick settings ---
+const numIn = (v, lo, hi, def) => { const n = Number(v); return Number.isFinite(n) ? clamp(n, lo, hi) : def; };
+const joyR = () => numIn(save.joy.r, JOY_MIN, JOY_MAX, JOY_DEF);
+const joyDead = () => numIn(save.joy.dead, DEAD_MIN, DEAD_MAX, DEAD_DEF) / 100;
+const joySmooth = () => numIn(save.joy.smooth, 0, SMOOTH_MAX, SMOOTH_DEF);
+const joyFree = () => save.joy.free !== false;
+const knobR = (r) => 22 + r * 0.1; // the knob stays finger-sized: 26 px at the default size
+function clampJoy(x, y) {
+  const r = joyR() + FAB_PAD;
+  return [Math.min(Math.max(x, r), Math.max(r, W - r)), Math.min(Math.max(y, r + 56), Math.max(r, H - r))]; // not under the pause button
+}
+// where a fixed joystick stands: its spot for this orientation, the other one's, or the bottom-left corner (the boost is bottom-right)
+function joySpot() {
+  const k = fabKey(), o = k === 'land' ? 'port' : 'land', v = fabOk(save.joy[k]) ? save.joy[k] : fabOk(save.joy[o]) ? save.joy[o] : null;
+  const r = joyR();
+  return v ? clampJoy(v[0] * W, v[1] * H) : clampJoy(r + 40, H - r - 48);
+}
+function joyHit(x, y, k = 1.25) { const [cx, cy] = joySpot(); return Math.hypot(x - cx, y - cy) <= joyR() * k + 12; }
+function setJoyAt(x, y) { const [cx, cy] = clampJoy(x, y); save.joy[fabKey()] = [cx / W, cy / H]; ctlDirty = true; if (fabEdit) placeFabPanel(); }
+function joyDragStart(e) {
+  if (joy.drag) return;
+  joy.drag = { pid: e.pointerId };
+  setJoyAt(e.clientX, e.clientY);
+  try { canvas.setPointerCapture(e.pointerId); } catch { /* */ }
+}
+// the course from the joystick: within one touch a jittery finger is smoothed (if the player asked), a new touch turns at once
+function joyCourse() {
+  const now = performance.now(), dt = (now - joy.st) / 1000, tau = joySmooth() / 1000;
+  joy.st = now;
+  if (joy.angle === null) return null;
+  if (!tau || joy.sa === null || !joy.active) joy.sa = joy.angle;
+  else joy.sa += angDiff(joy.angle, joy.sa) * (1 - Math.exp(-Math.min(dt, 0.1) / tau));
+  return joy.sa;
+}
 function fabCenter() { const r = fab.getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; }
 function setFabAt(x, y) { const [cx, cy] = clampFab(x, y); save.fab[fabKey()] = [cx / W, cy / H]; applyFab(); }
-// the setup panel goes on the other half of the screen from the button, so it doesn't cover it
+// the setup panel goes on the other half of the screen from the button (or the fixed joystick), so it doesn't cover it
 function placeFabPanel() {
-  const p = $('fabPanel'), [x, y] = fabCenter();
+  const p = $('fabPanel'), [x, y] = ctlTab === 'fab' ? fabCenter() : joyFree() ? [0, H] : joySpot(); // a free one is tried at the bottom-left
   p.classList.toggle('side', W > H);
   p.classList.toggle('at-top', W <= H && y > H / 2);
   p.classList.toggle('at-left', W > H && x > W / 2);
@@ -899,37 +958,61 @@ function fabDragStart(e, jump) {
 }
 window.addEventListener('pointermove', (e) => {
   if (fabDrag && e.pointerId === fabDrag.pid) setFabAt(e.clientX + fabDrag.dx, e.clientY + fabDrag.dy);
+  if (joy.drag && e.pointerId === joy.drag.pid) setJoyAt(e.clientX, e.clientY);
 });
-const fabDragEnd = (e) => { if (fabDrag && e.pointerId === fabDrag.pid) { fabDrag = null; fab.classList.remove('drag'); persist(); } };
+const fabDragEnd = (e) => {
+  if (fabDrag && e.pointerId === fabDrag.pid) { fabDrag = null; fab.classList.remove('drag'); persist(); }
+  if (joy.drag && e.pointerId === joy.drag.pid) { joy.drag = null; persist(); }
+};
 window.addEventListener('pointerup', fabDragEnd);
 window.addEventListener('pointercancel', fabDragEnd);
+// "Controls" from the pause menu: two tabs — the joystick and the boost button; the field stays visible to try them on
+let ctlTab = 'joy';
+const CTL_RANGES = [['fabSize', FAB_MIN, FAB_MAX, fabSize], ['joySize', JOY_MIN, JOY_MAX, joyR],
+  ['joyDead', DEAD_MIN, DEAD_MAX, () => Math.round(joyDead() * 100)], ['joySmooth', 0, SMOOTH_MAX, joySmooth]];
 function startFabEdit() {
   closeDialog();
-  fabEdit = true; fabUp(); hideHint(); joy.active = false; joy.pid = null;
-  fab.classList.add('edit'); $('fabPanel').hidden = false;
-  const rng = $('fabSize');
-  rng.min = FAB_MIN; rng.max = FAB_MAX; rng.value = fabSize();
-  showFabRange();
-  applyFab();
+  fabEdit = true; fabUp(); hideHint(); joy.active = false; joy.pid = null; joy.drag = null;
+  $('fabPanel').hidden = false;
+  showCtl();
 }
-function showFabRange() {
-  const rng = $('fabSize');
-  rng.style.setProperty('--p', `${(rng.value - FAB_MIN) / (FAB_MAX - FAB_MIN) * 100}%`);
+function showCtl() {
+  for (const [id, lo, hi, get] of CTL_RANGES) { const rng = $(id); rng.min = lo; rng.max = hi; rng.value = get(); showRange(rng); }
+  $('joyFree').checked = joyFree();
+  setCtlTab(ctlTab);
 }
+function setCtlTab(k) {
+  ctlTab = k;
+  $('ctlTabJoy').classList.toggle('on', k === 'joy'); $('ctlTabFab').classList.toggle('on', k === 'fab');
+  $('ctlTabJoy').setAttribute('aria-selected', k === 'joy'); $('ctlTabFab').setAttribute('aria-selected', k === 'fab');
+  $('ctlJoy').hidden = k !== 'joy'; $('ctlFab').hidden = k !== 'fab';
+  $('joyText').textContent = t(joyFree() ? 'joy.textFree' : 'joy.textFixed');
+  fab.classList.toggle('edit', k === 'fab');
+  applyFab(); placeFabPanel(); ctlDirty = true;
+}
+const showRange = (rng) => rng.style.setProperty('--p', `${(rng.value - rng.min) / (rng.max - rng.min) * 100}%`);
 function endFabEdit() {
   if (!fabEdit) return;
-  fabEdit = false; fabDrag = null;
+  fabEdit = false; fabDrag = null; joy.drag = null; joy.active = false; joy.pid = null; joy.angle = null; joy.sa = null;
   fab.classList.remove('edit', 'drag'); $('fabPanel').hidden = true;
   persist();
 }
 $('fabSize').addEventListener('input', () => {
   const c = fabCenter();
-  save.fab.size = Number($('fabSize').value); showFabRange();
+  save.fab.size = Number($('fabSize').value); showRange($('fabSize'));
   if (fabSpot()) setFabAt(c[0], c[1]); else applyFab(); // grows around its own center
 });
+for (const [id, k] of [['joySize', 'r'], ['joyDead', 'dead'], ['joySmooth', 'smooth']]) {
+  $(id).addEventListener('input', () => { save.joy[k] = Number($(id).value); showRange($(id)); placeFabPanel(); ctlDirty = true; });
+  $(id).addEventListener('change', persist);
+}
+$('joyFree').addEventListener('change', () => { save.joy.free = $('joyFree').checked; joy.active = false; joy.pid = null; setCtlTab('joy'); persist(); });
+$('ctlTabJoy').addEventListener('click', () => setCtlTab('joy'));
+$('ctlTabFab').addEventListener('click', () => setCtlTab('fab'));
 $('fabSize').addEventListener('change', persist);
 $('fabReset').addEventListener('click', () => {
-  save.fab = {}; $('fabSize').value = FAB_DEF; showFabRange(); applyFab(); persist();
+  if (ctlTab === 'fab') save.fab = {}; else save.joy = {};
+  showCtl(); persist();
 });
 $('fabDone').addEventListener('click', () => { endFabEdit(); menuDialog(); });
 window.addEventListener('resize', applyFab);
@@ -960,7 +1043,7 @@ function steer() {
     const sx = W / 2 + (me.segs[0].x - cam.x) * cam.z, sy = H / 2 + (me.segs[0].y - cam.y) * cam.z;
     const dx = mouse.x - sx, dy = mouse.y - sy;
     if (dx * dx + dy * dy > 144) a = Math.atan2(dy, dx);
-  } else if (inputKind === 'touch') a = joy.angle;
+  } else if (inputKind === 'touch') a = joyCourse();
   return { a, b };
 }
 
@@ -1361,7 +1444,7 @@ function netInput(now) {
   }
   if (auto.ta !== null) { // hand back the controls: the stale joystick course and a cursor over the menu button aren't a command to turn
     auto.ta = null; auto.t = -1e9;
-    joy.angle = me.a; mouse.has = false;
+    joy.angle = joy.sa = me.a; mouse.has = false;
   }
   const { a, b } = steer();
   if (a !== null) me.ta = a;
@@ -1698,8 +1781,8 @@ function bindHap() {
   if (!sw) return;
   sw.addEventListener('change', () => { save.haptic = sw.checked; persist(); if (save.haptic) haptic('kill'); });
 }
-// on a touch screen — the boost button setup as well
-const fabBtnHtml = () => (isTouch ? `<button class="fab-set" id="btnFabSet">${icon('bolt')}<span>${t('set.fab')}</span>${icon('right')}</button>` : '');
+// on a touch screen — the controls setup as well: the joystick and the boost button
+const fabBtnHtml = () => (isTouch ? `<button class="fab-set" id="btnFabSet">${icon('gamepad')}<span>${t('set.controls')}</span>${icon('right')}</button>` : '');
 function bindFabBtn() { const b = $('btnFabSet'); if (b) b.addEventListener('click', startFabEdit); }
 // food, boost, crash and molt sounds to choose from (sounds.js); in tabs, pick one and you hear it right away
 const SND_GROUPS = [['eat', EAT], ['boost', BOOST], ['crash', CRASH], ['molt', MOLT]];
@@ -2412,17 +2495,45 @@ function drawCrown(x, y, w, lw = 2 / cam.z, place = 0) {
   ctx.fillStyle = CROWNS[place][0]; ctx.fill();
   ctx.lineWidth = lw; ctx.strokeStyle = CROWNS[place][1]; ctx.stroke();
 }
+// the joystick under the finger; a fixed one is always visible (faint while idle); in the setup — with its dead zone,
+// and a free one is shown as a sample in the open part of the screen
 function drawJoystick() {
-  if (!joy.active || mode === null) return;
+  if (mode === null || !isTouch && !joy.active) return;
+  const r = joyR(), free = joyFree();
+  let bx = joy.bx, by = joy.by, dx = 0, dy = 0, idle = !joy.active;
+  if (joy.active) {
+    dx = joy.x - joy.bx; dy = joy.y - joy.by;
+    const len = Math.hypot(dx, dy);
+    if (len > r) { dx = dx / len * r; dy = dy / len * r; }
+  } else if (fabEdit && ctlTab === 'joy' && free) [bx, by] = joySample();
+  else if (!free && (fabEdit || inputKind === 'touch' && meLive())) [bx, by] = joySpot();
+  else return;
+  const edit = fabEdit && ctlTab === 'joy', a = idle && !edit ? 0.55 : 1;
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
-  ctx.beginPath(); ctx.arc(joy.bx, joy.by, JOY_R, 0, TAU);
-  ctx.fillStyle = 'rgba(225,227,222,0.08)'; ctx.fill();
-  ctx.lineWidth = 2; ctx.strokeStyle = 'rgba(225,227,222,0.28)'; ctx.stroke();
-  let dx = joy.x - joy.bx, dy = joy.y - joy.by;
-  const len = Math.hypot(dx, dy);
-  if (len > JOY_R) { dx = dx / len * JOY_R; dy = dy / len * JOY_R; }
-  ctx.beginPath(); ctx.arc(joy.bx + dx, joy.by + dy, 26, 0, TAU);
-  ctx.fillStyle = hexA(PRIMARY, 0.85); ctx.fill();
+  ctx.globalAlpha = a;
+  ctx.beginPath(); ctx.arc(bx, by, r, 0, TAU);
+  ctx.fillStyle = edit ? hexA(PRIMARY, 0.14) : 'rgba(225,227,222,0.08)'; ctx.fill();
+  ctx.lineWidth = 2; ctx.strokeStyle = edit ? hexA(PRIMARY, 0.7) : 'rgba(225,227,222,0.28)';
+  if (edit && !free) ctx.setLineDash([8, 6]);
+  ctx.stroke(); ctx.setLineDash([]);
+  ctx.beginPath(); ctx.arc(bx + dx, by + dy, knobR(r), 0, TAU);
+  ctx.fillStyle = hexA(PRIMARY, idle && !edit ? 0.45 : 0.85); ctx.fill();
+  if (edit) { // the dead zone: inside it the finger doesn't turn the snake (drawn over the knob, dark, so it shows)
+    ctx.beginPath(); ctx.arc(bx, by, r * joyDead(), 0, TAU);
+    ctx.lineWidth = 2; ctx.strokeStyle = 'rgba(16,28,52,0.75)'; ctx.setLineDash([5, 4]); ctx.stroke(); ctx.setLineDash([]);
+  }
+  if (edit && joy.active && joy.angle !== null) { // which way the snake would go
+    const c = joyCourse(), L = r + 22;
+    ctx.beginPath(); ctx.moveTo(bx + Math.cos(c) * (r + 6), by + Math.sin(c) * (r + 6)); ctx.lineTo(bx + Math.cos(c) * L, by + Math.sin(c) * L);
+    ctx.lineWidth = 4; ctx.lineCap = 'round'; ctx.strokeStyle = hexA(PRIMARY, 0.9); ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
+}
+// a sample of the free joystick during the setup: the middle of the part of the screen the panel leaves open
+function joySample() {
+  const p = $('fabPanel').getBoundingClientRect();
+  if (W > H) return [p.left > W / 2 ? p.left / 2 : (p.right + W) / 2, H / 2];
+  return [W / 2, p.top > H / 2 ? (56 + p.top) / 2 : (p.bottom + H) / 2];
 }
 // an arrow at the screen edge toward a target beyond it
 const meLive = () => me && (mode === 'net' || me.alive) && ui !== 'dead';
@@ -2687,7 +2798,7 @@ function frame(now) {
     draw();
     if (mode) updateHud(dt);
     else if (!$('home').hidden && $('dlg').hidden) drawPreview();
-  } else if (redraw && mode) draw(); // in pause the picture is still — redraw after the canvas was resized
+  } else if ((redraw || fabEdit && ctlDirty) && mode) { draw(); ctlDirty = false; } // in pause the picture is still — redraw after a resize or a change in the controls setup
   if (pzSnake && pzSnake.isConnected && !$('dlg').hidden) drawWave(pzSnake, save.skin); else pzSnake = null; // your own snake in pause
   redraw = false;
   checkSize(now);

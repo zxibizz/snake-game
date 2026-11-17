@@ -98,7 +98,7 @@ export default {
   'pause.place': (b) => `place ${b}`,
   'pause.out': 'Retour au menu',
   'set.haptic': 'Vibration',
-  'set.fab': 'Bouton turbo',
+  'set.controls': 'Commandes',
   'set.sounds': 'Sons',
   'set.bg': 'Fond',
   'bg.random': 'Aléatoire',
@@ -112,6 +112,14 @@ export default {
   'bg.hueRandom': 'Aléatoire à chaque partie',
   'fab.text': 'Fais glisser l’éclair ou touche l’endroit qui te convient',
   'fab.reset': 'Réinitialiser',
+  'ctl.joy': 'Joystick',
+  'ctl.fab': 'Turbo',
+  'joy.free': 'N’importe où sur l’écran',
+  'joy.size': 'Taille',
+  'joy.dead': 'Zone morte',
+  'joy.smooth': 'Lissage',
+  'joy.textFree': 'Touche le terrain pour essayer. Plus grand, plus précis',
+  'joy.textFixed': 'Touche l’endroit où le placer et fais glisser. Dans le cercle : essaie-le',
   'snd.eat': 'Repas',
   'snd.boost': 'Turbo',
   'snd.crash': 'Choc',
@@ -217,7 +225,7 @@ export default {
 
   // how to play and offline
   'help.touch': 'Touche n’importe où et fais glisser — c’est ton joystick. Maintiens l’éclair pour accélérer : ' +
-    'chaque seconde brûle 5 % de ta longueur, au moins 10. Déplace et redimensionne l’éclair depuis le menu pause.',
+    'chaque seconde brûle 5 % de ta longueur, au moins 10. Règle le joystick et l’éclair dans le menu pause, « Commandes ».',
   'help.mouse': 'Le serpent rampe vers le curseur de la souris. Clic gauche ou Espace pour accélérer : chaque seconde brûle 5 % de ta longueur, ' +
     'au moins 10. Les flèches ← → marchent aussi. Échap met en pause.',
   'help.cut': 'Coupe la route d’un rival pour qu’il se cogne la tête contre toi. La flèche dorée avec une couronne au bord de l’écran indique où est le leader.',

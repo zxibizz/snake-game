@@ -17,7 +17,7 @@ There are always 60 snakes in the arena: players and bots. From the very first s
   - "Free for all" — you can cut each other off too.
   After a crash you can continue — with the same share of length as alone at the room's level.
 
-Touch controls: a joystick that starts wherever you touch, and a lightning-bolt button for a speed boost (its size and position are set from the pause menu: "Boost button" — drag it or tap the spot you want, the slider sets the size; remembered separately for portrait and landscape). On a computer — the mouse or the arrow keys, Space to boost.
+Touch controls: a joystick and a lightning-bolt button for a speed boost, both tuned from the pause menu, "Controls" (two tabs, the field stays visible to try them on). Joystick: "Anywhere on the screen" (default) — it starts wherever you touch; switched off — it stands at a chosen spot (tap the place and drag; a touch inside its ring tries it out), is always faintly visible and is grabbed near that spot; size 32–120 px (bigger — finer aim), dead zone 5–60 % of the radius (the finger may wander there without turning the snake), smoothing 0–150 ms (averages a jittery finger within one touch; a new touch turns at once). Boost button: drag it or tap the spot you want, the slider sets the size. Positions are remembered separately for portrait and landscape. On a computer — the mouse or the arrow keys, Space to boost.
 
 ## Languages
 

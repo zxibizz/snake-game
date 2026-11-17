@@ -186,7 +186,13 @@ svg.i{width:24px;height:24px;fill:currentColor;flex:none}
 #fabPanel.at-top{bottom:auto;top:calc(72px + var(--hud-top))}
 #fabPanel.side{bottom:auto;top:50%;left:75%;transform:translate(-50%,-50%);width:min(340px,calc(50vw - 32px))}
 #fabPanel.side.at-left{left:25%}
-#fabPanel h3{margin:0 0 8px;font-size:20px;font-weight:400;line-height:28px}
+/* "Controls": joystick / boost tabs on top; sliders in rows "label — slider" so the panel fits a phone in landscape */
+.ctl-tabs{margin:0 0 10px}
+.ctl-tabs button{flex:1;min-width:0;padding:0 8px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#fabPanel .sw-row{margin:0;min-height:44px;font-size:15px}
+#fabPanel .ctl-row{margin:0;gap:12px;min-height:44px;font-size:15px;color:var(--on)}
+.ctl-row span{flex:0 0 38%;overflow-wrap:anywhere;hyphens:auto;line-height:1.15}
+.ctl-row input{flex:1}
 #fabPanel p{margin:0 0 4px;font-size:14px;line-height:20px;color:var(--on-var)}
 #fabPanel .vol svg.i{color:var(--on-var)}
 #fabPanel .vol .big svg.i{width:32px;height:32px}
@@ -298,6 +304,11 @@ svg.i{width:24px;height:24px;fill:currentColor;flex:none}
   .pzs h3{font-size:20px;line-height:26px;margin-bottom:8px}
   .scrim[data-kind=pzs]{padding-top:8px;padding-bottom:8px}
   .snd-tabs{margin-bottom:10px}
+  #fabPanel{padding:12px 20px 10px}
+  #fabPanel .ctl-row,#fabPanel .sw-row{min-height:38px}
+  .ctl-tabs{margin-bottom:4px}
+  .ctl-tabs button{height:36px}
+  #fabPanel .actions{margin-top:6px}
   .snd-opts{grid-template-columns:repeat(5,minmax(0,1fr));min-height:96px}
   .snd-opts.bg-opts{grid-template-columns:repeat(7,minmax(0,1fr));min-height:0}
   .bg-opts .snd-opt.auto{grid-column:auto}
@@ -372,9 +383,18 @@ svg.i{width:24px;height:24px;fill:currentColor;flex:none}
   <div id="board" class="shadow"></div>
   <button id="fab" hidden aria-label="Speed boost" data-t-aria="a11y.boost" data-icon="bolt"></button>
   <div id="fabPanel" hidden>
-    <h3 data-t="set.fab">Boost button</h3>
-    <p data-t="fab.text">Drag the lightning bolt or tap wherever is comfortable</p>
-    <div class="vol"><span data-icon="bolt"></span><input type="range" id="fabSize" step="4" aria-label="Button size" data-t-aria="a11y.fabSize"><span data-icon="bolt" class="big"></span></div>
+    <div class="tabs ctl-tabs" role="tablist"><button id="ctlTabJoy" role="tab" data-t="ctl.joy">Joystick</button><button id="ctlTabFab" role="tab" data-t="ctl.fab">Boost</button></div>
+    <div id="ctlJoy">
+      <p id="joyText"></p>
+      <label class="sw-row"><span data-t="joy.free">Anywhere on the screen</span><input type="checkbox" class="m3-switch" id="joyFree"></label>
+      <label class="vol ctl-row"><span data-t="joy.size">Size</span><input type="range" id="joySize" step="2"></label>
+      <label class="vol ctl-row"><span data-t="joy.dead">Dead zone</span><input type="range" id="joyDead" step="1"></label>
+      <label class="vol ctl-row"><span data-t="joy.smooth">Smoothing</span><input type="range" id="joySmooth" step="5"></label>
+    </div>
+    <div id="ctlFab">
+      <p data-t="fab.text">Drag the lightning bolt or tap wherever is comfortable</p>
+      <div class="vol"><span data-icon="bolt"></span><input type="range" id="fabSize" step="4" aria-label="Button size" data-t-aria="a11y.fabSize"><span data-icon="bolt" class="big"></span></div>
+    </div>
     <div class="actions"><button class="btn text" id="fabReset" data-t="fab.reset">Reset</button><button class="btn filled" id="fabDone" data-t="btn.done">Done</button></div>
   </div>
   <div id="hint" class="shadow" hidden></div>

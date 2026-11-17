@@ -98,7 +98,7 @@ export default {
   'pause.place': (b) => `${b}º lugar`,
   'pause.out': 'Voltar ao menu',
   'set.haptic': 'Vibração',
-  'set.fab': 'Botão turbo',
+  'set.controls': 'Controles',
   'set.sounds': 'Sons',
   'set.bg': 'Fundo',
   'bg.random': 'Aleatório',
@@ -112,6 +112,14 @@ export default {
   'bg.hueRandom': 'Aleatório a cada partida',
   'fab.text': 'Arraste o raio ou toque onde for mais confortável',
   'fab.reset': 'Redefinir',
+  'ctl.joy': 'Joystick',
+  'ctl.fab': 'Turbo',
+  'joy.free': 'Em qualquer lugar da tela',
+  'joy.size': 'Tamanho',
+  'joy.dead': 'Zona morta',
+  'joy.smooth': 'Suavização',
+  'joy.textFree': 'Toque no campo para testar. Maior é mais preciso',
+  'joy.textFixed': 'Toque onde ele deve ficar e arraste. Dentro do círculo, teste',
   'snd.eat': 'Comida',
   'snd.boost': 'Turbo',
   'snd.crash': 'Batida',
@@ -217,7 +225,7 @@ export default {
 
   // how to play and offline
   'help.touch': 'Toque em qualquer lugar e arraste — esse é o seu joystick. Segure o raio para acelerar: ' +
-    'cada segundo gasta 5% do seu comprimento, no mínimo 10. Mova e redimensione o raio no menu de pausa.',
+    'cada segundo gasta 5% do seu comprimento, no mínimo 10. Ajuste o joystick e o raio no menu de pausa, “Controles”.',
   'help.mouse': 'A cobra rasteja até o cursor do mouse. Botão esquerdo ou Espaço para acelerar: cada segundo gasta 5% do seu comprimento, ' +
     'no mínimo 10. As setas ← → também funcionam. Esc pausa.',
   'help.cut': 'Feche o caminho de um rival para ele bater a cabeça em você. A seta dourada com coroa na borda da tela mostra onde está o líder.',

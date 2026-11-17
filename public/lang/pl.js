@@ -98,7 +98,7 @@ export default {
   'pause.place': (b) => `miejsce ${b}`,
   'pause.out': 'Wróć do menu',
   'set.haptic': 'Wibracje',
-  'set.fab': 'Przycisk turbo',
+  'set.controls': 'Sterowanie',
   'set.sounds': 'Dźwięki',
   'set.bg': 'Tło',
   'bg.random': 'Losowe',
@@ -112,6 +112,14 @@ export default {
   'bg.hueRandom': 'Losowy w każdej grze',
   'fab.text': 'Przeciągnij błyskawicę lub dotknij miejsca, które ci pasuje',
   'fab.reset': 'Przywróć',
+  'ctl.joy': 'Joystick',
+  'ctl.fab': 'Turbo',
+  'joy.free': 'W dowolnym miejscu ekranu',
+  'joy.size': 'Rozmiar',
+  'joy.dead': 'Martwa strefa',
+  'joy.smooth': 'Wygładzanie',
+  'joy.textFree': 'Dotknij pola, by wypróbować. Większy — dokładniejszy',
+  'joy.textFixed': 'Dotknij miejsca, gdzie ma stać, i przeciągnij. W kole — wypróbuj',
   'snd.eat': 'Posiłek',
   'snd.boost': 'Turbo',
   'snd.crash': 'Kraksa',
@@ -217,7 +225,7 @@ export default {
 
   // how to play and offline
   'help.touch': 'Dotknij gdziekolwiek i przeciągnij — to twój joystick. Przytrzymaj błyskawicę, żeby przyspieszyć: ' +
-    'każda sekunda spala 5% długości, co najmniej 10. Rozmiar i miejsce błyskawicy ustawisz w menu pauzy.',
+    'każda sekunda spala 5% długości, co najmniej 10. Joystick i błyskawicę ustawisz w menu pauzy, „Sterowanie”.',
   'help.mouse': 'Wąż pełznie do kursora myszy. Lewy przycisk lub spacja przyspiesza: każda sekunda spala 5% długości, ' +
     'co najmniej 10. Działają też strzałki ← →. Esc to pauza.',
   'help.cut': 'Odetnij drogę rywalowi, żeby wjechał w ciebie głową. Złota strzałka z koroną przy krawędzi ekranu pokazuje, gdzie jest lider.',

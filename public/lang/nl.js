@@ -98,7 +98,7 @@ export default {
   'pause.place': (b) => `plek ${b}`,
   'pause.out': 'Terug naar menu',
   'set.haptic': 'Trillen',
-  'set.fab': 'Turboknop',
+  'set.controls': 'Besturing',
   'set.sounds': 'Geluiden',
   'set.bg': 'Achtergrond',
   'bg.random': 'Willekeurig',
@@ -112,6 +112,14 @@ export default {
   'bg.hueRandom': 'Elk spel willekeurig',
   'fab.text': 'Sleep de bliksem of tik waar het handig is',
   'fab.reset': 'Herstellen',
+  'ctl.joy': 'Joystick',
+  'ctl.fab': 'Turbo',
+  'joy.free': 'Overal op het scherm',
+  'joy.size': 'Grootte',
+  'joy.dead': 'Dode zone',
+  'joy.smooth': 'Afvlakking',
+  'joy.textFree': 'Tik op het veld om te proberen. Groter is preciezer',
+  'joy.textFixed': 'Tik waar hij moet staan en sleep. Binnen de cirkel: probeer hem',
   'snd.eat': 'Eten',
   'snd.boost': 'Turbo',
   'snd.crash': 'Botsing',
@@ -217,7 +225,7 @@ export default {
 
   // how to play and offline
   'help.touch': 'Raak ergens aan en sleep — dat is je joystick. Houd de bliksem vast om te versnellen: ' +
-    'elke seconde kost 5% van je lengte, minstens 10. Verplaats de bliksem en pas de grootte aan in het pauzemenu.',
+    'elke seconde kost 5% van je lengte, minstens 10. Stel de joystick en de bliksem in via het pauzemenu, ‘Besturing’.',
   'help.mouse': 'De slang kruipt naar de muiscursor. Linkermuisknop of spatie om te versnellen: elke seconde kost 5% van je lengte, ' +
     'minstens 10. De pijltjestoetsen ← → werken ook. Esc pauzeert.',
   'help.cut': 'Snijd een tegenstander af zodat hij met zijn kop tegen jou botst. De gouden pijl met kroon aan de rand van het scherm wijst naar de leider.',
