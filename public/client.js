@@ -1,5 +1,5 @@
-// Клиент: отрисовка, управление, меню; одиночная игра считает мир сама. В совместной мир считает браузер
-// хозяина комнаты (room.js), а свою змейку каждый игрок — у себя; связь между игроками прямая (rtc.js).
+// Client: rendering, controls, menus; the solo game computes its world itself. In a shared game the world is computed by
+// the host's browser (room.js), while each player computes their own snake locally; players connect directly (rtc.js).
 import {
   World, SKINS, TYPES, SKINS_OF, PAL, foodLookOf, GOLD, DIFF, R, TAU, START_MASS, SNAKES_N, FOOD_N, VERSION, segColor, STAGE_R, growR, setStage, MOLT_WAIT,
   radiusOf, spacingOf, countOf, bodyLenOf, foodRadiusOf, followChain, fitLength, clamp, angDiff, keepMass,
@@ -9,13 +9,18 @@ import { Room, runRoom, encodeSelf, FR, FLR, readFood } from './room.js';
 import { host, join, loopback } from './rtc.js';
 import { BACKDROPS, makeBackdrop, drawBackdrop } from './backdrop.js';
 import { EAT, EAT_SLICES, BOOST, CRASH, MOLT, semi } from './sounds.js';
+import { t, has } from './i18n.js';
 
-const TICK_MS = 25;        // комната: 40 шагов и снимков в секунду
-const INTERP_MS = 70;      // чужих змей рисуем с задержкой на пару-тройку снимков — так движение плавное и потеря снимка незаметна
-const SELF_MS = 25;        // как часто шлём хозяину, где своя змейка
-const JOY_R = 44;          // радиус джойстика: чем он меньше, тем короче движение пальца для разворота
+const BOT_NAMES = t('bots');
+const skinName = (sk) => t('skin.' + sk.id);
+const typeName = (ti) => t('type.' + TYPES[ti].id);
 
-// ---------- иконки (Material Icons, Apache 2.0) ----------
+const TICK_MS = 25;        // room: 40 steps and snapshots per second
+const INTERP_MS = 70;      // other snakes are drawn a couple of snapshots behind — this keeps motion smooth and hides a lost snapshot
+const SELF_MS = 25;        // how often we tell the host where our snake is
+const JOY_R = 44;          // joystick radius: the smaller it is, the shorter the finger movement for a U-turn
+
+// ---------- icons (Material Icons, Apache 2.0) ----------
 const ICONS = {
   pause: '<path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/>',
   menu: '<path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/>',
@@ -48,66 +53,66 @@ const hexA = (hex, a) => {
   return `rgba(${n >> 16},${(n >> 8) & 255},${n & 255},${a})`;
 };
 
-// ---------- сохранение ----------
-// xp — накопленные звёзды (имя ключа осталось от уровней)
+// ---------- save data ----------
+// xp — accumulated stars (the key name is left over from levels)
 const save = { best: { easy: 0, medium: 0, hard: 0 }, name: '', skin: 0, sound: true, vol: 1, haptic: true, xp: 0, diff: 'easy', hinted: false,
   stats: { games: 0, kills: 0, eaten: 0, best: 0 } };
-try { Object.assign(save, JSON.parse(localStorage.getItem('zmeigrad') || '{}')); } catch { /* приватный режим */ }
-delete save.daily; // задания дня убраны
+try { Object.assign(save, JSON.parse(localStorage.getItem('zmeigrad') || '{}')); } catch { /* private mode */ }
+delete save.daily; // daily tasks were removed
 if (!SKINS[save.skin]) save.skin = 0;
 if (!DIFF[save.diff]) save.diff = 'easy';
 if (!(save.vol >= 0 && save.vol <= 1)) save.vol = 1;
-// выбранные звуки еды, столкновения и линьки — номера в наборах sounds.js (выбор в паузе, «Звуки»)
+// chosen food, crash and molt sounds — indices into the sets in sounds.js (picked in the pause menu, "Sounds")
 if (!save.snd || typeof save.snd !== 'object') save.snd = {};
-// в 0.21.0 еда была синтезом (0 — «Ням», остальное «пиксельное», владельцу не понравилось): «Ням» сохранить, прочее — на первую запись
+// in 0.21.0 food sounds were synthesized (0 — "Yum", the rest sounded "pixelated" and were dropped): keep "Yum", move the others to the first recording
 if (save.snd.v !== 2) { if ('eat' in save.snd) save.snd.eat = Number(save.snd.eat) === 0 ? EAT.findIndex((e) => e.play) : 0; save.snd.v = 2; }
 for (const [k, set] of [['eat', EAT], ['boost', BOOST], ['crash', CRASH], ['molt', MOLT]]) { const i = Number(save.snd[k]); save.snd[k] = Number.isInteger(i) && set[i] ? i : 0; }
-// кнопка ускорения: размер и место (доли экрана, отдельно для вертикального и горизонтального) — игрок задаёт на паузе
+// boost button: size and position (fractions of the screen, separately for portrait and landscape) — the player sets them in the pause menu
 if (!save.fab || typeof save.fab !== 'object') save.fab = {};
-const persist = () => { try { localStorage.setItem('zmeigrad', JSON.stringify(save)); } catch { /* ничего */ } };
-const myName = () => save.name || 'Игрок';
-const soloName = () => 'Ты'; // одному имя не нужно
-// токен сессии: при переподключении комната отдаёт ту же змейку, а не создаёт вторую
+const persist = () => { try { localStorage.setItem('zmeigrad', JSON.stringify(save)); } catch { /* nothing to do */ } };
+const myName = () => save.name || t('player');
+const soloName = () => t('you'); // playing alone needs no name
+// session token: on reconnect the room hands back the same snake instead of creating a second one
 const TOKEN = (crypto.randomUUID ? crypto.randomUUID() : String(Math.random()).slice(2) + Date.now()).slice(0, 40);
 const hello = (o) => ({ ...o, name: myName(), skin: save.skin, token: TOKEN, v: VERSION });
-// токен хозяина для сайта — свой: TOKEN уходит чужим хозяевам комнат, и им нельзя дать забрать код нашей комнаты
+// a separate host token for the site: TOKEN goes to other rooms' hosts, and they must not be able to take over our room's code
 const HOST_TOKEN = (crypto.randomUUID ? crypto.randomUUID() : String(Math.random()).slice(2) + Date.now()).slice(0, 40);
 
-// ---------- звук (синтез, без файлов) ----------
-// iPhone: звук включается только из «настоящего» жеста (касание отпущено, клик, клавиша), а не из pointerdown;
-// после сворачивания или звонка контекст становится 'interrupted' и сам не просыпается. Беззвучный режим
-// (переключатель сбоку) Web Audio слушается — так решил владелец.
-let actx = null, bus = null, lastEatSound = 0, eatStep = 0; // bus — общий вход звуков: громкость и компрессор
-let audioStuck = 0, resumeBusy = false; // с какого момента жесты не будят контекст; ждём ли ответа resume()
-// контекст побывал в фоне или выпал из 'running': на iPhone такой может отвечать 'running' и молчать —
-// первым же жестом меняем на новый
+// ---------- sound (synthesized; recordings only for eating) ----------
+// iPhone: sound turns on only from a "real" gesture (touch released, click, key), not from pointerdown;
+// after minimizing or a phone call the context becomes 'interrupted' and doesn't wake up by itself. Web Audio obeys
+// the silent mode switch on the side — by design.
+let actx = null, bus = null, lastEatSound = 0, eatStep = 0; // bus — the common input for all sounds: volume and compressor
+let audioStuck = 0, resumeBusy = false; // since when gestures fail to wake the context; whether we're waiting for resume() to answer
+// the context has been in the background or dropped out of 'running': on iPhone such a context may report 'running' and stay silent —
+// swap in a new one on the very first gesture
 let audioStale = false;
 function newAudio() {
   try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch { actx = null; return; }
-  const ctx = actx; let ran = ctx.state === 'running'; // в жесте бывает 'running' сразу, без события
+  const ctx = actx; let ran = ctx.state === 'running'; // in a gesture it can be 'running' right away, without an event
   ctx.onstatechange = () => {
     if (ctx.state === 'running') ran = true;
     else if (ran && ctx === actx && ctx.state !== 'closed') audioStale = true;
   };
-  try { // компрессор: звуки громче (динамик телефона тихий), а наложенные не хрипят
+  try { // compressor: sounds get louder (the phone speaker is quiet) and overlapping ones don't distort
     const comp = actx.createDynamicsCompressor();
     comp.threshold.value = -18; comp.knee.value = 12; comp.ratio.value = 6; comp.attack.value = 0.003; comp.release.value = 0.15;
     bus = actx.createGain(); bus.gain.value = 1;
     bus.connect(comp); comp.connect(actx.destination);
   } catch { bus = null; }
-  try { // пустой отрывок в жесте — старые iOS иначе не открывают вывод
+  try { // an empty clip in a gesture — otherwise old iOS doesn't open the output
     const src = actx.createBufferSource();
     src.buffer = actx.createBuffer(1, 1, 22050);
     src.connect(actx.destination); src.start(0);
   } catch { /* */ }
 }
-// Chrome, Firefox, Edge и встроенные браузеры на iPhone — это WKWebView: Web Audio там молчит, пока страница не
-// сыграла обычный <audio>. Играем беззвучный отрывок в жесте (в Safari и в установленной игре не нужно — там звук и так есть,
-// и беззвучный режим там слушается). В таких браузерах звук играет и в беззвучном режиме.
+// Chrome, Firefox, Edge and in-app browsers on iPhone are WKWebView: Web Audio stays silent there until the page has
+// played a regular <audio>. We play a silent clip in a gesture (not needed in Safari or the installed game — sound works there,
+// and the silent mode switch is obeyed). In these browsers sound plays even in silent mode.
 const UA = navigator.userAgent || '';
 const IOS_WEBVIEW = /iPhone|iPad|iPod/.test(UA) && (/CriOS|FxiOS|EdgiOS|OPiOS|YaBrowser|GSA\//.test(UA) || !/Safari\//.test(UA));
 let htmlAudio = null;
-function silentWav() { // 0,25 с тишины, 8 кГц, 8 бит
+function silentWav() { // 0.25 s of silence, 8 kHz, 8 bit
   const n = 2000, b = new Uint8Array(44 + n), v = new DataView(b.buffer);
   const str = (o, t) => { for (let i = 0; i < t.length; i++) b[o + i] = t.charCodeAt(i); };
   str(0, 'RIFF'); v.setUint32(4, 36 + n, true); str(8, 'WAVEfmt '); v.setUint32(16, 16, true); v.setUint16(20, 1, true);
@@ -117,7 +122,7 @@ function silentWav() { // 0,25 с тишины, 8 кГц, 8 бит
 }
 function unlockHtmlAudio() {
   if (!IOS_WEBVIEW || document.hidden) return;
-  if (!soundOn()) { if (htmlAudio) htmlAudio.pause(); return; } // звук выключен — чужую музыку не глушим
+  if (!soundOn()) { if (htmlAudio) htmlAudio.pause(); return; } // sound is off — don't mute other apps' music
   if (!htmlAudio) {
     try {
       htmlAudio = document.createElement('audio');
@@ -131,24 +136,24 @@ function unlockHtmlAudio() {
 let resumeTry = 0;
 function wakeAudio() {
   if (!actx || actx.state === 'running' || resumeBusy) return;
-  // прерванный iOS-контекст может не ответить на resume() вовсе — ждём не дольше секунды, иначе жесты больше не помогут
+  // an interrupted iOS context may never answer resume() — wait no longer than a second, or gestures won't help anymore
   const n = ++resumeTry, done = () => { if (n === resumeTry) resumeBusy = false; };
   resumeBusy = true;
   setTimeout(done, 1000);
   try { Promise.resolve(actx.resume()).catch(() => {}).finally(done); } catch { done(); }
 }
-function replaceAudio() { // только из жеста: старый контекст закрыть (iOS держит их не больше ~4), сделать новый
+function replaceAudio() { // only from a gesture: close the old context (iOS keeps no more than ~4) and make a new one
   const old = actx; actx = null;
   if (old) {
     try { if (old.close) Promise.resolve(old.close()).catch(() => {}); else old.suspend(); } catch { try { old.suspend(); } catch { /* */ } }
   }
   newAudio(); audioStuck = 0; audioStale = false; resumeTry++; resumeBusy = false;
 }
-function ensureAudio() { // только из жестов: pointerup / touchend / click / keydown
+function ensureAudio() { // only from gestures: pointerup / touchend / click / keydown
   unlockHtmlAudio();
-  if (!actx || (audioStale && !document.hidden)) replaceAudio(); // после фона или прерывания старому контексту не верим
+  if (!actx || (audioStale && !document.hidden)) replaceAudio(); // after the background or an interruption the old context isn't trusted
   if (!actx || actx.state === 'running') { audioStuck = 0; return; }
-  // iOS 17 иногда не будит прерванный контекст: resume() уже ответил, а жесты не помогают дольше 1,5 с — новый
+  // iOS 17 sometimes doesn't wake an interrupted context: resume() has answered, but gestures don't help for over 1.5 s — make a new one
   const now = performance.now();
   if (!audioStuck) audioStuck = now;
   else if (!resumeBusy && now - audioStuck > 1500) replaceAudio();
@@ -158,17 +163,17 @@ function ensureAudio() { // только из жестов: pointerup / touchend
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) {
     if (htmlAudio) htmlAudio.pause();
-    if (actx && IOS) audioStale = true; // iPhone после сворачивания или другого приложения бывает «running», но молчит
-  } else wakeAudio(); // до первого касания — хоть старым контекстом: после звонка iOS часто будит и без жеста
+    if (actx && IOS) audioStale = true; // after minimizing or switching apps an iPhone context can be "running" yet silent
+  } else wakeAudio(); // before the first touch — at least with the old context: after a call iOS often wakes it even without a gesture
 });
 const soundOn = () => save.sound && save.vol > 0;
 const canSound = () => soundOn() && actx && (actx.state === 'running' || resumeBusy);
-const EAT_STEPS = [0, 2, 4, 7, 9, 12, 14, 16]; // полутоны от ре первой октавы
-const eatPitch = (step) => semi(294, EAT_STEPS[step]); // нота крошки: в игре и в пробе на паузе одна
-// pan — где звучит: −1 слева … 1 справа (события на арене — с той стороны экрана, где случились)
+const EAT_STEPS = [0, 2, 4, 7, 9, 12, 14, 16]; // semitones from D4
+const eatPitch = (step) => semi(294, EAT_STEPS[step]); // a crumb's note: the same in the game and in the pause-menu preview
+// pan — where it sounds: −1 left … 1 right (arena events come from the side of the screen where they happened)
 function tone(f0, f1, dur, vol, type = 'sine', delay = 0, pan = 0) {
-  if (!canSound()) return; // спящему контексту не копить звуки
-  vol *= save.vol * save.vol; // громкость из настройки — по квадрату, так ползунок ощущается ровнее
+  if (!canSound()) return; // a sleeping context shouldn't pile up sounds
+  vol *= save.vol * save.vol; // volume from the setting, squared — so the slider feels more even
   const t = actx.currentTime + delay;
   const o = actx.createOscillator(), g = actx.createGain();
   o.type = type;
@@ -182,9 +187,9 @@ function tone(f0, f1, dur, vol, type = 'sine', delay = 0, pan = 0) {
   out.connect(bus || actx.destination);
   o.start(t); o.stop(t + dur + 0.02);
 }
-// общее короткое эхо-«комната» (одно на контекст): часть звука уходит туда и тихо повторяется
+// a shared short "room" echo (one per context): part of the sound goes there and quietly repeats
 function roomOf(c) {
-  if ('room' in c) return c.room; // null — не вышло, не пробовать на каждой ноте
+  if ('room' in c) return c.room; // null — it failed, don't retry on every note
   try {
     const d = c.createDelay(1), fb = c.createGain(), wet = c.createGain(), lp = c.createBiquadFilter();
     d.delayTime.value = 0.09; fb.gain.value = 0.32; wet.gain.value = 0.35; lp.type = 'lowpass'; lp.frequency.value = 3000;
@@ -198,8 +203,8 @@ function sendOut(g, wet) {
   const r = wet && roomOf(actx);
   if (r) { const w = actx.createGain(); w.gain.value = wet; g.connect(w); w.connect(r); }
 }
-// нота с атакой a и спадом до dur; to — куда скользит высота; wet — доля в эхо
-// lp — фильтр сверху (мягче пила и квадрат), vib — [частота, глубина в центах] дрожи
+// a note with attack a and decay until dur; to — where the pitch glides; wet — share sent to the echo
+// lp — a low-pass filter (softer sawtooth and square), vib — [rate, depth in cents] of vibrato
 function note(f, { type = 'sine', vol = 0.2, a = 0.004, dur = 0.2, delay = 0, to = 0, wet = 0, detune = 0, lp = 0, vib = null } = {}) {
   if (!canSound()) return;
   vol *= save.vol * save.vol;
@@ -213,19 +218,19 @@ function note(f, { type = 'sine', vol = 0.2, a = 0.004, dur = 0.2, delay = 0, to
   src.connect(g); sendOut(g, wet);
   o.start(t); o.stop(t + dur + 0.05);
 }
-const SND = { n: note, h: (o) => hiss(o) }; // кирпичики для наборов sounds.js
-// записи хруста (sounds.js → EAT_SLICES): файл грузится один раз при первом жесте, буфер годится любому контексту
+const SND = { n: note, h: (o) => hiss(o) }; // building blocks for the sets in sounds.js
+// crunch recordings (sounds.js → EAT_SLICES): the file loads once on the first gesture, the buffer works with any context
 let eatBuf = null, eatLoading = false, eatFail = -1e9, eatVoice = null, lastSlice = '';
 function loadEat() {
-  if (eatBuf || eatLoading || !actx || !soundOn() || performance.now() - eatFail < 30000) return; // не вышло — не чаще раза в 30 с
+  if (eatBuf || eatLoading || !actx || !soundOn() || performance.now() - eatFail < 30000) return; // it failed — retry no more than once every 30 s
   eatLoading = true;
   const c = actx;
   fetch('sfx/eat.wav').then((r) => (r.ok ? r.arrayBuffer() : Promise.reject(r.status)))
-    .then((ab) => new Promise((ok, no) => { const p = c.decodeAudioData(ab, ok, no); if (p && p.catch) p.catch(no); })) // старый Safari — только колбэки
-    .then((b) => { eatBuf = b; }).catch(() => { eatFail = performance.now(); /* пока нет файла — играет «Ням» */ }).finally(() => { eatLoading = false; });
+    .then((ab) => new Promise((ok, no) => { const p = c.decodeAudioData(ab, ok, no); if (p && p.catch) p.catch(no); })) // old Safari — callbacks only
+    .then((b) => { eatBuf = b; }).catch(() => { eatFail = performance.now(); /* until the file is loaded, "Yum" plays */ }).finally(() => { eatLoading = false; });
 }
-// укус из набора: случайный отрезок (не тот же, что прошлый), высота с разбросом, подряд чуть выше;
-// прошлый укус быстро гаснет — при частой еде хруст не сливается в кашу
+// a bite from the set: a random slice (not the same as last time), pitch with some spread, a bit higher in a row;
+// the previous bite fades out fast — with frequent eating the crunches don't blur into mush
 function playBite(v, step, delay = 0) {
   if (!canSound()) return;
   const set = Array.isArray(v.sample) ? v.sample[(Math.random() * v.sample.length) | 0] : v.sample, list = EAT_SLICES[set];
@@ -244,7 +249,7 @@ function playBite(v, step, delay = 0) {
 }
 function playEat(i, step) {
   const v = EAT[i];
-  if (v.play || !eatBuf) { (v.play ? v : EAT.find((e) => e.play)).play(SND, eatPitch(step)); return; } // записи ещё не загрузились
+  if (v.play || !eatBuf) { (v.play ? v : EAT.find((e) => e.play)).play(SND, eatPitch(step)); return; } // the recordings haven't loaded yet
   playBite(v, step);
   if (v.twice) playBite(v, step, v.twice);
 }
@@ -256,7 +261,7 @@ function noiseBuffer() {
   }
   return noiseBuf;
 }
-// шорох: шум через фильтр (f → f1 за dur)
+// rustle: noise through a filter (f → f1 over dur)
 function hiss({ vol = 0.2, dur = 0.05, delay = 0, type = 'bandpass', f = 2000, f1 = 0, q = 1, a = 0.002 } = {}) {
   if (!canSound()) return;
   vol *= save.vol * save.vol;
@@ -268,38 +273,38 @@ function hiss({ vol = 0.2, dur = 0.05, delay = 0, type = 'bandpass', f = 2000, f
   src.start(t, Math.random() * 0.5); src.stop(t + dur + 0.05);
 }
 const sfx = {
-  // еда подряд — каждая крошка на ступень выше (пентатоника), пауза полсекунды — снова снизу
+  // food in a row — each crumb a step higher (pentatonic), after a half-second pause from the bottom again
   eat() {
     const now = performance.now();
     if (now - lastEatSound < 70) return;
     eatStep = now - lastEatSound < 500 ? Math.min(eatStep + 1, EAT_STEPS.length - 1) : 0;
     lastEatSound = now;
-    playEat(save.snd.eat, eatStep); // звук выбирает игрок в паузе
+    playEat(save.snd.eat, eatStep); // the player picks the sound in the pause menu
     haptic('eat');
   },
-  boost() { BOOST[save.snd.boost].start(SND); }, // щелчок молнии — звук выбирает игрок в паузе
-  // проскочил впритирку мимо чужого тела — короткий свист с той стороны
+  boost() { BOOST[save.snd.boost].start(SND); }, // lightning bolt click — the player picks the sound in the pause menu
+  // slipped past another body by a hair — a short whistle from that side
   near(pan) { tone(750, 1350, 0.11, 0.08, 'sine', 0, pan); tone(950, 1600, 0.08, 0.04, 'sine', 0.05, pan); haptic('near'); },
-  // чужая змейка погибла на экране — глухой хлопок с её стороны, издалека тише
+  // another snake died on screen — a dull pop from its side, quieter from afar
   pop(pan, k) { tone(420, 160, 0.16, 0.12 * k, 'triangle', 0, pan); tone(900, 300, 0.07, 0.05 * k, 'sine', 0.02, pan); },
-  // чужую бабочку поймали на экране — тихий перезвон с той стороны
+  // someone caught a butterfly on screen — a soft chime from that side
   chime(pan, k) { [587, 784].forEach((f, i) => tone(f, f * 1.2, 0.08, 0.06 * k, 'sine', i * 0.05, pan)); },
-  // громкости — до компрессора; частоты не ниже ~150 Гц: ниже динамик телефона почти не играет
-  // своя змейка разбилась — звук выбирает игрок в паузе (sounds.js)
+  // volumes are before the compressor; frequencies no lower than ~150 Hz: the phone speaker barely plays anything lower
+  // your own snake crashed — the player picks the sound in the pause menu (sounds.js)
   die() { CRASH[save.snd.crash].play(SND); haptic('die'); },
   win() { tone(330, 660, 0.14, 0.25, 'triangle'); tone(494, 988, 0.18, 0.22, 'triangle', 0.12); haptic('kill'); },
   combo(n) { for (let i = 0; i < n + 1; i++) tone(330 + i * 80, 660 + i * 110, 0.12, 0.22, 'triangle', i * 0.08); haptic('combo'); },
   title() { [262, 330, 392, 523].forEach((f, i) => tone(f, f * 1.01, 0.18, 0.22, 'triangle', i * 0.09)); haptic('title'); },
-  // своя линька — звук выбирает игрок в паузе (sounds.js); каждая следующая ступень на тон выше
+  // your own molt — the player picks the sound in the pause menu (sounds.js); each next stage a tone higher
   molt(st = 1) { MOLT[save.snd.molt].play(SND, Math.max(1, st), MOLT_CHARGE); haptic('molt'); },
-  // чужая линька на экране — то же тихо и с её стороны
+  // someone else's molt on screen — the same, quietly and from its side
   moltFar(pan, k) { tone(200, 600, 0.3, 0.05 * k, 'triangle', 0, pan); tone(523, 530, 0.18, 0.06 * k, 'sine', MOLT_CHARGE, pan); },
   level() { [196, 262, 330, 392, 523, 659].forEach((f, i) => tone(f, f, 0.22, 0.12, 'square', i * 0.08)); haptic('title'); },
   fly() { [440, 587, 784].forEach((f, i) => tone(f, f * 1.25, 0.09, 0.18, 'sine', i * 0.05)); haptic('fly'); },
 };
-// шум ускорения: пока держишь молнию — шорох, с каждой секундой выше и ярче
+// boost noise: while you hold the bolt — a rustle, higher and brighter with every second
 let whoosh = null, noiseBuf = null; // { srcs, g, ctx, vol }
-// звук набора, пока молния зажата (BOOST[i].loop): общий вход g — громкость и плавное включение/выключение
+// the set's sound while the bolt is held (BOOST[i].loop): common input g — volume and a smooth fade in/out
 function startLoop(v, vol) {
   const t = actx.currentTime, g = actx.createGain();
   g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(vol, t + 0.06);
@@ -307,35 +312,35 @@ function startLoop(v, vol) {
   g.connect(bus || actx.destination);
   return { srcs, g, ctx: actx, vol };
 }
-let boostPreview = null; // проба рывка в «Звуках»: { w, timer }
+let boostPreview = null; // boost preview in "Sounds": { w, timer }
 function stopBoostPreview() { if (boostPreview) { clearTimeout(boostPreview.timer); stopLoop(boostPreview.w); boostPreview = null; } }
 function stopLoop(w) {
   const t = w.ctx.currentTime;
   w.g.gain.cancelScheduledValues(t); w.g.gain.setValueAtTime(w.g.gain.value, t); w.g.gain.linearRampToValueAtTime(0, t + 0.12);
   for (const s of w.srcs) { try { s.stop(t + 0.15); } catch { /* */ } }
 }
-// пока держишь молнию — звук выбранного набора (по умолчанию ветер: шорох, который за полторы секунды выше и ярче)
+// while you hold the bolt — the chosen set's sound (wind by default: a rustle that gets higher and brighter over a second and a half)
 function setWhoosh(on) {
   if (on && (!soundOn() || !actx || actx.state !== 'running')) on = false;
   if (!on) { if (whoosh) { stopLoop(whoosh); whoosh = null; } return; }
   const vol = 0.05 * save.vol * save.vol;
-  if (whoosh && whoosh.ctx !== actx) whoosh = null; // контекст пересоздали (iOS) — старые узлы молчат
+  if (whoosh && whoosh.ctx !== actx) whoosh = null; // the context was recreated (iOS) — the old nodes are silent
   if (whoosh) {
-    if (whoosh.vol !== vol) { whoosh.g.gain.setTargetAtTime(vol, actx.currentTime, 0.05); whoosh.vol = vol; } // громкость поменяли на паузе
+    if (whoosh.vol !== vol) { whoosh.g.gain.setTargetAtTime(vol, actx.currentTime, 0.05); whoosh.vol = vol; } // the volume was changed in the pause menu
     return;
   }
   const v = BOOST[save.snd.boost];
-  if (!v.loop) return; // «Щелчок» — без звука в рывке
+  if (!v.loop) return; // "Click" — no sound during the boost
   try { whoosh = startLoop(v, vol); } catch { whoosh = null; }
 }
 
-// ---------- вибрация ----------
-// Только Android (navigator.vibrate). На iPhone веб вибрировать не может: vibrate там нет, а лазейку через щелчок
-// переключателя <input switch> Apple закрыла в iOS 26.5 — у владельца не сработала ни в Chrome, ни по нажатию.
+// ---------- vibration ----------
+// Android only (navigator.vibrate). On iPhone the web can't vibrate: there's no vibrate, and Apple closed the loophole of toggling
+// an <input switch> in iOS 26.5 — it worked neither in Chrome nor on tap when tested.
 const IOS = /iPhone|iPad|iPod/.test(UA) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 const CAN_VIBRATE = !IOS && typeof navigator.vibrate === 'function';
-const hasHaptic = () => isTouch && CAN_VIBRATE; // isTouch объявлен ниже — спрашиваем при вызове
-// паттерн: мс вибрации, паузы, вибрации…
+const hasHaptic = () => isTouch && CAN_VIBRATE; // isTouch is declared below — ask at call time
+// pattern: ms of vibration, pause, vibration…
 const HAPTIC = {
   eat: 8, boost: 14, near: 10,
   fly: [8, 35, 8, 35, 8],
@@ -349,21 +354,21 @@ const lastHap = {};
 function haptic(kind) {
   if (!hasHaptic() || !save.haptic || document.hidden) return;
   const now = performance.now();
-  if (now - (lastHap[kind] || 0) < 110) return; // одно и то же подряд — не жужжать
+  if (now - (lastHap[kind] || 0) < 110) return; // the same thing in a row — don't buzz
   lastHap[kind] = now;
   try { navigator.vibrate(HAPTIC[kind]); } catch { /* */ }
 }
 
-// проверка звука: что с ним на этом устройстве — показываем после включения звука на паузе
+// sound check: what's going on with sound on this device — shown after turning sound on in the pause menu
 function audioStatus() {
-  if (!actx) return 'Звук не запустился: браузер не дал его включить';
-  if (actx.state === 'running') return 'Звук работает. Не слышно — проверь беззвучный режим и громкость';
-  return `Звук не включился (${actx.state}). Коснись экрана ещё раз`;
+  if (!actx) return t('audio.blocked');
+  if (actx.state === 'running') return t('audio.ok');
+  return t('audio.off', actx.state);
 }
 
-// ---------- прогрессия: звёзды открывают раскраски ----------
-// Звёзды копятся за всё время: еда, победы, линьки, места в таблице. Тратить их не нужно — раскраска открывается,
-// когда накоплено её число звёзд.
+// ---------- progression: stars unlock skins ----------
+// Stars accumulate over all time: food, wins, molts, leaderboard places. They're never spent — a skin unlocks
+// once its number of stars has been reached.
 const stars = () => Math.floor(save.xp);
 const unlocked = (sk) => sk.stars <= save.xp;
 const nextSkin = () => SKINS.filter((x) => !unlocked(x)).sort((a, b) => a.stars - b.stars)[0] || null;
@@ -374,22 +379,22 @@ function addXp(n) {
   if (run) run.xp += n;
   const fresh = SKINS.filter((x) => x.stars > before && x.stars <= save.xp);
   if (fresh.length) {
-    if (run) run.unlocked.push(...fresh.map((x) => x.name));
-    if (mode && ui === 'play') flashMe(2, sfx.level); // какая — покажет окно после игры
+    if (run) run.unlocked.push(...fresh);
+    if (mode && ui === 'play') flashMe(2, sfx.level); // which one — the after-game dialog will show
     persist();
   }
 }
 
-// ---------- холст ----------
+// ---------- canvas ----------
 const canvas = $('c'), ctx = canvas.getContext('2d');
-let W = 0, H = 0, DPR = 1, tall = false, redraw = false; // tall — страница высотой с экран (см. resize), redraw — холст очищен
-// Установленная игра на iPhone (статус-бар поверх страницы): окно короче экрана примерно на высоту статус-бара,
-// и снизу остаётся пустая полоса. Там холст тянем на всю высоту экрана (screen у iOS — всегда в портретной ориентации).
+let W = 0, H = 0, DPR = 1, tall = false, redraw = false; // tall — the page is as tall as the screen (see resize), redraw — the canvas was cleared
+// Installed game on iPhone (status bar over the page): the window is shorter than the screen by about the status bar height,
+// leaving an empty strip at the bottom. There the canvas is stretched to the full screen height (iOS reports screen in portrait).
 const IS_PWA = navigator.standalone === true ||
   (window.matchMedia && matchMedia('(display-mode: standalone), (display-mode: fullscreen)').matches);
 const IOS_PWA = IS_PWA && /iPhone|iPod/.test(navigator.userAgent || '');
 if (IS_PWA) document.documentElement.classList.add('pwa');
-// высота экрана в текущей ориентации (screen у iOS — всегда в портретной)
+// screen height in the current orientation (iOS reports screen in portrait)
 function screenHeight() {
   return window.innerHeight >= window.innerWidth ? Math.max(screen.width, screen.height) : Math.min(screen.width, screen.height);
 }
@@ -398,19 +403,19 @@ function fullHeight() {
   if (!IOS_PWA || !screen.width || !screen.height) return ih;
   const portrait = ih >= iw, sh = portrait ? Math.max(screen.width, screen.height) : Math.min(screen.width, screen.height);
   const sw = portrait ? Math.min(screen.width, screen.height) : Math.max(screen.width, screen.height);
-  return Math.abs(sw - iw) < 2 && sh > ih && sh - ih < 120 ? sh : ih; // только если ширина совпала и разница — полоса, а не клавиатура
+  return Math.abs(sw - iw) < 2 && sh > ih && sh - ih < 120 ? sh : ih; // only if the width matches and the difference is a strip, not the keyboard
 }
-// размеры для разбора, если поле снова не на весь экран (видно в «Как играть» в установленной игре на iPhone)
+// sizes for debugging, in case the field isn't full-screen again (shown in "How to play" in the installed game on iPhone)
 function screenInfo() {
   const m = (css) => { const d = document.createElement('div'); d.style.cssText = `position:fixed;left:0;top:0;width:1px;visibility:hidden;${css}`;
     document.body.appendChild(d); const h = Math.round(d.getBoundingClientRect().height); d.remove(); return h; };
   const vv = window.visualViewport;
-  return `экран ${screen.width}×${screen.height} · окно ${innerWidth}×${innerHeight} · vv ${vv ? Math.round(vv.height) : '-'} · ` +
-    `doc ${document.documentElement.clientHeight} · поле ${H} · 100vh ${m('height:100vh')} · lvh ${m('height:100lvh')} · ` +
-    `safe ${m('height:env(safe-area-inset-top)')}/${m('height:env(safe-area-inset-bottom)')} · прокр ${Math.round(scrollY)} · ${document.documentElement.className}`;
+  return `screen ${screen.width}×${screen.height} · window ${innerWidth}×${innerHeight} · vv ${vv ? Math.round(vv.height) : '-'} · ` +
+    `doc ${document.documentElement.clientHeight} · field ${H} · 100vh ${m('height:100vh')} · lvh ${m('height:100lvh')} · ` +
+    `safe ${m('height:env(safe-area-inset-top)')}/${m('height:env(safe-area-inset-bottom)')} · scroll ${Math.round(scrollY)} · ${document.documentElement.className}`;
 }
-// страница выше окна (класс tall) — не дать ей уехать; но пока открыта клавиатура над полем ввода (ник, код комнаты),
-// не мешать iOS держать это поле на виду
+// the page is taller than the window (class tall) — don't let it scroll away; but while the keyboard is open over an input (name, room code),
+// don't stop iOS from keeping that input in view
 function unscroll() {
   if (!window.scrollY) return;
   const typing = document.activeElement?.matches('textarea, input:not([type=range], [type=checkbox], [type=radio], [type=button])');
@@ -418,7 +423,7 @@ function unscroll() {
   if (typing && (!vv || vv.height < window.innerHeight - 80)) return;
   window.scrollTo(0, 0);
 }
-// вырезы экрана (чёлка, полоса «домой»): стрелка лидера стоит у самого края, но не под ними
+// screen cutouts (notch, home indicator): the leader arrow sits right at the edge, but not under them
 let safe = { t: 0, r: 0, b: 0, l: 0 };
 function readSafe() {
   const d = document.createElement('div');
@@ -431,24 +436,24 @@ function resize() {
   DPR = Math.min(window.devicePixelRatio || 1, 2);
   readSafe();
   W = window.innerWidth; H = fullHeight();
-  // холст, интерфейс, затемнение диалогов и экраны меню — одной высоты (CSS: var(--app-h)). В установленной игре на iPhone
-  // раскладка по высоте экрана, даже если окно сейчас и само с экран: iOS то укорачивает окно на статус-бар, то растягивает
-  // вслед за страницей, и от этого раскладка меняться не должна (в 0.12.1 перекладка по кругу мигала). С клавиатурой — по окну.
+  // canvas, UI, dialog scrim and menu screens share one height (CSS: var(--app-h)). In the installed game on iPhone
+  // the layout follows the screen height even if the window is currently screen-sized: iOS keeps shortening the window by the status bar
+  // and stretching it after the page, and the layout must not change because of that (in 0.12.1 relayout in a loop flickered). With the keyboard — by the window.
   tall = H !== window.innerHeight || (IOS_PWA && H === screenHeight());
   document.documentElement.style.setProperty('--app-h', tall ? `${H}px` : '');
   document.documentElement.classList.toggle('tall', tall);
   unscroll();
-  // холст пересоздаём, только если размер правда изменился: присваивание очищает картинку (на паузе она не перерисовывается)
+  // recreate the canvas only if the size really changed: assigning it clears the picture (in the pause menu it isn't redrawn)
   const cw = Math.round(W * DPR), ch = Math.round(H * DPR);
   if (canvas.width !== cw || canvas.height !== ch) { canvas.width = cw; canvas.height = ch; redraw = true; }
 }
 window.addEventListener('resize', resize);
 resize();
-// iOS в установленной игре не всегда присылает resize: на старте окно бывает ещё высотой с экран, а потом молча
-// укорачивается на статус-бар — и поле с меню так и остаются по короткому окну (пустая полоса снизу).
-// Поэтому размеры ещё и сверяем сами (из главного цикла и при возврате в игру): если ширина или нужная высота
-// не те, по которым разложено, — раскладываем заново. Саму высоту окна не сравниваем: в растянутой странице iOS
-// то и дело меняет её между экраном и экраном без статус-бара, и перекладка по кругу мигала (0.12.1).
+// in the installed game iOS doesn't always send resize: at startup the window can still be screen-tall, then silently
+// shrinks by the status bar — and the field and menus stay laid out for the short window (an empty strip at the bottom).
+// So we also check the sizes ourselves (from the main loop and when returning to the game): if the width or the needed height
+// differ from the laid-out ones — lay out again. The window height itself isn't compared: in a stretched page iOS
+// keeps switching it between the screen and the screen minus the status bar, and relayout in a loop flickered (0.12.1).
 let sizeCheckT = -Infinity;
 function checkSize(now, force = false) {
   if (!force && now - sizeCheckT < 500) return;
@@ -462,12 +467,12 @@ window.addEventListener('pageshow', relayout);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) setTimeout(relayout, 300); });
 
 const OUTSIDE = '#2B1715', EDGE = '#FFB4AB';
-// обводка своей змейки: белая 60 % поверх поля; силуэты бусин накладываются друг на друга, поэтому цвет — уже смешанный с полем, плотный
+// outline of your own snake: white 60% over the field; bead silhouettes overlap, so the color is already blended with the field and solid
 const MINE_RGB = 162;
 const ON = '#E3E8F5', PRIMARY = '#8EB8FF', TERTIARY = '#DDBCE0', GOLD_C = '#FFD447', REVENGE = '#FF6B5E';
-// короны тройки лидеров: золото, серебро, бронза — [заливка, обводка, размер от золотой]
+// crowns of the top three: gold, silver, bronze — [fill, stroke, size relative to gold]
 const CROWNS = [[GOLD_C, '#8a5a00', 1], ['#DCE3EC', '#5E6B7A', 0.9], ['#E0975A', '#6E3A12', 0.82]];
-// фон арены: при каждом старте игры случайный, не тот же, что в прошлый раз (?bg=<вид> — закрепить, для проверок)
+// arena backdrop: random on every game start, not the same as last time (?bg=<kind> pins it, for testing)
 const BG_Q = new URLSearchParams(location.search).get('bg'), BG_FORCED = BACKDROPS.includes(BG_Q) ? BG_Q : null;
 let backdrop = null;
 function pickBackdrop() {
@@ -476,7 +481,7 @@ function pickBackdrop() {
   backdrop = makeBackdrop(ctx, kind, Math.floor(Math.random() * 1e9), R);
   return backdrop;
 }
-// спрайты: бусины змейки, голова, светящаяся еда — по одному на цвет палитры
+// sprites: snake beads, head, glowing food — one per palette color
 function shade(hex, k) {
   const n = parseInt(hex.slice(1), 16);
   let r = n >> 16, g = (n >> 8) & 255, b = n & 255;
@@ -484,20 +489,20 @@ function shade(hex, k) {
   return `rgb(${r | 0},${g | 0},${b | 0})`;
 }
 const SPR = 64;
-// спрайты рисуются при первом обращении к цвету: цветов в палитре около сотни, на арене видна малая часть
+// sprites are drawn the first time a color is used: the palette has about a hundred colors, only a few are visible in the arena
 const lazy = (size, draw) => { const cache = []; return (k) => cache[k] || (cache[k] = (() => {
   const c = document.createElement('canvas'); c.width = c.height = size;
   draw(c.getContext('2d'), size / 2, PAL[k] || PAL[0]); return c;
 })()); };
-// ---------- виды змеек: бусина и голова каждого вида ----------
-// Бусина рисуется в спрайт один раз на вид, цвет и узор; смотрит вдоль +x (к голове), радиус BR. Следующая бусина
-// перекрывает переднюю часть предыдущей — видна задняя дужка, поэтому узоры (пятна, лампочки) сдвинуты назад.
-const BR = 47, BEAD_U = 48, HU = 24, HE = 72; // бусина: радиус в спрайте; голова: радиус тела и половина спрайта
-// половина спрайта бусины по видам: бусинкам хватает самой бусины, гребню, лапкам и плавникам нужно место, свечению неона — ещё больше
+// ---------- snake types: each type's bead and head ----------
+// A bead is drawn into a sprite once per type, color and pattern; it faces +x (toward the head), radius BR. The next bead
+// covers the front part of the previous one — the back arc is what shows, so the patterns (spots, lights) are shifted back.
+const BR = 47, BEAD_U = 48, HU = 24, HE = 72; // bead: radius in the sprite; head: body radius and half the sprite
+// half the bead sprite by type: beads need only the bead itself, the crest, legs and fins need room, the neon glow even more
 const BEAD_E = { beads: 48, neon: 92 };
 const circ = (g, x, y, r, fill) => { g.beginPath(); g.arc(x, y, r, 0, TAU); g.fillStyle = fill; g.fill(); };
-// BEAD_U — сколько точек спрайта на единицу радиуса при отрисовке (бусина чуть меньше, как раньше)
-// бусина-чешуйка (вид «Бусинки»), тёмная дужка — по заднему краю
+// BEAD_U — sprite dots per unit of radius when drawing (the bead is a bit smaller, as before)
+// a scale bead (the Beads type), a dark arc along the back edge
 function ball(g, R, col, rear = true) {
   const w = R * 0.09;
   circ(g, 0, 0, R, shade(col, -0.5));
@@ -506,11 +511,11 @@ function ball(g, R, col, rear = true) {
   circ(g, 0, 0, R - w, gr);
   if (rear) { g.beginPath(); g.arc(0, 0, R * 0.62, Math.PI - 1, Math.PI + 1); g.lineWidth = w; g.lineCap = 'round'; g.strokeStyle = shade(col, -0.35); g.stroke(); }
 }
-// v — вариант узора по номеру бусины (VARIANTS вида), acc — цвет узора
-// full — бусина с узором вида (с 3-й ступени); без него — тот же вид попроще: без узора и блика
+// v — pattern variant by bead index (the type's VARIANTS), acc — pattern color
+// full — a bead with the type's pattern (from stage 3); without it — the same type, simpler: no pattern and no glint
 const BEADS = {
   beads: (g, R, col, v, acc, full) => ball(g, R, col, full),
-  fish: (g, R, col, v, acc, full) => { // чешуйка-капелька острым концом назад
+  fish: (g, R, col, v, acc, full) => { // a droplet scale with the sharp end back
     const drop = (sc) => { g.beginPath(); g.arc(0, 0, R * sc, -2.25, 2.25); g.lineTo(-R * 1.4 * sc, 0); g.closePath(); };
     drop(1); g.fillStyle = shade(col, -0.5); g.fill();
     const gr = g.createRadialGradient(R * 0.35, 0, R * 0.1, 0, 0, R * 1.1);
@@ -519,25 +524,25 @@ const BEADS = {
     if (!full) return;
     g.beginPath(); g.arc(0, 0, R * 0.74, -1.1, 1.1); g.lineWidth = R * 0.1; g.lineCap = 'round'; g.strokeStyle = shade(col, 0.55); g.stroke();
   },
-  caterpillar: (g, R, col, v, acc, full) => { // лапки по бокам и блик
+  caterpillar: (g, R, col, v, acc, full) => { // legs on the sides and a glint
     for (const sd of [-1, 1]) circ(g, -R * 0.12, sd * R * 0.96, R * 0.27, shade(acc || col, -0.5));
     ball(g, R * 0.97, col, false);
     if (full) circ(g, -R * 0.5, -R * 0.35, R * 0.16, 'rgba(255,255,255,0.5)');
   },
-  dots: (g, R, col, v, acc, full) => { // пятна: через бусину одно и два
+  dots: (g, R, col, v, acc, full) => { // spots: one and two on alternating beads
     ball(g, R, col, false);
     if (!full) return;
     if (v) circ(g, -R * 0.52, 0, R * 0.26, acc);
     else { circ(g, -R * 0.4, -R * 0.55, R * 0.2, acc); circ(g, -R * 0.4, R * 0.55, R * 0.2, acc); }
   },
-  dragon: (g, R, col, v, acc, full) => { // гребень по спине
+  dragon: (g, R, col, v, acc, full) => { // a crest along the back
     ball(g, R, col);
     if (!full) return;
     g.beginPath(); g.moveTo(R * 0.35, -R * 0.3); g.lineTo(-R * 1.12, 0); g.lineTo(R * 0.35, R * 0.3); g.closePath();
     const gr = g.createLinearGradient(R * 0.35, 0, -R, 0); gr.addColorStop(0, shade(acc, 0.35)); gr.addColorStop(1, acc);
     g.fillStyle = gr; g.fill(); g.lineWidth = R * 0.08; g.lineJoin = 'round'; g.strokeStyle = shade(acc, -0.55); g.stroke();
   },
-  tiger: (g, R, col, v, acc, full) => { // полоска-уголок
+  tiger: (g, R, col, v, acc, full) => { // a chevron stripe
     ball(g, R, col, false);
     if (!full) return;
     g.save(); g.beginPath(); g.arc(0, 0, R * 0.91, 0, TAU); g.clip();
@@ -545,7 +550,7 @@ const BEADS = {
     g.lineTo(-R * 0.4, R); g.lineTo(-R * 0.78, 0); g.lineTo(-R * 0.4, -R); g.closePath();
     g.fillStyle = acc; g.fill(); g.restore();
   },
-  robot: (g, R, col, v, acc, full) => { // кубик с заклёпками и лампочкой
+  robot: (g, R, col, v, acc, full) => { // a cube with rivets and a light
     const h = R * 0.88;
     g.beginPath(); g.roundRect(-h, -h, h * 2, h * 2, R * 0.28); g.fillStyle = shade(col, -0.55); g.fill();
     const gr = g.createLinearGradient(h, 0, -h, 0); gr.addColorStop(0, shade(col, 0.35)); gr.addColorStop(1, shade(col, -0.15));
@@ -554,7 +559,7 @@ const BEADS = {
     if (!full) return;
     g.save(); g.shadowBlur = R * 0.8; g.shadowColor = acc; circ(g, -h * 0.55, 0, R * (v ? 0.14 : 0.2), acc); g.restore();
   },
-  neon: (g, R, col, v, acc, full) => { // светящееся кольцо на тёмном
+  neon: (g, R, col, v, acc, full) => { // a glowing ring on dark
     circ(g, 0, 0, R, '#0C100E');
     g.save(); g.shadowBlur = R * (full ? 0.9 : 0.4); g.shadowColor = col;
     g.beginPath(); g.arc(0, 0, R * 0.74, 0, TAU); g.lineWidth = R * 0.2; g.strokeStyle = col; g.stroke();
@@ -562,9 +567,9 @@ const BEADS = {
     g.restore();
   },
 };
-// Ступени (линьки): 1-я — простая плоская бусина, 2-я — бусина вида с объёмом, 3-я — с узором вида (BEADS),
-// дальше — наряд поверх (dressBead): 4-я — светлый кант и блик-капелька, 5-я — ещё шипы по хребту,
-// 6-я — кант и шипы золотые. При отрисовке 5-й ступени ещё переливы по телу, 6-й — сияние и искры с хвоста.
+// Stages (molts): 1st — a simple flat bead, 2nd — the type's bead with volume, 3rd — with the type's pattern (BEADS),
+// then an outfit on top (dressBead): 4th — a light trim and a droplet glint, 5th — spikes along the spine as well,
+// 6th — golden trim and spikes. When drawing, the 5th stage also gets shimmer along the body, the 6th — a glow and sparks from the tail.
 function plainBead(g, t, R, col) {
   if (t === 'robot') {
     const h = R * 0.88;
@@ -581,7 +586,7 @@ function plainBead(g, t, R, col) {
 }
 function dressBead(g, R, col, st) {
   const gold = st >= 5, edge = gold ? GOLD_C : shade(col, 0.7);
-  g.save(); g.globalCompositeOperation = 'source-atop'; // только по самой бусине
+  g.save(); g.globalCompositeOperation = 'source-atop'; // only over the bead itself
   g.beginPath(); g.arc(0, 0, R * 0.8, Math.PI * 0.42, Math.PI * 1.58);
   g.lineWidth = R * (gold ? 0.14 : 0.1); g.lineCap = 'round'; g.strokeStyle = edge; g.stroke();
   circ(g, -R * 0.28, -R * 0.42, R * 0.13, 'rgba(255,255,255,0.65)');
@@ -594,11 +599,11 @@ function dressBead(g, R, col, st) {
 const VARIANTS = { dots: 2, robot: 2 };
 const skinOf = (skin) => SKINS[skin] || SKINS[0];
 const typeId = (skin) => TYPES[skinOf(skin).type].id;
-// вариант узора бусины i (рисуются чётные сегменты): чередуется по бусинам
+// pattern variant of bead i (even segments are drawn): alternates from bead to bead
 const beadVar = (skin, i) => { const n = VARIANTS[typeId(skin)]; return n ? (i >> 1) % n : 0; };
-// спрайт бусины; у спрайта .e — половина размера: рисовать в (-e, -e). mode: 0 — бусина, 1 — вспыхнувшая, 2 — силуэт для обводки
-const beadCache = new Map(), BEAD_CACHE_MAX = 600; // со ступенями спрайтов вшестеро больше — держим не больше 600
-// st — ступень (линька): от неё наряд бусины; по умолчанию — полный вид без наряда (превью на главной и в паузе)
+// a bead sprite; the sprite's .e is half its size: draw at (-e, -e). mode: 0 — bead, 1 — flashed, 2 — silhouette for the outline
+const beadCache = new Map(), BEAD_CACHE_MAX = 600; // with stages there are six times more sprites — keep no more than 600
+// st — stage (molt): it sets the bead's outfit; by default — the full type without an outfit (previews on the home screen and in pause)
 function beadSprite(skin, col, v, mode = 0, st = 2) {
   const sk = skinOf(skin), key = ((((sk.type * 512 + sk.acc + 1) * 512 + col) * 4 + v) * 4 + mode) * 8 + st;
   let c = beadCache.get(key);
@@ -611,25 +616,25 @@ function beadSprite(skin, col, v, mode = 0, st = 2) {
   if (st === 0) plainBead(g, t, BR, cl);
   else BEADS[t](g, BR, cl, v, PAL[sk.acc], st >= 2);
   if (st >= 3) dressBead(g, BR, cl, st);
-  if (mode === 1) { // та же бусина, вспыхнувшая: для волны свечения при ускорении
+  if (mode === 1) { // the same bead, flashed: for the glow wave while boosting
     g.globalCompositeOperation = 'source-atop';
     const gr = g.createRadialGradient(BR * 0.2, 0, 0, 0, 0, BR * 1.2);
     gr.addColorStop(0, 'rgba(255,255,255,0.9)'); gr.addColorStop(0.6, 'rgba(255,255,255,0.45)'); gr.addColorStop(1, 'rgba(255,255,255,0.2)');
     g.fillStyle = gr; g.fillRect(-E, -E, E * 2, E * 2);
   } else if (mode === 2) silhouette(g, E);
-  if (beadCache.size >= BEAD_CACHE_MAX) beadCache.delete(beadCache.keys().next().value); // самый старый — нарисуем снова, если понадобится
+  if (beadCache.size >= BEAD_CACHE_MAX) beadCache.delete(beadCache.keys().next().value); // the oldest one — it'll be redrawn if needed
   beadCache.set(key, c);
   return c;
 }
-// силуэт для обводки своей змейки: форма бусины или головы целиком (с гребнем, лапками, ушками), залитая цветом обводки.
-// Свечение неона в силуэт не идёт — только плотная часть
+// a silhouette for your own snake's outline: the whole shape of the bead or head (with crest, legs, ears), filled with the outline color.
+// The neon glow isn't part of the silhouette — only the solid part
 function silhouette(g, E) {
   const d = g.getImageData(0, 0, E * 2, E * 2), a = d.data;
   for (let i = 0; i < a.length; i += 4) { const on = a[i + 3] > 160; a[i] = a[i + 1] = a[i + 2] = MINE_RGB; a[i + 3] = on ? 255 : 0; }
   g.putImageData(d, 0, 0);
 }
 
-// голова: в начале координат, смотрит вдоль +x, r — радиус тела. Глаза рисуются отдельно — они следят за курсом
+// head: at the origin, facing +x, r — body radius. The eyes are drawn separately — they follow the course
 function roundHead(g, r, col, sc = 1.1) {
   const R = r * sc; circ(g, 0, 0, R, shade(col, -0.55));
   const gr = g.createRadialGradient(R * 0.25, -R * 0.2, R * 0.1, 0, 0, R);
@@ -645,7 +650,7 @@ function antennae(g, r, line, tip) {
 }
 const HEADS = {
   beads: (g, r, hd) => roundHead(g, r, hd),
-  fish: (g, r, hd, acc) => { // плавники у головы
+  fish: (g, r, hd, acc) => { // fins at the head
     for (const sd of [-1, 1]) {
       g.beginPath(); g.moveTo(-r * 0.1, sd * r * 0.7); g.lineTo(-r * 0.85, sd * r * 1.55); g.lineTo(-r * 0.25, sd * r * 1.55); g.lineTo(r * 0.3, sd * r * 0.8); g.closePath();
       g.fillStyle = hexA(acc, 0.9); g.fill(); g.lineWidth = r * 0.07; g.strokeStyle = shade(acc, -0.45); g.stroke();
@@ -654,7 +659,7 @@ const HEADS = {
   },
   caterpillar: (g, r, hd, acc) => { antennae(g, r, shade(hd, -0.5), acc); roundHead(g, r, hd, 1.18); },
   dots: (g, r, hd) => { antennae(g, r * 0.8, hd, hd); roundHead(g, r, hd); },
-  dragon: (g, r, hd, acc) => { // рожки и ноздри
+  dragon: (g, r, hd, acc) => { // horns and nostrils
     for (const sd of [-1, 1]) {
       g.beginPath(); g.moveTo(-r * 0.1, sd * r * 0.5); g.quadraticCurveTo(-r * 1.0, sd * r * 1.25, -r * 1.75, sd * r * 1.2); g.lineTo(-r * 0.7, sd * r * 0.85); g.closePath();
       g.fillStyle = acc; g.fill(); g.lineWidth = r * 0.09; g.strokeStyle = shade(acc, -0.55); g.stroke();
@@ -662,7 +667,7 @@ const HEADS = {
     g.save(); g.scale(1.22, 1); roundHead(g, r, hd, 1.05); g.restore();
     circ(g, r * 1.05, -r * 0.22, r * 0.08, shade(hd, -0.6)); circ(g, r * 1.05, r * 0.22, r * 0.08, shade(hd, -0.6));
   },
-  tiger: (g, r, hd, acc) => { // ушки, полоски на лбу, носик
+  tiger: (g, r, hd, acc) => { // ears, forehead stripes, a little nose
     for (const sd of [-1, 1]) {
       g.beginPath(); g.moveTo(-r * 0.55, sd * r * 0.45); g.lineTo(-r * 0.75, sd * r * 1.35); g.lineTo(r * 0.05, sd * r * 0.95); g.closePath();
       g.fillStyle = hd; g.fill(); g.lineWidth = r * 0.1; g.lineJoin = 'round'; g.strokeStyle = shade(hd, -0.55); g.stroke();
@@ -673,7 +678,7 @@ const HEADS = {
     for (const y of [-0.35, 0, 0.35]) { g.beginPath(); g.moveTo(-r * 0.85, y * r); g.lineTo(-r * 0.35, y * r * 0.6); g.stroke(); }
     circ(g, r * 0.95, 0, r * 0.15, '#FF8FA3');
   },
-  robot: (g, r, hd, acc) => { // голова-экран с антенной; глаза — лампочки на экране
+  robot: (g, r, hd, acc) => { // a screen head with an antenna; the eyes are lights on the screen
     g.beginPath(); g.moveTo(-r * 0.3, 0); g.lineTo(-r * 1.4, -r * 0.9); g.lineWidth = r * 0.12; g.strokeStyle = shade(hd, -0.5); g.stroke();
     g.save(); g.shadowBlur = r; g.shadowColor = acc; circ(g, -r * 1.4, -r * 0.9, r * 0.2, acc); g.restore();
     const h = r * 1.08;
@@ -690,9 +695,9 @@ const HEADS = {
     g.beginPath(); g.arc(0, 0, r * 0.92, 0, TAU); g.lineWidth = r * 0.2; g.strokeStyle = hd; g.stroke(); g.restore();
   },
 };
-// глаза по видам: d — как далеко от центра, big — размер, slit — зрачок-щёлочка, glow — светятся, none — нарисованы в голове
+// eyes by type: d — how far from the center, big — size, slit — slit pupil, glow — they glow, none — drawn into the head
 const EYES = { dragon: { d: 0.45, slit: true }, fish: { big: 1.2 }, caterpillar: { big: 1.15 }, neon: { glow: true }, robot: { none: true } };
-// голова раскраски: спрайт, силуэт для обводки (лениво), глаза вида и цвет головы — один раз на раскраску
+// a skin's head: sprite, silhouette for the outline (lazily), the type's eyes and the head color — once per skin
 const headCache = [];
 function headOf(skin) {
   if (headCache[skin]) return headCache[skin];
@@ -709,8 +714,8 @@ function headSil(skin) {
   }
   return h.sil;
 }
-// голова со взглядом: (x, y) — центр, a — куда смотрит, look — куда хочет повернуть, r — радиус тела, sc — раздувание волной;
-// edge > 0 — вместо головы её силуэт, шире на edge (обводка своей змейки)
+// a head with a gaze: (x, y) — center, a — where it faces, look — where it wants to turn, r — body radius, sc — swelling from the wave;
+// edge > 0 — the head's silhouette instead, wider by edge (your own snake's outline)
 function drawHead(g, skin, x, y, a, look, r, sc = 1, edge = 0) {
   const h = headOf(skin), c = Math.cos(a), s = Math.sin(a), k = (r * sc + edge) / HU;
   const m = g.getTransform();
@@ -747,34 +752,34 @@ const glowSprite = lazy(SPR, (g, m, col) => {
   g.fillStyle = gr; g.fillRect(0, 0, SPR, SPR);
 });
 
-// ---------- общее состояние ----------
-let mode = null;         // null — демо за меню, 'solo', 'net'
+// ---------- shared state ----------
+let mode = null;         // null — demo behind the menu, 'solo', 'net'
 let ui = 'home';         // home | play | paused | dead | conn
-let world = null;        // мир одиночной игры и демо
-let me = null;           // своя змейка (в solo — из world, в net — своя, считается здесь же: selfStep)
+let world = null;        // the world of the solo game and the demo
+let me = null;           // your own snake (in solo — from world, in net — your own, computed right here: selfStep)
 let diffKey = 'easy';
 let time = 0, playTime = 0, sessionBest = 0;
 let demoFocus = null;
-let run = null;          // текущая игра: звёзды, победы, рекорды мест — для итогов и заданий
-let feast = null;        // { x, y, until } — золотой пир на арене
-let effects = [];        // кольца-вспышки на месте побед
-let gulps = [];          // крошки, которые своя змейка втягивает в рот
-let gulpT = -9;          // когда своя змейка глотнула последний раз — голова на миг раздувается
-let lumps = [];          // когда глотала: по телу от головы к хвосту катится комок
-let sparks = [];         // искры: бусины погибших змеек, пыльца бабочек
-const kick = { t: -9, z: 0, shake: 0 }; // толчок камеры: z — приближение, shake — тряска в точках экрана
-let slowUntil = 0;       // одиночная игра: миг замедления после своей победы
+let run = null;          // the current game: stars, wins, place records — for the summary
+let feast = null;        // { x, y, until } — a golden feast in the arena
+let effects = [];        // flash rings where wins happened
+let gulps = [];          // crumbs your snake is sucking into its mouth
+let gulpT = -9;          // when your snake last swallowed — the head swells for a moment
+let lumps = [];          // when it swallowed: a lump rolls along the body from head to tail
+let sparks = [];         // sparks: beads of dead snakes, butterfly pollen
+const kick = { t: -9, z: 0, shake: 0 }; // camera kick: z — zoom, shake — shake in screen points
+let slowUntil = 0;       // solo game: a moment of slow motion after your own win
 let wasBoost = false;
 const REDUCED = !!(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches);
-let leaderId = 0;        // у кого золотая корона
-let podium = [];         // id первых трёх: золотая, серебряная, бронзовая корона
+let leaderId = 0;        // who wears the golden crown
+let podium = [];         // ids of the top three: gold, silver, bronze crown
 const cam = { x: 0, y: 0, z: 1 };
 
 function newRun(diff) {
   return { diff, xp: 0, kills: 0, eatenBase: 0, eatXp: 0, eatStat: 0, maxStage: 0, bestRank: 999, flags: new Set(),
     lifeStart: 0, killTimes: [], revenge: null, feastSeen: new Set(), unlocked: [], maxMass: START_MASS, startT: performance.now() };
 }
-// ---------- ввод ----------
+// ---------- input ----------
 const isTouch = ('ontouchstart' in window) || (window.matchMedia && matchMedia('(pointer: coarse)').matches);
 const joy = { active: false, pid: null, bx: 0, by: 0, x: 0, y: 0, angle: null };
 const mouse = { x: 0, y: 0, has: false, down: false };
@@ -783,12 +788,12 @@ let fabDown = false;
 const keys = new Set();
 
 canvas.addEventListener('pointerdown', (e) => {
-  if (fabEdit) { fabDragStart(e, true); return; } // настройка кнопки: касание поля переносит её сюда
+  if (fabEdit) { fabDragStart(e, true); return; } // button setup: touching the field moves the button here
   if (e.pointerType === 'mouse') {
     inputKind = 'mouse'; mouse.down = e.button === 0; mouse.x = e.clientX; mouse.y = e.clientY; mouse.has = true;
     return;
   }
-  if (joy.active) return; // второй палец на поле игнорируем
+  if (joy.active) return; // a second finger on the field is ignored
   inputKind = 'touch';
   joy.active = true; joy.pid = e.pointerId;
   joy.bx = joy.x = e.clientX; joy.by = joy.y = e.clientY;
@@ -800,7 +805,7 @@ canvas.addEventListener('pointermove', (e) => {
   joy.x = e.clientX; joy.y = e.clientY;
   let dx = joy.x - joy.bx, dy = joy.y - joy.by;
   const len = Math.hypot(dx, dy);
-  if (len > JOY_R) { // основание едет за пальцем
+  if (len > JOY_R) { // the base follows the finger
     joy.bx = joy.x - dx / len * JOY_R; joy.by = joy.y - dy / len * JOY_R;
     dx = joy.x - joy.bx; dy = joy.y - joy.by;
   }
@@ -821,7 +826,7 @@ fab.addEventListener('pointerdown', (e) => {
   e.preventDefault();
   if (fabEdit) { fabDragStart(e, false); return; }
   fabDown = true; fab.classList.add('on');
-  if (me && me.mass > MIN_BOOST_MASS) haptic('boost'); // сразу в касании, не ждём ответа сервера
+  if (me && me.mass > MIN_BOOST_MASS) haptic('boost'); // right on touch, without waiting for the network
   try { fab.setPointerCapture(e.pointerId); } catch { /* */ }
 });
 const fabUp = () => { fabDown = false; fab.classList.remove('on'); };
@@ -830,13 +835,13 @@ fab.addEventListener('pointercancel', fabUp);
 fab.addEventListener('lostpointercapture', fabUp);
 if (isTouch) fab.hidden = false;
 
-// --- размер и место кнопки ускорения (на планшете до угла далеко тянуться) ---
+// --- boost button size and position (on a tablet the corner is a long reach) ---
 const FAB_DEF = 76, FAB_MIN = 56, FAB_MAX = 180, FAB_PAD = 8;
-let fabEdit = false, fabDrag = null; // fabDrag: { pid, dx, dy } — палец и сдвиг от центра кнопки
+let fabEdit = false, fabDrag = null; // fabDrag: { pid, dx, dy } — the finger and its offset from the button center
 const fabSize = () => Math.min(FAB_MAX, Math.max(FAB_MIN, Number(save.fab.size) || FAB_DEF));
 const fabKey = () => (W > H ? 'land' : 'port');
 const fabOk = (v) => Array.isArray(v) && v.length === 2 && v.every((x) => x >= 0 && x <= 1);
-// место для этой ориентации; нет своего — берём из другой (повернул планшет — кнопка примерно там же)
+// the position for this orientation; if there's none, take the other one's (rotate the tablet — the button stays roughly in place)
 function fabSpot() {
   const k = fabKey(), o = k === 'land' ? 'port' : 'land';
   return fabOk(save.fab[k]) ? save.fab[k] : fabOk(save.fab[o]) ? save.fab[o] : null;
@@ -852,12 +857,12 @@ function applyFab() {
   if (spot) {
     const [x, y] = clampFab(spot[0] * W, spot[1] * H);
     fab.style.left = `${x - s / 2}px`; fab.style.top = `${y - s / 2}px`; fab.style.right = fab.style.bottom = 'auto';
-  } else fab.style.left = fab.style.top = fab.style.right = fab.style.bottom = ''; // по умолчанию — правый нижний угол (CSS)
+  } else fab.style.left = fab.style.top = fab.style.right = fab.style.bottom = ''; // by default — the bottom-right corner (CSS)
   if (fabEdit) placeFabPanel();
 }
 function fabCenter() { const r = fab.getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; }
 function setFabAt(x, y) { const [cx, cy] = clampFab(x, y); save.fab[fabKey()] = [cx / W, cy / H]; applyFab(); }
-// окно настройки — на другой половине экрана, чем кнопка, чтобы не закрывать её
+// the setup panel goes on the other half of the screen from the button, so it doesn't cover it
 function placeFabPanel() {
   const p = $('fabPanel'), [x, y] = fabCenter();
   p.classList.toggle('side', W > H);
@@ -900,7 +905,7 @@ function endFabEdit() {
 $('fabSize').addEventListener('input', () => {
   const c = fabCenter();
   save.fab.size = Number($('fabSize').value); showFabRange();
-  if (fabSpot()) setFabAt(c[0], c[1]); else applyFab(); // растёт вокруг своего центра
+  if (fabSpot()) setFabAt(c[0], c[1]); else applyFab(); // grows around its own center
 });
 $('fabSize').addEventListener('change', persist);
 $('fabReset').addEventListener('click', () => {
@@ -923,7 +928,7 @@ window.addEventListener('keydown', (e) => {
 window.addEventListener('keyup', (e) => { keys.delete(e.code); });
 window.addEventListener('blur', () => { keys.clear(); fabUp(); mouse.down = false; joy.active = false; });
 
-// куда хочет ползти игрок: угол или null (не трогать)
+// where the player wants to crawl: an angle, or null (leave as is)
 function steer() {
   if (!me) return { a: null, b: false };
   const b = keys.has('Space') || keys.has('ArrowUp') || keys.has('KeyW') || keys.has('ShiftLeft') ||
@@ -939,11 +944,11 @@ function steer() {
   return { a, b };
 }
 
-// ---------- сетевая игра ----------
-// Игрового сервера нет. Мир — ботов, еду, бабочек — считает браузер хозяина комнаты (room.js, часы runRoom),
-// а свою змейку каждый игрок считает у себя (selfStep): поворот виден сразу, о своём проигрыше решает сам и
-// присылает хозяину, где он, что съел и кого поймал. Чужих змей рисуем по снимкам хозяина с задержкой INTERP_MS.
-// Хозяин играет так же, как гости, — через петлю внутри страницы.
+// ---------- network game ----------
+// There's no game server. The world — bots, food, butterflies — is computed by the host's browser (room.js, clock runRoom),
+// while each player computes their own snake locally (selfStep): a turn shows instantly, the player decides about their own crash
+// and reports to the host where they are, what they ate and what they caught. Other snakes are drawn from the host's snapshots INTERP_MS behind.
+// The host plays the same way as guests — through a loopback inside the page.
 const net = {
   link: null, room: null, stopRoom: null, sig: null, isHost: false,
   code: '', roomMode: 'team', diff: 'easy', youId: 0, myTeam: 0,
@@ -958,7 +963,7 @@ function netReset() {
   net.youId = 0; net.lastB = false; net.lb = null; net.eatQ = []; net.dropQ = []; net.ate.clear(); net.claimed.clear();
   net.lastSnap = 0; me = null;
 }
-// канал до комнаты готов (прямой или петля у хозяина): здороваемся, дальше комната шлёт мир
+// the channel to the room is ready (direct, or the host's loopback): say hello, then the room sends the world
 function useLink(link) {
   net.link = link;
   link.onjson = onNetMsg;
@@ -980,15 +985,15 @@ function onNetMsg(m) {
   else if (m.t === 'slept') onSlept();
   else if (m.t === 'err') onNetError(m.code);
 }
-// игру сворачивали — комната убрала нашу змейку, чтобы она не висела у всех неподвижной
+// the game was minimized — the room removed our snake so it wouldn't hang frozen for everyone
 function onSlept() {
   const dead = me;
   if (!dead) return;
   me = null;
   onNetDeath({ by: null, byId: 0, mass: Math.floor(dead.mass), max: Math.floor(dead.maxMass), eaten: dead.eaten,
-    who: 'Пока игра была свёрнута, змейка уснула' }, dead);
+    who: t('oops.asleep') }, dead);
 }
-// хозяин: код комнаты у сайта, комната — здесь же, гости — напрямую
+// host: the room code lives on the site, the room itself right here, guests connect directly
 function hostRoom(opts) {
   net.isHost = true;
   const attach = (room, link) => {
@@ -1001,11 +1006,11 @@ function hostRoom(opts) {
     v: VERSION, token: HOST_TOKEN,
     onCode: (code) => {
       if (mode !== 'net' || net.leaving) return;
-      if (net.room) { // связь с сайтом восстановилась; если код за это время отдали, — у комнаты новый
+      if (net.room) { // the connection to the site is back; if the code was given away meanwhile, the room has a new one
         if (code !== net.code) { net.code = code; net.room.code = code; showRoomCode(); }
         return;
       }
-      const room = new Room({ code, mode: opts.mode, diff: opts.diff });
+      const room = new Room({ code, mode: opts.mode, diff: opts.diff, botNames: BOT_NAMES, playerName: t('player') });
       net.room = room;
       net.stopRoom = runRoom(room);
       const [mine, theirs] = loopback();
@@ -1013,7 +1018,7 @@ function hostRoom(opts) {
       useLink(mine);
     },
     onPeer: (link) => { if (net.room && !net.leaving) attach(net.room, link); else link.close(); },
-    onError: (code) => { if (!net.room) onNetError(code); }, // комната уже идёт — без сайта просто никто новый не зайдёт
+    onError: (code) => { if (!net.room) onNetError(code); }, // the room is already running — without the site simply nobody new can join
   });
 }
 function stopHosting() {
@@ -1022,7 +1027,7 @@ function stopHosting() {
   if (net.room) { net.room.closeAll(); net.room = null; }
   net.isHost = false;
 }
-// гость: знакомство через сайт и прямой канал к хозяину
+// guest: introduction through the site and a direct channel to the host
 function joinRoom(code, isRetry) {
   net.code = code;
   join({ code, v: VERSION }).then((link) => {
@@ -1038,19 +1043,19 @@ function joinRoom(code, isRetry) {
 function hostGone() {
   net.leaving = true;
   mode = null; me = null;
-  dialog('Комната закрылась', '<p>Хозяин комнаты вышел из игры. Создай свою комнату или зайди в другую.</p>',
-    [{ label: 'В меню', kind: 'filled', onClick: toHome }]);
+  dialog(t('room.closed'), `<p>${t('room.closedText')}</p>`,
+    [{ label: t('btn.menu'), kind: 'filled', onClick: toHome }]);
 }
 function netFailed() {
   mode = null; net.link = null;
-  dialog('Нет связи с сайтом игры', '<p>Чтобы найти друг друга, нужен интернет. Одиночная игра доступна и без сети.</p>',
-    [{ label: 'Понятно', kind: 'filled', onClick: toHome }]);
+  dialog(t('net.noSite'), `<p>${t('net.noSiteText')}</p>`,
+    [{ label: t('btn.ok'), kind: 'filled', onClick: toHome }]);
 }
 function netReconnect() {
   ui = 'conn';
-  if (net.retry === 0) dialog('Связь потеряна', '<p>Переподключаюсь к комнате…</p>', [{ label: 'Выйти', kind: 'text', onClick: leaveNet }]);
+  if (net.retry === 0) dialog(t('net.lost'), `<p>${t('net.lostText')}</p>`, [{ label: t('btn.leave'), kind: 'text', onClick: leaveNet }]);
   if (net.retry >= 10) {
-    dialog('Не получилось переподключиться', '<p>Проверь интернет и зайди в комнату снова.</p>', [{ label: 'В меню', kind: 'filled', onClick: leaveNet }]);
+    dialog(t('net.retryFail'), `<p>${t('net.retryFailText')}</p>`, [{ label: t('btn.menu'), kind: 'filled', onClick: leaveNet }]);
     return;
   }
   net.retry++;
@@ -1061,8 +1066,8 @@ function netReconnect() {
     joinRoom(net.code, true);
   }, net.retry === 1 ? 300 : 2000);
 }
-// Обновление — только по кнопке: новая версия уже скачана и ждёт (см. sw.js), говорим ей взять управление и перезагружаемся.
-// Если её ещё нет (зашли в комнату раньше, чем браузер проверил обновление) — сначала скачиваем.
+// Updating only happens via the button: the new version is already downloaded and waiting (see sw.js), we tell it to take over and reload.
+// If it isn't there yet (joined a room before the browser checked for updates) — download it first.
 let updating = false;
 async function updateApp() {
   updating = true;
@@ -1081,32 +1086,32 @@ async function updateApp() {
           };
           w.addEventListener('statechange', go);
           go();
-          setTimeout(res, 60000); // скачивание по медленной сети ждём долго, но не вечно
+          setTimeout(res, 60000); // on a slow network wait long for the download, but not forever
         });
       }
     }
-  } catch { /* перезагрузим как есть */ }
+  } catch { /* reload as is */ }
   location.reload();
 }
-// Вышла новая версия: показываем на главной плашку с кнопкой. Сама игра не перезагружается — партию не обрываем.
+// A new version is out: show a banner with a button on the home screen. The game itself doesn't reload — a match isn't cut short.
 function watchUpdates(reg) {
-  // reg.active отличает обновление от первой установки (тогда предлагать нечего)
+  // reg.active tells an update from the first install (then there's nothing to offer)
   const offer = () => { if (reg.waiting && reg.active) $('update').hidden = false; };
   const track = (w) => { if (w) w.addEventListener('statechange', offer); };
   offer();
   track(reg.installing);
   reg.addEventListener('updatefound', () => track(reg.installing));
-  // открытая вкладка сама не узнает о выпуске: спрашиваем сервер при возврате в игру и раз в час —
-  // но не чаще раза в 10 минут и не во время партии, чтобы скачивание не мешало игре по сети
+  // an open tab doesn't learn about a release by itself: ask the server when returning to the game and once an hour —
+  // but no more than once every 10 minutes and not during a match, so the download doesn't disturb network play
   let lastCheck = performance.now();
   const check = () => {
     if (mode !== null || performance.now() - lastCheck < 10 * 60 * 1000) return;
     lastCheck = performance.now();
-    reg.update().catch(() => { /* нет сети */ });
+    reg.update().catch(() => { /* offline */ });
   };
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') check(); });
   setInterval(check, 60 * 60 * 1000);
-  // версию обновили в другой вкладке: эта осталась на старом коде — на главной перезагружаемся сразу, партию не обрываем
+  // the version was updated in another tab: this one is still on old code — reload right away on the home screen, don't cut a match short
   let controlled = !!navigator.serviceWorker.controller;
   navigator.serviceWorker.addEventListener('controllerchange', () => {
     if (controlled && !updating) { if (mode === null) location.reload(); else $('update').hidden = false; }
@@ -1121,21 +1126,14 @@ function onNetError(code) {
   stopHosting();
   mode = null; me = null;
   if (code === 'version') {
-    dialog('Вышло обновление', '<p>У хозяина комнаты новая версия игры. Обнови её на устройстве, чтобы играть вместе.</p>',
-      [{ label: 'Позже', kind: 'text', onClick: toHome }, { label: 'Обновить', kind: 'filled', onClick: updateApp }]);
+    dialog(t('update.title'), `<p>${t('update.host')}</p>`,
+      [{ label: t('btn.later'), kind: 'text', onClick: toHome }, { label: t('btn.update'), kind: 'filled', onClick: updateApp }]);
     return;
   }
-  const text = {
-    no_room: 'Комнаты с таким кодом нет. Проверь код или создай новую комнату.',
-    full: 'В комнате уже 8 игроков.',
-    limit: 'Сейчас слишком много комнат. Попробуй позже.',
-    old_host: 'У хозяина комнаты старая версия игры. Пусть нажмёт «Обновить» на главной и создаст комнату заново.',
-    p2p: 'Не получилось соединиться напрямую с хозяином комнаты. В одной Wi-Fi-сети всё работает; ' +
-      'через мобильный интернет некоторые сети прямое соединение не пропускают — попробуйте подключиться к одному Wi-Fi.',
-  }[code] || 'Что-то пошло не так.';
-  dialog('Не получилось войти', `<p>${text}</p>`, [{ label: 'Понятно', kind: 'filled', onClick: toHome }]);
+  const text = t(has('err.' + code) ? 'err.' + code : 'err.other');
+  dialog(t('err.title'), `<p>${text}</p>`, [{ label: t('btn.ok'), kind: 'filled', onClick: toHome }]);
 }
-// тело по сети — плоский массив [x0, y0, x1, y1, …]
+// a body over the network — a flat array [x0, y0, x1, y1, …]
 function unflat(flat) {
   const segs = [];
   for (let i = 0; i < flat.length; i += 2) segs.push({ x: flat[i], y: flat[i + 1] });
@@ -1145,22 +1143,22 @@ function unflat(flat) {
 function makeNetSnake(m) {
   const segs = unflat(m.segs);
   return { id: m.id, name: m.name, skin: m.skin, team: m.team, human: m.human, segs, a: 0, ta: 0, mass: START_MASS,
-    r: STAGE_R[0], stage: undefined, isBoosting: false, inv: 0, visible: false, seen: false }; // ступень — с первым снимком
+    r: STAGE_R[0], stage: undefined, isBoosting: false, inv: 0, visible: false, seen: false }; // the stage comes with the first snapshot
 }
 function setFeast(f) { feast = f ? { x: f.x, y: f.y, until: time + f.life } : null; }
 function showRoomCode() {
   try { history.replaceState(null, '', `?room=${net.code}`); } catch { /* */ }
-  $('roomChip').innerHTML = `${icon('group')}Комната ${net.code}${icon('share')}`;
+  $('roomChip').innerHTML = `${icon('group')}${t('room.title', net.code)}${icon('share')}`;
   $('roomBox').hidden = false;
 }
-// своя змейка — от комнаты (где появиться и какой длины), дальше считаем её сами
+// your own snake comes from the room (where to appear and how long), after that we compute it ourselves
 function setMe(y) {
   const segs = unflat(y.segs);
   const s = new Snake(y.id, segs[0].x, segs[0].y, y.mass, save.skin, myName(), true, y.team, undefined, segs);
   s.inv = y.inv || 0;
   me = s;
   net.youId = y.id; net.myTeam = y.team; net.eaten = 0; net.seq = 0; net.lastSent = 0;
-  // moveSnake из core.js — с этим «миром»: правила уровня, край арены, сброс еды при рывке уходит хозяину
+  // moveSnake from core.js with this "world": the level's rules, the arena edge, the food dropped while boosting goes to the host
   net.sim = { D: DIFF[net.diff], pending: [], addFood: (x, yy, v, c) => { net.dropQ.push([Math.round(x), Math.round(yy), Math.round(v * 100) / 100, c]); } };
   cam.x = segs[0].x; cam.y = segs[0].y;
 }
@@ -1179,19 +1177,19 @@ function onWelcome(m) {
   hudT = 0;
 }
 function addNetFood(id, x, y, v, c, life, cell) {
-  if (net.ate.has(id)) return; // уже съели сами, хозяин ещё не успел убрать
+  if (net.ate.has(id)) return; // already eaten by us, the host hasn't removed it yet
   net.foods.set(id, { id, x, y, v, c, r: foodRadiusOf(v), ph: Math.random() * TAU, life, age: 0, cell });
 }
-// записи еды и бабочек (FR, FLR, readFood) — в room.js, рядом с тем, кто их пишет
-function onSync(m) { // догнали после пропущенных снимков: змеи рядом — заново, еда придёт следом целиком
+// food and butterfly records (FR, FLR, readFood) live in room.js, next to whoever writes them
+function onSync(m) { // caught up after missed snapshots: nearby snakes anew, the food follows in full
   for (const s of m.snakes) if (s.id !== net.youId) net.snakes.set(s.id, makeNetSnake(s));
   setFeast(m.feast);
   if (m.kill && m.kill.length) onEvents({ kill: m.kill });
 }
 function onEvents(m) {
-  for (const s of m.spawn || []) if (s.id !== net.youId) net.snakes.set(s.id, makeNetSnake(s)); // вошла в поле зрения — тело целиком
+  for (const s of m.spawn || []) if (s.id !== net.youId) net.snakes.set(s.id, makeNetSnake(s)); // entered the field of view — the whole body
   if (m.feast) onFeast(m.feast.x, m.feast.y, m.feast.life);
-  // мир рисуем с задержкой INTERP_MS — вспышку и звук поимки тоже, иначе они опередят голову
+  // the world is drawn INTERP_MS behind — so are the flash and sound of a catch, otherwise they'd get ahead of the head
   for (const [x, y, c, by, v] of m.fly || []) setTimeout(() => onFlyCaught(x, y, c, by === net.youId, v), INTERP_MS);
   for (const k of m.kill || []) {
     const vs = k.v !== net.youId && net.snakes.get(k.v);
@@ -1209,7 +1207,7 @@ function readFoods(dv, o, n, out) { for (let i = 0; i < n; i++, o += FR) out.pus
 function onBinary(buf) {
   const dv = new DataView(buf);
   const type = dv.getUint8(0);
-  if (type === 2) { // вся еда вокруг разом — изменения до неё уже не нужны
+  if (type === 2) { // all food around at once — changes before it are no longer needed
     net.foods.clear();
     net.foodQ = [];
     const all = [];
@@ -1217,7 +1215,7 @@ function onBinary(buf) {
     for (const f of all) addNetFood(...f);
     return;
   }
-  if (type === 3) { // сменились клетки вокруг: из ушедших еду убираем, пришедшие — заново целиком
+  if (type === 3) { // the cells around changed: remove food from the ones that left, the ones that entered come in full
     let o = 1;
     const drop = new Set();
     const nl = dv.getUint8(o++);
@@ -1225,26 +1223,26 @@ function onBinary(buf) {
     const ne = dv.getUint8(o++);
     for (let i = 0; i < ne; i++) drop.add(dv.getUint8(o++));
     for (const [id, f] of net.foods) if (drop.has(f.cell)) net.foods.delete(id);
-    // изменения в очереди ещё не применены — их еду из этих клеток не возвращаем
+    // changes in the queue aren't applied yet — don't bring back their food from these cells
     for (const q of net.foodQ) q.added = q.added.filter((f) => !drop.has(f[6]));
     const all = [];
     readFoods(dv, o + 4, dv.getUint32(o, true), all);
     for (const f of all) addNetFood(...f);
     return;
   }
-  if (type === 4) { // что с едой случилось за шаг — применим, когда до этого шага дойдёт картинка
+  if (type === 4) { // what happened to food during a step — applied when the picture reaches that step
     const tick = dv.getUint32(1, true), added = [], removed = [];
     let o = readFoods(dv, 7, dv.getUint16(5, true), added);
     const nr = dv.getUint16(o, true); o += 2;
     for (let i = 0; i < nr; i++, o += 4) removed.push(dv.getUint32(o, true));
     net.foodQ.push({ tick, added, removed });
-    while (net.foodQ.length > 120) applyFood(net.foodQ.shift()); // вкладка свёрнута — не копим
+    while (net.foodQ.length > 120) applyFood(net.foodQ.shift()); // the tab is minimized — don't pile up
     return;
   }
   if (type !== 1) return;
   let o = 1;
   const tick = dv.getUint32(o, true); o += 4;
-  if (tick <= net.lastTick) return; // снимки идут без повторов и могут прийти не по порядку: старый — мимо
+  if (tick <= net.lastTick) return; // snapshots come without retransmits and may arrive out of order: an old one is ignored
   net.lastTick = tick;
   net.lastSnap = performance.now();
   const n = dv.getUint16(o, true); o += 2;
@@ -1271,7 +1269,7 @@ function onBinary(buf) {
   const sample = performance.now() - tick * TICK_MS;
   net.offset = net.offset === null ? sample : Math.min(sample, net.offset + 2);
   net.buf.push({ tick, snakes, flies });
-  while (net.buf.length > 40) net.buf.shift(); // вкладка свёрнута — кадры не рисуются и буфер не разбирается; старое не копим
+  while (net.buf.length > 40) net.buf.shift(); // the tab is minimized — frames aren't drawn and the buffer isn't consumed; don't pile up old ones
 }
 function applyFood(q) {
   for (const f of q.added) addNetFood(...f);
@@ -1295,7 +1293,7 @@ function netUpdate(now, dt) {
     sn.a = a0.a + angDiff(b.a, a0.a) * t;
     sn.ta = b.ta;
     sn.mass = a0.mass + (b.mass - a0.mass) * t;
-    if (sn.stage === undefined) { sn.stage = b.stage; sn.r = STAGE_R[b.stage]; } // увидели впервые — без линьки
+    if (sn.stage === undefined) { sn.stage = b.stage; sn.r = STAGE_R[b.stage]; } // seen for the first time — no molt
     else { setStage(sn, b.stage); growR(sn, dt); }
     sn.isBoosting = b.boost;
     sn.inv = b.inv ? 1 : 0;
@@ -1306,15 +1304,15 @@ function netUpdate(now, dt) {
   }
   net.flies = [];
   for (const [id, b] of s1.flies) {
-    if (net.claimed.has(id)) continue; // свою поимку не ждём — бабочка исчезает сразу
+    if (net.claimed.has(id)) continue; // our own catch isn't awaited — the butterfly disappears at once
     const a0 = s0.flies.get(id) || b;
     net.flies.push({ id, x: a0.x + (b.x - a0.x) * t, y: a0.y + (b.y - a0.y) * t, dir: a0.dir + angDiff(b.dir, a0.dir) * t,
       n: b.n, dart: b.dart, top: b.top, ph: (id * 2.39996) % TAU });
   }
   const last = buf[buf.length - 1];
   for (const [id, sn] of net.snakes) if (sn.seen && !sn.visible && !last.snakes.has(id)) net.snakes.delete(id);
-  // еда притягивается к головам, как в мире хозяина, — иначе исчезает раньше, чем до неё доползли.
-  // Только в видимой области: за экраном это никто не увидит.
+  // food is pulled toward heads, as in the host's world — otherwise it disappears before anyone crawls up to it.
+  // Only in the visible area: nobody would see it off screen.
   const hw = W / 2 / cam.z + 80, hh = H / 2 / cam.z + 80, k = Math.min(1, dt * 7);
   const heads = [];
   for (const sn of net.snakes.values()) {
@@ -1335,13 +1333,13 @@ function netUpdate(now, dt) {
 }
 function netInput(now) {
   if (!me || ui === 'dead') return;
-  // меню комнаты (и настройка кнопки из него) открыто — игра не стоит, змейкой правит осторожный автопилот
+  // the room menu (or the button setup from it) is open — the game doesn't stop, a careful autopilot steers the snake
   if (ui === 'play' && (roomMenuOpen() || fabEdit)) {
     if (now - auto.t >= AUTO_MS) { auto.t = now; auto.ta = safeCourse(me, sceneSnakes(), net.foods.values(), auto.ta, DIFF[net.diff]); me.ta = auto.ta; }
     me.boost = false; net.lastB = false;
     return;
   }
-  if (auto.ta !== null) { // отдаём руль: старый курс джойстика и курсор над кнопкой меню — не команда повернуть
+  if (auto.ta !== null) { // hand back the controls: the stale joystick course and a cursor over the menu button aren't a command to turn
     auto.ta = null; auto.t = -1e9;
     joy.angle = me.a; mouse.has = false;
   }
@@ -1349,15 +1347,15 @@ function netInput(now) {
   if (a !== null) me.ta = a;
   me.boost = b; net.lastB = b;
 }
-const AUTO_MS = 80;                     // автопилот на паузе в комнате (safeCourse в core.js) решает раз в 80 мс
+const AUTO_MS = 80;                     // the pause autopilot in a room (safeCourse in core.js) decides every 80 ms
 const auto = { t: -1e9, ta: null };
-const roomMenuOpen = () => !$('dlg').hidden && /\bpzs?\b/.test($('dlgBox').className); // окно паузы (или её «Звуки») — меню комнаты
-// своя змейка: движение по правилам core.js, столкновения — с тем, что видно на экране, еда и бабочки — тоже
+const roomMenuOpen = () => !$('dlg').hidden && /\bpzs?\b/.test($('dlgBox').className); // the pause dialog (or its "Sounds") is the room menu
+// your own snake: movement by the rules of core.js, collisions with what's visible on screen, food and butterflies too
 function selfStep(dt, now) {
   if (!me || !net.link || ui === 'conn') return;
   const sim = net.sim, m0 = me.mass;
   World.prototype.moveSnake.call(sim, me, dt);
-  if (sim.pending.length) { sim.pending = []; selfDie(null); return; } // край арены (на среднем и сложном)
+  if (sim.pending.length) { sim.pending = []; selfDie(null); return; } // the arena edge (on medium and hard)
   const h = me.segs[0];
   if (me.inv <= 0) {
     for (const o of net.snakes.values()) {
@@ -1392,32 +1390,32 @@ function selfSend(now) {
   if (me) net.link.fast(encodeSelf(me, net.seq++));
   if (net.eatQ.length) { netSend({ t: 'eat', ids: net.eatQ }); net.eatQ = []; }
   if (net.dropQ.length) { netSend({ t: 'drop', f: net.dropQ }); net.dropQ = []; }
-  // что сами съели и поймали — помним пару секунд, пока хозяин не уберёт это у себя
+  // what we ate and caught ourselves — remember it for a couple of seconds until the host removes it on its side
   for (const [id, t] of net.ate) if (now - t > 2000) net.ate.delete(id);
   for (const [id, t] of net.claimed) if (now - t > 2000) net.claimed.delete(id);
 }
 function selfDie(killer) {
   const dead = me;
   selfSend(performance.now());
-  // где разбились — прямо в сообщении (надёжно): останки лягут там, где это видно на экране
+  // where we crashed goes right in the message (reliably): the remains land where it's visible on screen
   netSend({ t: 'die', by: killer ? killer.id : 0, at: [Math.round(dead.x), Math.round(dead.y), dead.mass] });
   me = null;
   onNetDeath({ by: killer ? killer.name : null, byId: killer ? killer.id : 0, mass: Math.floor(dead.mass), max: Math.floor(dead.maxMass), eaten: dead.eaten }, dead);
 }
 function onNetDeath(m, dead) {
   sfx.die();
-  auto.ta = null; auto.t = -1e9; // разбились на автопилоте — после «Продолжить» руль у игрока как есть
+  auto.ta = null; auto.t = -1e9; // crashed on autopilot — after "Continue" the controls are the player's as they are
   burst(dead, false); camKick(0, 9);
   net.deadInfo = m;
   ui = 'dead';
   onLifeEnd(Math.max(m.eaten || 0, net.eaten), m.max);
   net.eaten = 0;
-  run.revenge = m.byId ? { id: m.byId, name: m.by } : null; // о край — мстить некому
+  run.revenge = m.byId ? { id: m.byId, name: m.by } : null; // hit the edge — nobody to take revenge on
   net.rv = null;
-  const who = m.who || (m.by ? `На пути была змейка «${esc(m.by)}»` : 'Это край арены');
+  const who = m.who || (m.by ? t('oops.by', esc(m.by)) : t('oops.edge'));
   setTimeout(() => {
     if (ui !== 'dead' || mode !== 'net') return;
-    dialog('Ой!', oopsHtml(who, m.mass, net.diff),
+    dialog(t('oops.title'), oopsHtml(who, m.mass, net.diff),
       goOutActions(() => netSend({ t: 'respawn' }), leaveNet), { cls: 'oops', wait: 600 });
   }, 700);
 }
@@ -1429,10 +1427,10 @@ function startNet(firstMsg) {
   net.leaving = false;
   stopHosting();
   if (firstMsg.t === 'create') {
-    dialog('Создаю комнату…', '<p>Получаю код комнаты.</p>', [{ label: 'Отмена', kind: 'text', onClick: leaveNet }]);
+    dialog(t('net.creating'), `<p>${t('net.creatingText')}</p>`, [{ label: t('btn.cancel'), kind: 'text', onClick: leaveNet }]);
     hostRoom(firstMsg);
   } else {
-    dialog('Подключаюсь…', '<p>Соединяюсь с хозяином комнаты.</p>', [{ label: 'Отмена', kind: 'text', onClick: leaveNet }]);
+    dialog(t('net.joining'), `<p>${t('net.joiningText')}</p>`, [{ label: t('btn.cancel'), kind: 'text', onClick: leaveNet }]);
     joinRoom(firstMsg.code, false);
   }
 }
@@ -1442,7 +1440,7 @@ function leaveNet() {
   netSend({ t: 'leave' });
   const link = net.link;
   net.link = null;
-  // гостю — дать «leave» уйти, хозяину — закрыть комнату всем
+  // a guest — let "leave" go out, the host — close the room for everyone
   if (link) setTimeout(() => link.close(), 100);
   stopHosting();
   try { history.replaceState(null, '', location.pathname); } catch { /* */ }
@@ -1450,25 +1448,25 @@ function leaveNet() {
 }
 async function shareRoom() {
   const url = `${location.origin}${location.pathname}?room=${net.code}`;
-  const text = `Заходи в Змейку! Комната ${net.code}`;
+  const text = t('share.text', net.code);
   try {
-    if (navigator.share) { await navigator.share({ title: 'Змейка', text, url }); return; }
+    if (navigator.share) { await navigator.share({ title: t('app.name'), text, url }); return; }
   } catch { return; }
-  try { await navigator.clipboard.writeText(url); snack('Ссылка на комнату скопирована'); } catch { snack(`Код комнаты: ${net.code}`); }
+  try { await navigator.clipboard.writeText(url); snack(t('share.copied')); } catch { snack(t('share.code', net.code)); }
 }
 $('roomChip').addEventListener('click', shareRoom);
 
-// ---------- одиночная игра ----------
+// ---------- solo game ----------
 function startSolo(diff) {
   mode = 'solo'; diffKey = diff;
-  world = new World({ diff });
+  world = new World({ diff, botNames: BOT_NAMES });
   me = world.addHuman({ name: soloName(), skin: save.skin, inv: 2 });
   cam.x = me.x; cam.y = me.y;
   cam.z = baseZoom() * 1.3;
   playTime = 0; sessionBest = START_MASS; hudT = 0; lastSoloMass = me.mass;
   run = newRun(diff); feast = null; clearFx(); clearGlow();
   pickBackdrop();
-  world.track = true; // съеденная еда — для крошек, летящих в рот
+  world.track = true; // eaten food — for the crumbs flying into the mouth
   $('roomBox').hidden = true;
   showHome(false);
   closeDialog();
@@ -1493,21 +1491,21 @@ function recordBest() {
 function onSoloDeath(killer) {
   sfx.die();
   burst(me, false); camKick(0, 9);
-  const who = killer ? `На пути была змейка «${esc(killer.name)}»` : 'Это край арены';
+  const who = killer ? t('oops.by', esc(killer.name)) : t('oops.edge');
   const dead = me;
   onLifeEnd(dead.eaten, dead.maxMass);
-  // продолжить можно на любом уровне: сколько длины останется — по уровню (keepMass)
+  // you can continue on any level: how much length is kept depends on the level (keepMass)
   const isNew = recordBest();
   ui = 'dead';
   run.revenge = killer && killer.alive ? { id: killer.id, name: killer.name } : null;
-  dialog('Ой!', oopsHtml(who, dead.mass, diffKey) + (isNew ? `<p class="record">${icon('trophy')}Новый рекорд!</p>` : ''),
+  dialog(t('oops.title'), oopsHtml(who, dead.mass, diffKey) + (isNew ? `<p class="record">${icon('trophy')}${t('oops.record')}</p>` : ''),
   goOutActions(() => {
     me = world.addHuman({ name: soloName(), skin: save.skin, mass: keepMass(diffKey, dead.mass), inv: 3 });
     ui = 'play'; closeDialog(); onRespawn();
   }, toHome), { cls: 'oops', wait: 600 });
 }
 
-// ---------- ход игры: линьки, места, серии, пир, месть ----------
+// ---------- game flow: molts, places, streaks, feast, revenge ----------
 const lifeEaten = () => (mode === 'net' ? net.eaten : me && me.alive ? me.eaten : 0);
 function onLifeEnd(eaten, maxMass) {
   if (!run) return;
@@ -1518,9 +1516,9 @@ function onLifeEnd(eaten, maxMass) {
 }
 function onRespawn() { if (run) run.lifeStart = playTime; }
 function onFeast(x, y, life) {
-  setFeast({ x, y, life }); // ни стрелки, ни звука — пир находят сами (решение владельца)
+  setFeast({ x, y, life }); // neither an arrow nor a sound — players find the feast themselves (design decision)
 }
-// бабочку поймали: вспышка в цвет крошек; если поймали мы — звук и звёзды (полная бабочка — щедрее)
+// a butterfly was caught: a flash in the crumbs' color; if we caught it — a sound and stars (a full butterfly is more generous)
 function onFlyCaught(x, y, c, mine, v) {
   effects.push({ x, y, t: time, c: shade(PAL[c] || GOLD_C, 0.3), r: 12 });
   pollen(x, y, PAL[c] ? c : GOLD);
@@ -1539,16 +1537,16 @@ function onMyKill(id, vm, km, pos, color) {
   let xp = 10 + (vm > km ? 20 : 0) + (n >= 2 ? 10 * n : 0);
   if (pos) effects.push({ x: pos.x, y: pos.y, t: time, c: PAL[color] || GOLD_C, r: radiusOf(vm) });
   camKick(n >= 2 || vm > km ? 0.06 : 0.035, 0);
-  if (mode === 'solo') slowUntil = time + 0.07; // миг замедления — победа ощущается весомее
-  // о победах не пишем: вспышка на месте змейки и звук, серия — звонче
+  if (mode === 'solo') slowUntil = time + 0.07; // a moment of slow motion — a win feels weightier
+  // wins aren't written out: a flash where the snake was and a sound, a streak sounds brighter
   if (run.revenge && run.revenge.id === id) { run.revenge = null; xp += 40; sfx.combo(3); }
   else if (n >= 2) sfx.combo(n);
   else if (vm > km * 1.5 && vm > 300) sfx.combo(2);
   else sfx.win();
   addXp(xp);
 }
-const RANK_STEPS = [[SNAKES_N >> 1, 10, false], [10, 40, true], [3, 80, true], [2, 120, true], [1, 200, true]]; // [место, звёзды, волна]
-// место и число змей на арене
+const RANK_STEPS = [[SNAKES_N >> 1, 10, false], [10, 40, true], [3, 80, true], [2, 120, true], [1, 200, true]]; // [place, stars, wave]
+// place and the number of snakes in the arena
 function myRank() {
   if (!me) return null;
   if (mode === 'net') {
@@ -1556,7 +1554,7 @@ function myRank() {
     if (!lb) return null;
     let r = 1;
     for (let i = 2; i < lb.mm.length; i += 3) if (lb.mm[i] > me.mass) r++;
-    // в mm есть и мы сами — со старой массой; не считаем себя
+    // mm includes us too — with the old mass; don't count ourselves
     const self = lb.hum.find((h) => h[0] === net.youId);
     if (self && self[4] > me.mass) r--;
     return { rank: Math.max(1, r), n: lb.n };
@@ -1576,7 +1574,7 @@ function runTick() {
   if (alive) {
     if (me.mass > run.maxMass) run.maxMass = me.mass;
     if (me.mass > save.stats.best) save.stats.best = Math.floor(me.mass);
-    const st = me.stage || 0; // линьку видно и слышно на самой змейке (moltCheck), здесь — звёзды за новую ступень в игре
+    const st = me.stage || 0; // a molt is seen and heard on the snake itself (moltCheck), here — stars for a new stage within the game
     if (st > run.maxStage) { run.maxStage = st; addXp(st * 30); }
     const rk = myRank();
     if (rk && playTime > 3) {
@@ -1604,7 +1602,7 @@ function runTick() {
   persistT -= 0.25;
   if (persistT <= 0) { persistT = 5; persist(); }
 }
-// где обидчик: {x, y} — знаем, null — далеко и не видно, false — его больше нет
+// where the offender is: {x, y} — known, null — far away and not visible, false — it's gone
 function revengeTarget() {
   const rv = run && run.revenge;
   if (!rv) return null;
@@ -1614,22 +1612,22 @@ function revengeTarget() {
   }
   const s = net.snakes.get(rv.id);
   if (s && s.visible) return s.segs[0];
-  if (net.rv === 0) return false;      // сервер сказал, что обидчика больше нет
+  if (net.rv === 0) return false;      // the host said the offender is gone
   return net.rv ? { x: net.rv[0], y: net.rv[1] } : null;
 }
-// звёзды за игру и сколько осталось до следующей раскраски
+// stars for the game and how many are left until the next skin
 function unlockHtml(xp, fresh) {
   const nx = nextSkin();
   const prev = nx ? Math.max(0, ...SKINS.filter(unlocked).map((x) => x.stars)) : 0;
   const bar = nx ? `<div class="bar"><i style="width:${(100 * clamp((save.xp - prev) / (nx.stars - prev), 0, 1)).toFixed(1)}%"></i></div>` +
-    `<small>до раскраски «${esc(nx.name)}» ещё ${nx.stars - stars()} ★</small>` : '<small>открыты все раскраски!</small>';
-  const got = fresh.length ? `<p class="record">${icon('star')}Открыта раскраска «${fresh.map(esc).join('», «')}»</p>` : '';
+    `<small>${t('unlock.next', esc(skinName(nx)), nx.stars - stars())}</small>` : `<small>${t('unlock.all')}</small>`;
+  const got = fresh.length ? `<p class="record">${icon('star')}${t('unlock.got', fresh.map((sk) => esc(skinName(sk))))}</p>` : '';
   return `<div class="unlock"><span class="xp">${icon('star')}+${xp}</span>${bar}</div>${got}`;
 }
 const oopsHtml = (who, mass, diff) => {
   const keep = (DIFF[diff] || DIFF.easy).keep, left = Math.floor(keepMass(diff, mass));
   return `<p>${who}.</p><div class="big-num">${Math.floor(mass)}</div>` +
-    `<p class="muted">${keep > 0 && left > START_MASS ? `Продолжишь с длиной ${left} (${Math.round(keep * 100)} %).` : 'Продолжишь с самого начала.'}</p>`;
+    `<p class="muted">${keep > 0 && left > START_MASS ? t('oops.keep', left, Math.round(keep * 100)) : t('oops.restart')}</p>`;
 };
 function finishRun() {
   if (!run) return '';
@@ -1642,11 +1640,11 @@ function finishRun() {
   return html;
 }
 
-// ---------- меню, пауза ----------
-let pzSnake = null; // холст своей змейки в открытой паузе — рисуется в кадре
-// громкость на паузе: кнопка — выключить/включить, ползунок — громкость (0 — то же, что выключить)
-const volHtml = () => `<div class="vol"><button class="btn text sound" id="volMute" aria-label="Звук"></button>` +
-  `<input type="range" id="volRange" min="0" max="100" step="5" aria-label="Громкость"></div>`;
+// ---------- menu, pause ----------
+let pzSnake = null; // canvas of your own snake in the open pause dialog — drawn every frame
+// volume in pause: the button turns sound off/on, the slider sets the volume (0 is the same as off)
+const volHtml = () => `<div class="vol"><button class="btn text sound" id="volMute" aria-label="${t('a11y.sound')}"></button>` +
+  `<input type="range" id="volRange" min="0" max="100" step="5" aria-label="${t('a11y.volume')}"></div>`;
 function bindVol() {
   const btn = $('volMute'), rng = $('volRange');
   const show = () => {
@@ -1654,59 +1652,59 @@ function bindVol() {
     rng.value = v; rng.style.setProperty('--p', `${v}%`);
     btn.innerHTML = icon(soundOn() ? 'vol' : 'volOff');
   };
-  const quiet = (f) => { const h = save.haptic; save.haptic = false; f(); save.haptic = h; }; // проба звука — без вибрации
-  const check = () => { unlockHtmlAudio(); quiet(sfx.title); setTimeout(() => snack(audioStatus()), 500); }; // сразу слышно, работает ли звук
+  const quiet = (f) => { const h = save.haptic; save.haptic = false; f(); save.haptic = h; }; // sound preview — without vibration
+  const check = () => { unlockHtmlAudio(); quiet(sfx.title); setTimeout(() => snack(audioStatus()), 500); }; // you hear right away whether sound works
   btn.addEventListener('click', () => {
     if (soundOn()) save.sound = false;
     else { save.sound = true; if (save.vol < 0.05) save.vol = 0.6; }
     persist(); show();
-    if (soundOn()) check(); else unlockHtmlAudio(); // общий слушатель жестов сработал ещё до переключения
+    if (soundOn()) check(); else unlockHtmlAudio(); // the global gesture listener has already fired before the toggle
   });
   rng.addEventListener('input', () => {
     save.vol = rng.value / 100; save.sound = save.vol > 0;
     show();
   });
-  rng.addEventListener('change', () => { persist(); unlockHtmlAudio(); if (soundOn()) quiet(sfx.win); }); // отпустил — пробный звук
+  rng.addEventListener('change', () => { persist(); unlockHtmlAudio(); if (soundOn()) quiet(sfx.win); }); // released — a test sound
   show();
 }
-// вибрация — только где она есть (телефон, планшет); включил — сразу чувствуешь, какая она
-const hapHtml = () => (hasHaptic() ? `<label class="sw-row">${icon('vibration')}<span>Вибрация</span>` +
+// vibration — only where it exists (phone, tablet); turn it on and you feel what it's like right away
+const hapHtml = () => (hasHaptic() ? `<label class="sw-row">${icon('vibration')}<span>${t('set.haptic')}</span>` +
   `<input type="checkbox" class="m3-switch" id="hapSw"${save.haptic ? ' checked' : ''}></label>` : '');
 function bindHap() {
   const sw = $('hapSw');
   if (!sw) return;
   sw.addEventListener('change', () => { save.haptic = sw.checked; persist(); if (save.haptic) haptic('kill'); });
 }
-// на сенсорном экране — ещё настройка кнопки ускорения
-const fabBtnHtml = () => (isTouch ? `<button class="fab-set" id="btnFabSet">${icon('bolt')}<span>Кнопка ускорения</span>${icon('right')}</button>` : '');
+// on a touch screen — the boost button setup as well
+const fabBtnHtml = () => (isTouch ? `<button class="fab-set" id="btnFabSet">${icon('bolt')}<span>${t('set.fab')}</span>${icon('right')}</button>` : '');
 function bindFabBtn() { const b = $('btnFabSet'); if (b) b.addEventListener('click', startFabEdit); }
-// звуки еды, ускорения, столкновения и линьки на выбор (sounds.js, просьбы владельца); вкладками, выбрал — сразу слышно
-const SND_GROUPS = [['eat', 'Еда', EAT], ['boost', 'Рывок', BOOST], ['crash', 'Удар', CRASH], ['molt', 'Линька', MOLT]];
+// food, boost, crash and molt sounds to choose from (sounds.js); in tabs, pick one and you hear it right away
+const SND_GROUPS = [['eat', EAT], ['boost', BOOST], ['crash', CRASH], ['molt', MOLT]];
 let sndTab = 'eat';
-const sndBtnHtml = () => `<button class="fab-set" id="btnSnd">${icon('music')}<span>Звуки</span>${icon('right')}</button>`;
+const sndBtnHtml = () => `<button class="fab-set" id="btnSnd">${icon('music')}<span>${t('set.sounds')}</span>${icon('right')}</button>`;
 function bindSndBtn() { $('btnSnd').addEventListener('click', soundsDialog); }
 function previewSound(k, i) {
   unlockHtmlAudio(); loadEat();
-  if (!soundOn()) { snack('Звук выключен — включи его в паузе'); return; }
+  if (!soundOn()) { snack(t('snd.off')); return; }
   stopBoostPreview();
-  if (k === 'eat') [0, 2, 4].forEach((st, j) => setTimeout(() => playEat(i, st), j * 180)); // три крошки подряд
-  else if (k === 'boost') { // щелчок и полторы секунды рывка
+  if (k === 'eat') [0, 2, 4].forEach((st, j) => setTimeout(() => playEat(i, st), j * 180)); // three crumbs in a row
+  else if (k === 'boost') { // a click and a second and a half of boost
     BOOST[i].start(SND);
     if (BOOST[i].loop && canSound()) {
-      try { const w = startLoop(BOOST[i], 0.05 * save.vol * save.vol); boostPreview = { w, timer: setTimeout(stopBoostPreview, 1500) }; } catch { /* старый WebKit */ }
+      try { const w = startLoop(BOOST[i], 0.05 * save.vol * save.vol); boostPreview = { w, timer: setTimeout(stopBoostPreview, 1500) }; } catch { /* old WebKit */ }
     }
   } else if (k === 'crash') CRASH[i].play(SND);
   else MOLT[i].play(SND, 1, MOLT_CHARGE);
 }
 function soundsDialog() {
-  const tabs = SND_GROUPS.map(([k, label]) => `<button data-tab="${k}"${k === sndTab ? ' class="on"' : ''}>${label}</button>`).join('');
-  // класс pzs: в комнате пока открыто — правит автопилот, как в меню комнаты (roomMenuOpen)
-  dialog('Звуки', `<div class="tabs snd-tabs">${tabs}</div><div class="snd-opts" id="sndOpts"></div>`,
-    [{ label: 'Готово', kind: 'filled', onClick: menuDialog }], { cls: 'pzs' });
+  const tabs = SND_GROUPS.map(([k]) => `<button data-tab="${k}"${k === sndTab ? ' class="on"' : ''}>${t('snd.' + k)}</button>`).join('');
+  // class pzs: in a room, while it's open the autopilot steers, as in the room menu (roomMenuOpen)
+  dialog(t('set.sounds'), `<div class="tabs snd-tabs">${tabs}</div><div class="snd-opts" id="sndOpts"></div>`,
+    [{ label: t('btn.done'), kind: 'filled', onClick: menuDialog }], { cls: 'pzs' });
   const opts = $('sndOpts');
   const show = () => {
-    const [k, , set] = SND_GROUPS.find((g) => g[0] === sndTab);
-    opts.innerHTML = set.map((o, i) => `<button class="snd-opt${save.snd[k] === i ? ' on' : ''}" data-i="${i}">${esc(o.name)}</button>`).join('');
+    const [k, set] = SND_GROUPS.find((g) => g[0] === sndTab);
+    opts.innerHTML = set.map((o, i) => `<button class="snd-opt${save.snd[k] === i ? ' on' : ''}" data-i="${i}">${esc(t(`snd.${k}.${o.id}`))}</button>`).join('');
     $('dlgBody').querySelectorAll('[data-tab]').forEach((b) => b.classList.toggle('on', b.dataset.tab === sndTab));
   };
   $('dlgBody').querySelectorAll('[data-tab]').forEach((b) => b.addEventListener('click', () => { sndTab = b.dataset.tab; stopBoostPreview(); show(); }));
@@ -1724,15 +1722,15 @@ function openMenu() {
   if (mode === 'solo') ui = 'paused';
   menuDialog();
 }
-// пауза (и меню комнаты): сверху своя змейка шевелится (drawWave в кадре), длина и место; «Продолжить» — большая жёлтая,
-// настройки — карточкой, «Выйти в меню» — полноценная кнопка. Решение владельца по макетам (вариант «со змейкой»).
+// pause (and the room menu): your snake wiggles at the top (drawWave every frame), length and place; "Continue" is big and yellow,
+// settings sit in a card, "Back to menu" is a full button. A design decision based on mockups (the "with the snake" variant).
 function pauseHtml(note, goLabel) {
   const rk = myRank();
   return `<div class="pz-chips"><span class="pz-chip">${icon('ruler')}<b id="pzLen">${curLen()}</b></span>` +
-    `<span class="pz-chip gold"${rk ? '' : ' hidden'}>${icon('trophy')}<b id="pzRank">${rk ? rk.rank : ''}</b> место</span></div>` + note +
+    `<span class="pz-chip gold"${rk ? '' : ' hidden'}>${icon('trophy')}${t('pause.place', `<b id="pzRank">${rk ? rk.rank : ''}</b>`)}</span></div>` + note +
     `<button class="btn filled pz-go" id="pzGo">${icon('play')}${goLabel}</button>` +
     `<div class="pz-list">${volHtml()}${sndBtnHtml()}${hapHtml()}${fabBtnHtml()}</div>` +
-    `<button class="btn pz-out" id="pzOut">${icon('home')}Выйти в меню</button>`;
+    `<button class="btn pz-out" id="pzOut">${icon('home')}${t('pause.out')}</button>`;
 }
 function pauseDialog(title, note, goLabel, go, out) {
   dialog(title, pauseHtml(note, goLabel), [], { cls: 'pz', top: '<canvas id="pzSnake"></canvas>' });
@@ -1741,11 +1739,10 @@ function pauseDialog(title, note, goLabel, go, out) {
   bindVol(); bindSndBtn(); bindHap(); bindFabBtn();
 }
 function menuDialog() {
-  if (mode === 'solo' && ui === 'paused') pauseDialog('Пауза', '', 'Продолжить', resume, toHome);
+  if (mode === 'solo' && ui === 'paused') pauseDialog(t('pause.title'), '', t('btn.continue'), resume, toHome);
   else if (mode === 'net' && ui === 'play') {
-    pauseDialog(`Комната ${net.code}`, `<p class="pz-note">${net.roomMode === 'team' ? 'Команда против ботов' : 'Все против всех'} · боты: ${DIFF[net.diff].label.toLowerCase()}. ` +
-      'Игра идёт: пока открыто меню, змейкой осторожно правит автопилот.' + (net.isHost ? ' Ты хозяин комнаты: не сворачивай игру, иначе комната встанет у всех.' : '') +
-      '</p>', 'Играть', closeDialog, leaveNet);
+    pauseDialog(t('room.title', net.code), `<p class="pz-note">${t('room.note', net.roomMode === 'team', t('diff.' + net.diff))}` +
+      (net.isHost ? ' ' + t('room.hostNote') : '') + '</p>', t('btn.play'), closeDialog, leaveNet);
   }
 }
 function resume() { if (ui === 'paused') { ui = 'play'; closeDialog(); last = performance.now(); } }
@@ -1764,7 +1761,7 @@ function toHome() {
   closeDialog();
   endFabEdit();
   hideHint();
-  world = new World({ diff: 'easy', bots: SNAKES_N >> 1, foodN: FOOD_N >> 1 }); // демо за меню — вдвое легче игры для телефона
+  world = new World({ diff: 'easy', bots: SNAKES_N >> 1, foodN: FOOD_N >> 1, botNames: BOT_NAMES }); // the demo behind the menu — half as heavy as the game, for phones
   demoFocus = null;
   viewSkin = save.skin;
   cam.x = 0; cam.y = 0;
@@ -1777,15 +1774,15 @@ function showHome(v) {
   $('btnMenu').innerHTML = icon(mode === 'net' ? 'menu' : 'pause');
 }
 
-// ---------- диалоги и снекбар ----------
+// ---------- dialogs and snackbar ----------
 let dialogWait = 0;
-// «Ой!»: в ряд — слева «В меню» (решение владельца: держится слева, как раньше), справа большая жёлтая «Продолжить»
-const goOutActions = (go, out) => [{ label: 'В меню', kind: 'pz-out', icon: 'home', onClick: out }, { label: 'Продолжить', kind: 'filled pz-go', icon: 'play', onClick: go }];
-// wait — сколько мс после появления кнопки не нажимаются (inert: ни касанием, ни с клавиатуры)
+// "Oops!": in a row — "Menu" on the left (design decision: it stays on the left, as before), the big yellow "Continue" on the right
+const goOutActions = (go, out) => [{ label: t('btn.menu'), kind: 'pz-out', icon: 'home', onClick: out }, { label: t('btn.continue'), kind: 'filled pz-go', icon: 'play', onClick: go }];
+// wait — for how many ms after appearing the buttons can't be pressed (inert: neither by touch nor by keyboard)
 function dialog(title, body, actions, { cls = '', top = '', wait = 0 } = {}) {
-  endFabEdit(); // игра кончилась или выход, пока настраивал кнопку
-  stopBoostPreview(); // проба рывка из «Звуков» не доигрывает поверх нового окна
-  pzSnake = null; // новое окно поверх паузы — её змейка и плашки ушли
+  endFabEdit(); // the game ended or was left while the button was being set up
+  stopBoostPreview(); // the boost preview from "Sounds" doesn't keep playing over the new dialog
+  pzSnake = null; // a new dialog over the pause — its snake and chips are gone
   $('dlgBox').className = `dialog ${cls}`;
   $('dlgTop').innerHTML = top;
   $('dlgTitle').textContent = title;
@@ -1800,7 +1797,7 @@ function dialog(title, body, actions, { cls = '', top = '', wait = 0 } = {}) {
     b.addEventListener('click', a.onClick);
     box.appendChild(b);
   }
-  // «Ой!» появляется, пока палец ещё водит змейку: кнопки на время wait не нажимаются (хозяин комнаты закрыл бы её всем)
+  // "Oops!" appears while the finger is still steering: the buttons are disabled for `wait` (the host would close the room for everyone)
   clearTimeout(dialogWait);
   box.inert = wait > 0;
   if (wait) dialogWait = setTimeout(() => { box.inert = false; }, wait);
@@ -1815,19 +1812,19 @@ function snack(text) {
   clearTimeout(snackTimer);
   snackTimer = setTimeout(() => s.classList.remove('show'), 2400);
 }
-// успех (место, раскраска) — не надписью, а волной золотого свечения по своей змейке от головы к хвосту:
-// бусины на гребне вспыхивают и чуть раздуваются. Надписи мешали играть — решение владельца.
+// success (place, skin) is shown not as text but as a wave of golden glow along your snake from head to tail:
+// the beads on the crest flash and swell a little. Text got in the way of playing — design decision.
 const GLOW_DUR = 1.1;
 let glow = null; // { t0, waves }
 function flashMe(waves, sound) {
-  if (glow && glow.who === me && time - glow.t0 < GLOW_DUR * glow.waves * 0.5) { // уже идёт — не перезапускать
-    if (waves <= glow.waves) return;           // и звук не повторять: несколько успехов разом — один сигнал
+  if (glow && glow.who === me && time - glow.t0 < GLOW_DUR * glow.waves * 0.5) { // already running — don't restart
+    if (waves <= glow.waves) return;           // and don't repeat the sound: several successes at once — one signal
     glow.waves = waves;
-  } else glow = { t0: time, waves, who: me }; // новая змейка после «Продолжить» чужую волну не подхватит
+  } else glow = { t0: time, waves, who: me }; // a new snake after "Continue" doesn't pick up the old one's wave
   if (sound) sound();
 }
 function clearGlow() { glow = null; }
-// сила свечения бусины i из n (0…1) или null, если волны нет
+// glow strength of bead i out of n (0…1), or null if there's no wave
 function glowOf(n) {
   if (!glow) return null;
   const t = (time - glow.t0) / GLOW_DUR;
@@ -1836,10 +1833,10 @@ function glowOf(n) {
   return (i) => { const d = (i - p) / w; return d * d > 9 ? 0 : Math.exp(-d * d); };
 }
 
-// ---------- эффекты: глоток, искры, толчок камеры ----------
+// ---------- effects: gulp, sparks, camera kick ----------
 function clearFx() { effects = []; gulps = []; lumps = []; sparks = []; sheds = []; kick.t = -9; slowUntil = 0; gulpT = -9; }
 const inView = (x, y, m = 0) => Math.abs(x - cam.x) < W / 2 / cam.z + m && Math.abs(y - cam.y) < H / 2 / cam.z + m;
-function onGulp(f) { // крошка f ({ x, y, r, c }) съедена своей змейкой
+function onGulp(f) { // crumb f ({ x, y, r, c }) was eaten by your snake
   if (gulps.length < 40) gulps.push({ x: f.x, y: f.y, r: f.lr ?? foodLookOf(f.v), c: f.c, t: time });
   gulpT = time;
   if (!lumps.length || time - lumps[lumps.length - 1] > 0.12) { lumps.push(time); if (lumps.length > 5) lumps.shift(); }
@@ -1848,7 +1845,7 @@ function addSpark(x, y, vx, vy, c, r, life) {
   if (sparks.length >= 260) sparks.shift();
   sparks.push({ x, y, vx, vy, c, r, t: time, life });
 }
-// змейка погибла — её бусины разлетаются искрами её цветов
+// a snake died — its beads scatter as sparks of its colors
 function burst(sn, sound = true) {
   const segs = sn && sn.segs, n = segs ? segs.length : 0;
   if (!n || !inView(segs[0].x, segs[0].y, bodyLenOf(sn.mass))) return;
@@ -1861,22 +1858,22 @@ function burst(sn, sound = true) {
     addSpark(q.x, q.y, Math.cos(a) * v, Math.sin(a) * v, segColor(sn.skin, i), sn.r * (0.45 + Math.random() * 0.4), 0.45 + Math.random() * 0.4);
   }
 }
-// звук события на арене: с той стороны экрана, где оно, к краю тише; в демо за меню — молча
+// sound of an arena event: from the side of the screen where it is, quieter toward the edge; silent in the demo behind the menu
 const lastPlaced = new Map();
 function placed(x, y, play) {
   if (!mode) return;
   const now = performance.now();
-  if (now - (lastPlaced.get(play) || 0) < 100) return; // несколько одинаковых разом — один звук
+  if (now - (lastPlaced.get(play) || 0) < 100) return; // several identical ones at once — one sound
   lastPlaced.set(play, now);
   const px = (x - cam.x) * cam.z / (W / 2), py = (y - cam.y) * cam.z / (H / 2);
   play(clamp(px, -1, 1) * 0.8, clamp(1 - 0.45 * Math.hypot(px, py), 0.35, 1));
 }
-// проскочил впритирку: голова прошла рядом с чужим телом — свист с той стороны (и тик на Android).
-// Срабатывает при входе в зазор; снова — когда отошёл и прошло полсекунды
+// a near miss: the head passed right by another body — a whistle from that side (and a tick on Android).
+// Fires when entering the gap; again — after moving away and half a second passing
 let nearArmed = true, nearT = 0, nearOdd = false;
 function checkNear() {
   if (!mode || ui !== 'play' || !me || me.alive === false || me.inv > 0) { nearArmed = true; return; }
-  if ((nearOdd = !nearOdd)) return; // через кадр: звук не требует точности до кадра
+  if ((nearOdd = !nearOdd)) return; // every other frame: the sound doesn't need frame accuracy
   const h = me.segs[0], close = Math.max(6, me.r * 0.6);
   let gap = Infinity, gx = 0, gy = 0;
   for (const o of sceneSnakes()) {
@@ -1894,10 +1891,10 @@ function checkNear() {
   if (gap > close * 2.5) { nearArmed = true; return; }
   if (gap < close && nearArmed && time - nearT > 0.5) {
     nearArmed = false; nearT = time;
-    sfx.near(Math.abs(gx) > 2 ? Math.sign(gx) * 0.6 : 0); // тело левее головы на экране — свист слева
+    sfx.near(Math.abs(gx) > 2 ? Math.sign(gx) * 0.6 : 0); // the body is left of the head on screen — whistle on the left
   }
 }
-// пыльца пойманной бабочки
+// pollen of a caught butterfly
 function pollen(x, y, c) {
   if (!inView(x, y, 60)) return;
   for (let j = 0; j < 12; j++) {
@@ -1905,14 +1902,14 @@ function pollen(x, y, c) {
     addSpark(x, y, Math.cos(a) * v, Math.sin(a) * v - 30, j % 3 ? c : GOLD, 3 + Math.random() * 4, 0.5 + Math.random() * 0.5);
   }
 }
-// толчок камеры: z — насколько приблизить, shake — тряска (точки экрана). При «Уменьшить движение» — без толчков
+// camera kick: z — how much to zoom in, shake — shaking (screen points). With "Reduce motion" — no kicks
 function camKick(z, shake) {
   if (REDUCED) return;
   const left = Math.exp(-(time - kick.t) * 9);
   kick.z = Math.max(z, kick.z * left); kick.shake = Math.max(shake, kick.shake * left); kick.t = time;
 }
-// своя змейка: голова раздувается после глотка, комок катится по телу
-const LUMP_V = 45; // бусин в секунду
+// your own snake: the head swells after a gulp, a lump rolls along the body
+const LUMP_V = 45; // beads per second
 function lumpAt(i) {
   let a = 0;
   for (const t of lumps) {
@@ -1923,13 +1920,12 @@ function lumpAt(i) {
 }
 const headBump = () => { const k = (time - gulpT) / 0.18; return k < 1 ? 1 - k : 0; };
 
-// подсказка управления — только в первой игре на устройстве
+// controls hint — only in the first game on a device
 let hintTimer = 0;
 function showHint() {
   if (save.hinted) return;
   const h = $('hint');
-  h.textContent = inputKind === 'touch' ? 'Коснись экрана и веди пальцем — змейка ползёт следом. Молния — ускорение'
-    : 'Змейка ползёт к курсору. Кнопка мыши или пробел — ускорение';
+  h.textContent = inputKind === 'touch' ? t('hint.touch') : t('hint.mouse');
   h.hidden = false; h.classList.remove('fade');
   save.hinted = true; persist();
   clearTimeout(hintTimer);
@@ -1937,20 +1933,20 @@ function showHint() {
 }
 function hideHint() { clearTimeout(hintTimer); $('hint').hidden = true; }
 
-// ---------- главный экран ----------
+// ---------- home screen ----------
 
-// выбор змейки (решение владельца, вариант «Б»): стрелки и свайп по змейке меняют вид (бусинки, рыбка, …),
-// цветные кружки под названием — раскраски этого вида; закрытые — тусклые с замком. Играть можно только открытыми.
+// snake picker (design decision, variant "B"): arrows and swiping the snake change the type (beads, fish, …),
+// colored swatches under the name are that type's skins; locked ones are dim with a lock. Only unlocked ones can be played.
 let viewSkin = save.skin;
 const viewAt = (k) => { viewSkin = k; if (unlocked(SKINS[k])) { save.skin = k; persist(); } renderHome(); };
-// к виду ti: своя раскраска, если она этого вида; иначе последняя открытая; если закрыты все — первая (покажет цену)
+// to type ti: your own skin if it's of that type; otherwise the last unlocked one; if all are locked — the first (shows its price)
 const toType = (ti) => {
   if (SKINS[save.skin].type === ti && unlocked(SKINS[save.skin])) return save.skin;
   const open = SKINS_OF[ti].filter((i) => unlocked(SKINS[i]));
   return open.length ? open[open.length - 1] : SKINS_OF[ti][0];
 };
 const stepSkin = (d) => viewAt(toType((SKINS[viewSkin].type + d + TYPES.length) % TYPES.length));
-// кружок раскраски: её цвета секторами
+// a skin swatch: its colors as sectors
 const swatchBg = (k) => {
   const cols = [...new Set(SKINS[k].p.map((p) => PAL[p]))].slice(0, 8);
   return cols.length > 1 ? `conic-gradient(${cols.map((c, i) => `${c} ${(i / cols.length * 100).toFixed(1)}% ${((i + 1) / cols.length * 100).toFixed(1)}%`).join(',')})` : cols[0];
@@ -1958,7 +1954,7 @@ const swatchBg = (k) => {
 $('swatches').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) viewAt(+b.dataset.k); });
 $('skinPrev').addEventListener('click', () => stepSkin(-1));
 $('skinNext').addEventListener('click', () => stepSkin(1));
-// свайп по змейке тоже листает
+// swiping the snake flips through too
 let swipeX = null;
 const pv = $('preview');
 pv.addEventListener('pointerdown', (e) => { swipeX = e.clientX; });
@@ -1976,21 +1972,21 @@ function renderHome() {
   if (viewSkin !== save.skin && unlocked(SKINS[viewSkin])) { save.skin = viewSkin; persist(); }
   $('stars').innerHTML = `${icon('star')}${stars()}`;
   const sk = SKINS[viewSkin], open = unlocked(sk);
-  $('typeName').textContent = TYPES[sk.type].name;
-  $('skinName').textContent = sk.name;
-  const focusK = document.activeElement?.closest?.('#swatches button')?.dataset.k; // клавиатура: фокус остаётся на выбранном кружке
+  $('typeName').textContent = typeName(sk.type);
+  $('skinName').textContent = skinName(sk);
+  const focusK = document.activeElement?.closest?.('#swatches button')?.dataset.k; // keyboard: focus stays on the selected swatch
   $('swatches').innerHTML = SKINS_OF[sk.type].map((k) => {
     const op = unlocked(SKINS[k]);
-    return `<button data-k="${k}" class="${k === viewSkin ? 'on' : ''}${op ? '' : ' locked'}" aria-pressed="${k === viewSkin}" style="background:${swatchBg(k)}" aria-label="${esc(SKINS[k].name)}${op ? '' : ' (закрыта)'}">${op ? '' : icon('lock')}</button>`;
+    return `<button data-k="${k}" class="${k === viewSkin ? 'on' : ''}${op ? '' : ' locked'}" aria-pressed="${k === viewSkin}" style="background:${swatchBg(k)}" aria-label="${esc(op ? skinName(SKINS[k]) : t('skin.locked', skinName(SKINS[k])))}">${op ? '' : icon('lock')}</button>`;
   }).join('');
   if (focusK !== undefined) $('swatches').querySelector(`[data-k="${focusK}"]`)?.focus();
-  $('skinLock').innerHTML = open ? '' : `${icon('lock')}ещё ${sk.stars - stars()} ★`;
+  $('skinLock').innerHTML = open ? '' : `${icon('lock')}${t('skin.left', sk.stars - stars())}`;
   document.querySelectorAll('#diff button').forEach((b) => b.classList.toggle('on', b.dataset.d === save.diff));
   const v = save.best[save.diff] || 0;
-  $('best').innerHTML = v ? `${icon('trophy')}рекорд ${v}` : '';
+  $('best').innerHTML = v ? `${icon('trophy')}${t('home.best', v)}` : '';
 }
 
-// превью: змейка раскраски k ползёт волной на месте (главная — выбранная, пауза — своя)
+// preview: skin k's snake crawls in a wave in place (home — the selected one, pause — your own)
 const drawPreview = () => drawWave(pv, viewSkin);
 function drawWave(cv, k) {
   const cw = cv.clientWidth, ch = cv.clientHeight;
@@ -2004,7 +2000,7 @@ function drawWave(cv, k) {
   const pts = [];
   for (let i = 0; i <= n; i++) {
     const x = x0 - i * sp;
-    pts.push({ x, y: cy + Math.sin(x / (r * 3.2) + time * 3) * ch * 0.2 }); // изгибы бегут от головы к хвосту — ползёт головой вперёд
+    pts.push({ x, y: cy + Math.sin(x / (r * 3.2) + time * 3) * ch * 0.2 }); // the bends run from head to tail — it crawls head first
   }
   g.globalAlpha = open ? 1 : 0.35;
   for (let i = n - (n & 1); i >= 2; i -= 2) {
@@ -2023,16 +2019,16 @@ function drawWave(cv, k) {
   g.globalAlpha = 1;
 }
 
-// имя нужно только в совместной игре: его видят остальные в комнате
+// the name is only needed when playing together: the others in the room see it
 const nameFieldHtml = () => '<div class="field name-field"><input id="nick" maxlength="12" autocomplete="off" placeholder=" ">' +
-  '<label for="nick">Твоё имя</label></div>';
+  `<label for="nick">${t('name.label')}</label></div>`;
 function bindName() {
   const el = $('nick');
   el.value = save.name;
   el.addEventListener('input', () => { save.name = el.value.trim().slice(0, 12); persist(); });
   el.addEventListener('keydown', (e) => { if (e.key === 'Enter') el.blur(); });
 }
-// играть вместе: создать комнату или войти по коду
+// play together: create a room or join with a code
 let createOpts = { mode: 'team', diff: 'easy' };
 function segHtml(name, opts) {
   return `<div class="seg" data-seg="${name}">${opts.map(([v, l]) =>
@@ -2040,15 +2036,15 @@ function segHtml(name, opts) {
 }
 function openTogether() {
   if (navigator.onLine === false) {
-    dialog('Нужен интернет', '<p>Играть вместе можно только через интернет. Одному — и без сети.</p>', [{ label: 'Понятно', kind: 'filled', onClick: closeDialog }]);
+    dialog(t('net.need'), `<p>${t('net.needText')}</p>`, [{ label: t('btn.ok'), kind: 'filled', onClick: closeDialog }]);
     return;
   }
-  dialog('Играть вместе', nameFieldHtml() +
-    `<button class="btn filled big wide" id="dCreate">${icon('group')}Создать комнату</button>` +
-    '<div class="or">или войди по коду</div>' +
+  dialog(t('btn.together'), nameFieldHtml() +
+    `<button class="btn filled big wide" id="dCreate">${icon('group')}${t('together.create')}</button>` +
+    `<div class="or">${t('together.or')}</div>` +
     '<div class="join"><div class="field"><input id="code" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="off" placeholder=" ">' +
-    '<label for="code">Код комнаты</label></div><button class="btn tonal big" id="dJoin">Войти</button></div>',
-    [{ label: 'Закрыть', kind: 'text', onClick: closeDialog }]);
+    `<label for="code">${t('together.code')}</label></div><button class="btn tonal big" id="dJoin">${t('btn.join')}</button></div>`,
+    [{ label: t('btn.close'), kind: 'text', onClick: closeDialog }]);
   bindName();
   const code = $('code');
   code.value = inviteCode && /^\d{4}$/.test(inviteCode) ? inviteCode : '';
@@ -2064,16 +2060,16 @@ function openTogether() {
 }
 $('btnTogether').addEventListener('click', openTogether);
 function openCreate() {
-  dialog('Новая комната',
-    `<div class="sub">Режим</div>${segHtml('mode', [['team', 'Команда'], ['ffa', 'Все против всех']])}` +
+  dialog(t('newroom.title'),
+    `<div class="sub">${t('newroom.mode')}</div>${segHtml('mode', [['team', t('newroom.team')], ['ffa', t('newroom.ffa')]])}` +
     '<p class="hint" id="modeHint"></p>' +
-    `<div class="sub">Боты</div>${segHtml('diff', [['easy', 'Лёгкие'], ['medium', 'Средние'], ['hard', 'Сложные']])}`,
-    [{ label: 'Отмена', kind: 'text', onClick: closeDialog },
-      { label: 'Создать', kind: 'filled', onClick: () => startNet(hello({ t: 'create', ...createOpts })) }]);
+    `<div class="sub">${t('newroom.bots')}</div>${segHtml('diff', [['easy', t('newroom.easy')], ['medium', t('newroom.medium')], ['hard', t('newroom.hard')]])}`,
+    [{ label: t('btn.cancel'), kind: 'text', onClick: closeDialog },
+      { label: t('btn.create'), kind: 'filled', onClick: () => startNet(hello({ t: 'create', ...createOpts })) }]);
   const hint = () => {
     $('modeHint').textContent = createOpts.mode === 'team'
-      ? 'Свои змейки проходят друг сквозь друга — играете вместе против ботов.'
-      : 'Подрезать можно и друг друга.';
+      ? t('newroom.teamHint')
+      : t('newroom.ffaHint');
   };
   hint();
   document.querySelectorAll('#dlg .seg').forEach((seg) => {
@@ -2087,30 +2083,28 @@ function openCreate() {
   });
 }
 
-// ---------- как играть и офлайн ----------
+// ---------- how to play and offline ----------
 const isStandalone = (window.matchMedia && matchMedia('(display-mode: standalone)').matches) ||
   (window.matchMedia && matchMedia('(display-mode: fullscreen)').matches) || navigator.standalone === true;
 function installHint() {
   if (isStandalone) return '';
-  if (IOS) return 'Чтобы играть в самолёте: Safari → «Поделиться» → «На экран „Домой“», затем один раз открой игру с иконки, пока есть интернет.';
-  if (/Android/.test(navigator.userAgent)) return 'Чтобы играть в самолёте: Chrome → ⋮ → «Добавить на главный экран», затем один раз открой игру с иконки при интернете.';
+  if (IOS) return t('install.ios');
+  if (/Android/.test(navigator.userAgent)) return t('install.android');
   return '';
 }
-let offline = { cls: '', ic: 'cloudOff', text: 'Проверяю, сохранена ли игра для офлайна…' };
+let offline = { cls: '', ic: 'cloudOff', text: t('offline.checking') };
 $('btnInfo').addEventListener('click', () => {
-  const ctl = isTouch
-    ? 'Коснись экрана в любом месте и веди пальцем — это джойстик. Держи молнию, чтобы ускориться: каждая секунда сжигает 5 % длины, но не меньше 10. Размер и место молнии — на паузе.'
-    : 'Змейка ползёт к курсору мыши. Левая кнопка или пробел — ускорение: каждая секунда сжигает 5 % длины, но не меньше 10. Можно стрелками ← →. Пауза — Esc.';
+  const ctl = isTouch ? t('help.touch') : t('help.mouse');
   const ih = installHint();
-  dialog('Как играть', `<p>${ctl}</p><p>Подрежь соперника — пусть врежется в тебя головой. Золотая стрелка с короной у края экрана показывает, где лидер.</p>` +
-    `<p>Звёзды за еду, победы и места открывают новых змеек и их раскраски.</p>` +
-    `<div class="note ${offline.cls}">${icon(offline.ic)}<span>${offline.text}${ih ? ` ${ih}` : ''}</span></div>` + `<p class="muted">Версия ${VERSION}</p>` + (IOS_PWA ? `<p class="muted">${screenInfo()}</p>` : ''),
-  [{ label: 'Понятно', kind: 'filled', onClick: closeDialog }]);
+  dialog(t('a11y.help'), `<p>${ctl}</p><p>${t('help.cut')}</p>` +
+    `<p>${t('help.stars')}</p>` +
+    `<div class="note ${offline.cls}">${icon(offline.ic)}<span>${offline.text}${ih ? ` ${ih}` : ''}</span></div>` + `<p class="muted">${t('help.version', VERSION)}</p>` + (IOS_PWA ? `<p class="muted">${screenInfo()}</p>` : ''),
+  [{ label: t('btn.ok'), kind: 'filled', onClick: closeDialog }]);
 });
 let updatesWatched = false;
 async function checkOffline() {
-  const set = (cls, ic, text) => { offline = { cls, ic, text }; }; // показывается в «Как играть»
-  if (!('serviceWorker' in navigator) || !window.caches) { set('warn', 'cloudOff', 'Этот браузер не умеет сохранять игру для офлайна.'); return; }
+  const set = (cls, ic, text) => { offline = { cls, ic, text }; }; // shown in "How to play"
+  if (!('serviceWorker' in navigator) || !window.caches) { set('warn', 'cloudOff', t('offline.unsupported')); return; }
   try {
     const reg = await navigator.serviceWorker.register('sw.js');
     if (!updatesWatched) { updatesWatched = true; watchUpdates(reg); }
@@ -2121,15 +2115,15 @@ async function checkOffline() {
       const c = await caches.open(k);
       if ((await c.match('index.html')) && (await c.match('client.js')) && (await c.match('core.js'))) ok = true;
     }
-    if (ok) set('ok', 'cloudDone', 'Игра сохранена на устройстве: одному можно играть без интернета.');
-    else { set('', 'cloudOff', 'Сохраняю игру для офлайна…'); setTimeout(checkOffline, 1500); }
+    if (ok) set('ok', 'cloudDone', t('offline.ok'));
+    else { set('', 'cloudOff', t('offline.saving')); setTimeout(checkOffline, 1500); }
   } catch (e) {
-    set('warn', 'cloudOff', 'Не получилось включить офлайн-режим: ' + esc(e.message));
+    set('warn', 'cloudOff', t('offline.fail', esc(e.message)));
   }
 }
 checkOffline();
 
-// ---------- камера ----------
+// ---------- camera ----------
 const baseZoom = () => Math.min(W, H) / 760;
 function updateCamera(dt) {
   let target = me && (mode === 'net' || me.alive) ? me : null;
@@ -2143,29 +2137,29 @@ function updateCamera(dt) {
     const k = Math.min(1, dt * (target === me ? 12 : 3));
     cam.x += (h.x - cam.x) * k; cam.y += (h.y - cam.y) * k;
     tr = target.r;
-    // линька: камера сперва держит прежний масштаб — видно, как змейка толстеет, — и только потом плавно отъезжает
+    // molt: the camera first keeps the old zoom — you see the snake getting thicker — and only then smoothly pulls back
     if (target.moltT !== undefined && time - target.moltT < MOLT_FX + 0.2) tr = STAGE_R[target.moltFrom];
   }
-  // чем толще змейка, тем дальше камера — гиганту нужно видеть, кого он окружает
+  // the thicker the snake, the farther the camera — a giant needs to see whom it's surrounding
   let zt = baseZoom() * clamp(1.3 * Math.pow(11 / tr, 0.5), 0.5, 1.3);
   if (mode === null) zt *= 0.8;
   cam.z += (zt - cam.z) * Math.min(1, dt * 2);
 }
 
-// ---------- рисование ----------
+// ---------- drawing ----------
 const GULP_DUR = 0.12;
-let lastDt = 0; // шаг кадра — для искр (на паузе кадры не рисуются)
-const camT = { k: 1, e: 0, f: 0 }; // матрица камеры текущего кадра: её задаёт draw(), по ней повёрнуты бусины
-// ускорение: по сегментам от головы к хвосту бежит волна, каждый светится своим цветом
+let lastDt = 0; // frame step — for sparks (no frames are drawn in pause)
+const camT = { k: 1, e: 0, f: 0 }; // the current frame's camera matrix: set by draw(), beads are rotated by it
+// boost: a wave runs along the segments from head to tail, each glowing in its own color
 const boostWave = (i) => { const w = 0.5 + 0.5 * Math.sin(time * 16 - i * 0.22); return w * w; };
 const isMate = (s) => mode === 'net' && net.roomMode === 'team' && s.human && s.team && s.team === net.myTeam;
-// ---------- линька ----------
-// Сначала свечение бежит от хвоста к голове (MOLT_CHARGE с), потом от головы к хвосту катится волна: за ней бусины
-// уже новой толщины и нового наряда, на гребне — раздуваются с перехлёстом. Старая кожа остаётся лежать бледной
-// тенью и рассыпается искрами (sheds). Толщина в мире (s.r) растёт с той же паузы MOLT_WAIT за MOLT_T — вместе с волной.
-const MOLT_CHARGE = MOLT_WAIT, MOLT_FX = 1.35, SHED_T = 1.3; // толщина в мире начинает расти вместе с волной
+// ---------- molt ----------
+// First a glow runs from tail to head (MOLT_CHARGE s), then a wave rolls from head to tail: behind it the beads
+// already have the new thickness and outfit, on the crest they swell and overshoot. The old skin stays behind as a pale
+// shadow and crumbles into sparks (sheds). The world thickness (s.r) grows after the same MOLT_WAIT pause over MOLT_T — together with the wave.
+const MOLT_CHARGE = MOLT_WAIT, MOLT_FX = 1.35, SHED_T = 1.3; // the world thickness starts growing together with the wave
 let sheds = []; // { t, pts, r, skin, st, burst }
-// заметили, что змейка перелиняла (ступень выросла с прошлого кадра); увидели впервые — без линьки
+// noticed the snake has molted (the stage grew since the last frame); seen for the first time — no molt
 function moltCheck(s) {
   const st = s.stage || 0;
   if (s.seenSt === undefined) { s.seenSt = st; return; }
@@ -2180,7 +2174,7 @@ function moltCheck(s) {
   if (sheds.length >= 6) sheds.shift();
   sheds.push({ t: time + MOLT_CHARGE, pts, r: STAGE_R[s.moltFrom], skin: s.skin, st: s.moltFrom, burst: false });
 }
-// старая кожа: бледные силуэты бусин прежней толщины поверх змейки, гаснут и рассыпаются искрами
+// old skin: pale silhouettes of the beads at the previous thickness over the snake, fading and crumbling into sparks
 function drawSheds(vx0, vy0, vx1, vy1) {
   sheds = sheds.filter((d) => time - d.t < SHED_T);
   const k = camT.k;
@@ -2188,7 +2182,7 @@ function drawSheds(vx0, vy0, vx1, vy1) {
     const p = (time - d.t) / SHED_T;
     if (p < 0) continue;
     const pts = d.pts, n = pts.length;
-    if (!d.burst && p > 0.45) { // рассыпается
+    if (!d.burst && p > 0.45) { // crumbles
       d.burst = true;
       for (let j = 0; j < Math.min(28, n); j++) {
         const q = pts[Math.floor(j / Math.min(28, n) * n)], a = Math.random() * TAU, v = 40 + Math.random() * 120;
@@ -2212,19 +2206,19 @@ function drawSheds(vx0, vy0, vx1, vy1) {
   }
   ctx.globalAlpha = 1;
 }
-// переливы 5-й ступени и выше: по телу от головы к хвосту бегут узкие светлые полосы
+// shimmer from the 5th stage up: narrow light bands run along the body from head to tail
 const shimmerAt = (i) => { const w = Math.sin(i * 0.11 - time * 2.6); return w > 0.6 ? 0.6 * Math.pow(w, 16) : 0; };
 function drawSnake(s, vx0, vy0, vx1, vy1) {
   moltCheck(s);
   const segs = s.segs, st = s.stage || 0;
   const h = segs[0], n = segs.length;
-  // линька идёт: mp — сколько секунд с её начала; rOld/rNew — толщина до и после
+  // a molt is in progress: mp — seconds since it started; rOld/rNew — thickness before and after
   const mp = s.moltT === undefined ? 9 : time - s.moltT, molting = mp < MOLT_FX;
   const rNew = STAGE_R[st], rOld = molting ? STAGE_R[s.moltFrom] : s.r, r = molting ? rNew : s.r;
   const charging = molting && mp < MOLT_CHARGE;
   const front = !molting ? 0 : charging ? (1 - mp / MOLT_CHARGE) * (n + 10) : (mp - MOLT_CHARGE) / (MOLT_FX - MOLT_CHARGE) * (n + 30) - 10;
   const fw = 4 + n * 0.04;
-  // волна линьки у бусины i: pass — прошла ли (0…1), bump — гребень (0…1)
+  // the molt wave at bead i: pass — whether it has passed (0…1), bump — the crest (0…1)
   const passAt = (i) => (!molting ? 1 : charging ? 0 : clamp(0.5 + (front - i) / 3, 0, 1));
   const bumpAt = (i) => { if (!molting) return 0; const d = (i - front) / (charging ? 6 : fw); return d * d > 9 ? 0 : Math.exp(-d * d); };
   const baseR = (i) => (molting ? rOld + (rNew - rOld) * passAt(i) : r);
@@ -2233,10 +2227,10 @@ function drawSnake(s, vx0, vy0, vx1, vy1) {
   if (h.x < vx0 - margin || h.x > vx1 + margin || h.y < vy0 - margin || h.y > vy1 + margin) return;
   const x0 = vx0 - r * 2, x1 = vx1 + r * 2, y0 = vy0 - r * 2, y1 = vy1 + r * 2;
   ctx.globalAlpha = s.inv > 0 ? 0.45 + 0.25 * Math.sin(time * 18) : 1;
-  // рисуем бусины через сегмент: меньше перерисовки, а тело всё равно сплошное; мелкую на экране — реже
+  // beads are drawn every other segment: less overdraw, and the body still looks solid; a small one on screen — even sparser
   const step = r * cam.z < 3 ? 4 : 2;
   const a0 = ctx.globalAlpha, boost = s.isBoosting, gw = glow && s === glow.who ? glowOf(n) : null;
-  if (st >= 5 && !molting) { // 6-я ступень: золотое сияние вокруг тела и искорки с хвоста
+  if (st >= 5 && !molting) { // 6th stage: a golden glow around the body and sparkles from the tail
     const g = r * 1.9;
     ctx.globalAlpha = a0 * 0.16;
     for (let i = (n - 1) & ~1; i >= 0; i -= 6) {
@@ -2252,7 +2246,7 @@ function drawSnake(s, vx0, vy0, vx1, vy1) {
       addSpark(t.x, t.y, Math.cos(a) * 40, Math.sin(a) * 40, GOLD, r * 0.22, 0.6);
     }
   }
-  if (gw) { // золотой ореол под гребнем волны успеха
+  if (gw) { // a golden halo under the crest of the success wave
     const g = r * 2.6;
     for (let i = (n - 1) & ~1; i >= 0; i -= step) {
       const w = gw(i), q = segs[i];
@@ -2262,7 +2256,7 @@ function drawSnake(s, vx0, vy0, vx1, vy1) {
     }
     ctx.globalAlpha = a0;
   }
-  if (molting) { // линька: свечение бежит к голове (белое), потом гребень волны светится цветами бусин
+  if (molting) { // molt: the glow runs to the head (white), then the wave crest glows in the beads' colors
     for (let i = (n - 1) & ~1; i >= 0; i -= 2) {
       const w = bumpAt(i), q = segs[i];
       if (w < 0.05 || q.x < x0 || q.x > x1 || q.y < y0 || q.y > y1) continue;
@@ -2282,13 +2276,13 @@ function drawSnake(s, vx0, vy0, vx1, vy1) {
     }
     ctx.globalAlpha = a0;
   }
-  // бусина повёрнута по ходу тела: матрица — мировая камера × поворот × масштаб
+  // a bead is rotated along the body: matrix — world camera × rotation × scale
   const k = camT.k;
   const tail = Math.min(10, n >> 2);
-  // радиус бусины: хвост сужается; на гребне волны успеха — шире
+  // bead radius: the tail tapers; on the crest of the success wave — wider
   const mine = s === me && lumps.length > 0;
   const radAt = (i, gwi) => { const b = baseR(i); return (i > n - tail ? b * (0.55 + 0.45 * (n - i) / tail) : b) * (1 + 0.22 * gwi + 0.3 * (charging ? 0 : bumpAt(i)) + (mine ? 0.16 * lumpAt(i) : 0)); };
-  // edge > 0 — проход обводки: силуэты бусин шире на edge; иначе сами бусины
+  // edge > 0 — the outline pass: bead silhouettes wider by edge; otherwise the beads themselves
   const beads = (edge) => {
     for (let i = (n - 1) & ~1; i >= 2; i -= step) {
       const q = segs[i];
@@ -2297,13 +2291,13 @@ function drawSnake(s, vx0, vy0, vx1, vy1) {
       const rr = radAt(i, gwi);
       const p = segs[i - 1], o = segs[i + 1] || q;
       let dx = p.x - o.x, dy = p.y - o.y, d = Math.hypot(dx, dy);
-      if (d < 1e-6) { dx = Math.cos(s.a); dy = Math.sin(s.a); d = 1; } // соседи совпали (хвост при росте) — смотрим по ходу головы
+      if (d < 1e-6) { dx = Math.cos(s.a); dy = Math.sin(s.a); d = 1; } // neighbors coincide (the tail while growing) — use the head's course
       const sc = k * (rr + edge) / BEAD_U / d;
       dx *= sc; dy *= sc;
       ctx.setTransform(dx, dy, -dy, dx, k * q.x + camT.e, k * q.y + camT.f);
-      // мелкую змейку рисуем через бусину — тогда узор и цвета чередуем по нарисованным, иначе они застынут на одном
+      // a small snake is drawn every other bead — then pattern and colors alternate over the drawn ones, otherwise they'd freeze on one
       const ci = step === 4 ? i >> 1 : i, c = segColor(s.skin, ci), v = beadVar(s.skin, ci);
-      const bst = passAt(i) > 0.5 ? st : s.moltFrom; // за волной линьки — уже новый наряд
+      const bst = passAt(i) > 0.5 ? st : s.moltFrom; // behind the molt wave — already the new outfit
       if (edge) { const sp = beadSprite(s.skin, c, v, 2, bst); ctx.drawImage(sp, -sp.e, -sp.e); continue; }
       const sp = beadSprite(s.skin, c, v, 0, bst);
       ctx.drawImage(sp, -sp.e, -sp.e);
@@ -2313,13 +2307,13 @@ function drawSnake(s, vx0, vy0, vx1, vy1) {
     ctx.setTransform(k, 0, 0, k, camT.e, camT.f);
     drawHead(ctx, s.skin, h.x, h.y, s.a, s.ta, baseR(0), (1 + 0.22 * (gw ? gw(0) : 0) + (charging ? 0 : 0.3 * bumpAt(0))) * (s === me ? 1 + 0.13 * headBump() : 1), edge);
   };
-  // своя змейка — в светлой обводке: под бусинами их силуэты чуть шире (по форме вида — с гребнем, лапками, ушками)
+  // your own snake gets a light outline: under the beads their silhouettes slightly wider (shaped like the type — with crest, legs, ears)
   if (s === me) beads(1 / cam.z);
   beads(0);
   ctx.globalAlpha = 1;
 
   const rv = run && run.revenge && run.revenge.id === s.id;
-  if (rv) { // обидчик: красное кольцо вокруг головы
+  if (rv) { // offender: a red ring around the head
     ctx.beginPath(); ctx.arc(h.x, h.y, r * 1.7 + 4 * Math.sin(time * 6), 0, TAU);
     ctx.lineWidth = 3 / cam.z; ctx.strokeStyle = REVENGE; ctx.stroke();
   }
@@ -2351,9 +2345,9 @@ function drawJoystick() {
   ctx.beginPath(); ctx.arc(joy.bx + dx, joy.by + dy, 26, 0, TAU);
   ctx.fillStyle = hexA(PRIMARY, 0.85); ctx.fill();
 }
-// стрелка у края экрана к цели за его пределами
+// an arrow at the screen edge toward a target beyond it
 const meLive = () => me && (mode === 'net' || me.alive) && ui !== 'dead';
-// где лидер таблицы, если это не я: в комнате — его голова, если видна, иначе позиция из таблицы (раз в секунду)
+// where the leaderboard leader is, if it's not me: in a room — their head if visible, otherwise the position from the leaderboard (once a second)
 function leaderTarget() {
   if (!leaderId || !meLive() || leaderId === (mode === 'net' ? net.youId : me.id)) return null;
   if (mode === 'solo') { const s = world.byId.get(leaderId); return s && s.alive ? s.segs[0] : null; }
@@ -2364,15 +2358,15 @@ function leaderTarget() {
 }
 function drawPointer(tx, ty, color, crown = false) {
   const sx = W / 2 + (tx - cam.x) * cam.z, sy = H / 2 + (ty - cam.y) * cam.z;
-  // кончик стрелки — примерно в 9 px от края экрана (центр стрелки на pad от края; вырезы экрана не заходим)
+  // the arrow tip is about 9 px from the screen edge (the arrow center is pad from the edge; stays out of screen cutouts)
   const pad = 30, pl = pad + safe.l, pr = pad + safe.r, pb = pad + safe.b;
-  const underHud = hudBoxes.some((b) => sx > b.left && sx < b.right && sy < b.bottom); // голова под счётом или таблицей — не видна
+  const underHud = hudBoxes.some((b) => sx > b.left && sx < b.right && sy < b.bottom); // the head is under the score or the leaderboard — not visible
   if (sx > pl && sx < W - pr && sy > pad + safe.t && sy < H - pb && !underHud) return;
   const dx = sx - W / 2, dy = sy - H / 2;
   const at = (pt) => { const k = Math.min((W / 2 - (dx < 0 ? pl : pr)) / Math.abs(dx || 1e-6), (H / 2 - (dy < 0 ? pt : pb)) / Math.abs(dy || 1e-6)); return [W / 2 + dx * k, H / 2 + dy * k]; };
   let [px, py] = at(pad + safe.t);
-  // упёрлись в счёт или таблицу — опускаемся под них (с запасом на стрелку и корону)
-  if (hudBoxes.some((b) => px > b.left - 48 && px < b.right + 48 && py < b.bottom + 24)) { // 48 — стрелка с короной
+  // ran into the score or the leaderboard — drop below them (with room for the arrow and crown)
+  if (hudBoxes.some((b) => px > b.left - 48 && px < b.right + 48 && py < b.bottom + 24)) { // 48 — arrow with crown
     const pt = Math.max(pad + safe.t, hudBottom + 24);
     [px, py] = at(pt);
   }
@@ -2385,7 +2379,7 @@ function drawPointer(tx, ty, color, crown = false) {
   ctx.fillStyle = color; ctx.fill();
   ctx.lineWidth = 2; ctx.strokeStyle = 'rgba(0,0,0,.5)'; ctx.stroke();
   ctx.restore();
-  if (crown) { // корона рядом со стрелкой, ближе к центру экрана
+  if (crown) { // the crown next to the arrow, closer to the screen center
     ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
     drawCrown(px - Math.cos(a) * 26, py - Math.sin(a) * 26 + 6, 8, 1.5);
   }
@@ -2397,7 +2391,7 @@ function sceneSnakes() {
 function sceneFoods() { return mode === 'net' ? net.foods.values() : (world ? world.foods : []); }
 function sceneFlies() { return mode === 'net' ? net.flies : (world ? world.flies : []); }
 
-// бабочка: две скобки, внутри крошки съеденного (до пяти, крупнеют с сытостью); скобки переливаются цветами крошек
+// butterfly: two brackets with crumbs of what it ate inside (up to five, growing with fullness); the brackets shimmer in the crumbs' colors
 const FLY_C = '#A8EBFF';
 const canConic = typeof CanvasRenderingContext2D !== 'undefined' && 'createConicGradient' in CanvasRenderingContext2D.prototype;
 function drawFly(f) {
@@ -2413,7 +2407,7 @@ function drawFly(f) {
   for (let i = 0; i < cnt; i++) {
     const a = i * TAU / cnt + time * 0.8 + f.ph, x = Math.cos(a) * rho, y = Math.sin(a) * rho, hex = PAL[cols[i]] || GOLD_C;
     ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); ctx.fillStyle = hex; ctx.fill();
-    ctx.beginPath(); ctx.arc(x - r * 0.3, y - r * 0.3, r * 0.45, 0, TAU); ctx.fillStyle = 'rgba(255,255,255,0.45)'; ctx.fill(); // блик
+    ctx.beginPath(); ctx.arc(x - r * 0.3, y - r * 0.3, r * 0.45, 0, TAU); ctx.fillStyle = 'rgba(255,255,255,0.45)'; ctx.fill(); // glint
   }
   ctx.rotate(f.dir);
   let st = FLY_C;
@@ -2434,7 +2428,7 @@ function draw() {
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.fillStyle = OUTSIDE;
   ctx.fillRect(0, 0, canvas.width, canvas.height);
-  // толчок камеры: приближение и тряска быстро гаснут
+  // camera kick: zoom and shake fade quickly
   const kt = time - kick.t, kf = kt < 0.5 ? Math.exp(-kt * 9) : 0;
   const z = cam.z * (1 + kick.z * kf), sh = kick.shake * kf;
   const ox = sh ? sh * Math.sin(kt * 71) : 0, oy = sh ? sh * Math.cos(kt * 53) : 0;
@@ -2446,7 +2440,7 @@ function draw() {
 
   const hw = W / 2 / z, hh = H / 2 / z;
   const vx0 = cam.x - hw - 30, vx1 = cam.x + hw + 30, vy0 = cam.y - hh - 30, vy1 = cam.y + hh + 30;
-  if (feast && time < feast.until) { // золотое сияние под пиром
+  if (feast && time < feast.until) { // a golden glow under the feast
     const g = ctx.createRadialGradient(feast.x, feast.y, 0, feast.x, feast.y, 420);
     g.addColorStop(0, 'rgba(255,212,71,0.22)'); g.addColorStop(1, 'rgba(255,212,71,0)');
     ctx.fillStyle = g; ctx.beginPath(); ctx.arc(feast.x, feast.y, 420, 0, TAU); ctx.fill();
@@ -2454,13 +2448,13 @@ function draw() {
   for (const f of sceneFoods()) {
     if (f.x < vx0 || f.x > vx1 || f.y < vy0 || f.y > vy1) continue;
     ctx.globalAlpha = f.life > 0 && f.life - f.age < 3 ? Math.max(0, (f.life - f.age) / 3) : 1;
-    const rr = (f.lr ??= foodLookOf(f.v)) * 1.9 * (1 + 0.12 * Math.sin(time * 3 + f.ph)); // размер по цене (f.r — для поедания)
+    const rr = (f.lr ??= foodLookOf(f.v)) * 1.9 * (1 + 0.12 * Math.sin(time * 3 + f.ph)); // size by value (f.r is for eating)
     ctx.drawImage(foodSprite(f.c), f.x - rr, f.y - rr, rr * 2, rr * 2);
   }
   ctx.globalAlpha = 1;
 
   const snakes = sceneSnakes();
-  // мелкие сверху крупных: так видно, кто кого подрезает
+  // small ones on top of big ones: this way you see who cuts off whom
   const order = snakes.filter((s) => s !== me).sort((a, b) => b.mass - a.mass);
   for (const s of order) drawSnake(s, vx0, vy0, vx1, vy1);
   if (me && (mode === 'net' || me.alive)) drawSnake(me, vx0, vy0, vx1, vy1);
@@ -2468,7 +2462,7 @@ function draw() {
   for (const f of sceneFlies()) if (f.x > vx0 - 40 && f.x < vx1 + 40 && f.y > vy0 - 40 && f.y < vy1 + 40) drawFly(f);
 
   if (lumps.length && time - lumps[0] > 3) lumps.shift();
-  // крошки летят в рот своей змейке
+  // crumbs fly into your snake's mouth
   if (gulps.length) {
     const h = me && me.segs.length ? me.segs[0] : null;
     gulps = gulps.filter((g) => time - g.t < GULP_DUR);
@@ -2482,7 +2476,7 @@ function draw() {
     }
     ctx.globalAlpha = 1;
   }
-  // искры: летят, тормозят, гаснут
+  // sparks: fly, slow down, fade
   if (sparks.length) {
     sparks = sparks.filter((p) => time - p.t < p.life);
     const drag = Math.exp(-3.2 * lastDt);
@@ -2496,7 +2490,7 @@ function draw() {
     ctx.globalAlpha = 1;
   }
 
-  // вспышки побед
+  // win flashes
   effects = effects.filter((e) => time - e.t < 0.8);
   for (const e of effects) {
     const k = (time - e.t) / 0.8;
@@ -2506,7 +2500,7 @@ function draw() {
   }
   ctx.globalAlpha = 1;
 
-  if (mode) { // у края экрана — только где лидер (курс, обидчика и пир не показываем — решение владельца)
+  if (mode) { // at the screen edge — only where the leader is (course, offender and feast aren't shown — design decision)
     const lt = leaderTarget();
     if (lt) drawPointer(lt.x, lt.y, GOLD_C, true);
   }
@@ -2526,9 +2520,9 @@ function updateHud(dt) {
   runTick();
   const rk = myRank();
   $('score').innerHTML = `<b>${curLen()}</b>${rk ? `<small>#${rk.rank}</small>` : ''}`;
-  if (pzSnake) { $('pzLen').textContent = curLen(); $('pzRank').textContent = rk ? rk.rank : ''; $('pzRank').parentNode.hidden = !rk; } // меню комнаты: игра идёт
+  if (pzSnake) { $('pzLen').textContent = curLen(); $('pzRank').textContent = rk ? rk.rank : ''; $('pzRank').parentNode.hidden = !rk; } // room menu: the game goes on
 
-  // топ-3 и своя строка: в одиночной — весь мир, в комнате — с сервера
+  // top 3 and your own row: in solo — the whole world, in a room — from the host
   let rows;
   if (mode === 'net') rows = net.lb ? net.lb.top.map((t) => ({ id: t[0], name: t[1], mass: t[2], human: t[3], team: t[4] })) : [];
   else rows = sceneSnakes().filter((s) => s.alive).sort((a, b) => b.mass - a.mass).slice(0, 3);
@@ -2543,17 +2537,17 @@ function updateHud(dt) {
   let html = rows.slice(0, 3).map(row).join('');
   if (rk && rk.rank > 3 && me) html += `${rk.rank > 4 ? '<div class="gap">···</div>' : ''}${row({ id: myId, name: me.name, mass: me.mass }, rk.rank - 1)}`;
   $('board').innerHTML = html;
-  // что сверху занято (счёт, таблица, комната) — стрелка лидера обходит только эти места, между ними стоит у края
+  // what's taken at the top (score, leaderboard, room) — the leader arrow avoids only those spots and sits at the edge between them
   hudBoxes = [$('board'), document.querySelector('.hud-tl'), $('roomBox')].map((e) => e.getBoundingClientRect()).filter((b) => b.width && b.top < H / 2);
   hudBottom = Math.max(...hudBoxes.map((b) => b.bottom), 0);
 }
 
-// одиночная игра: что съела своя змейка (мир копит удалённую еду, когда track)
+// solo game: what your snake ate (the world collects removed food while track is on)
 function soloGulps(grew) {
-  const rem = world.foodRemoved, h = grew ? me.segs[0] : null; // не подросла — рядом ел сосед
+  const rem = world.foodRemoved, h = grew ? me.segs[0] : null; // didn't grow — a neighbor was eating nearby
   if (h) {
     for (const f of rem) {
-      if (f.life > 0 && f.age > f.life) continue; // растаяла сама
+      if (f.life > 0 && f.age > f.life) continue; // melted away by itself
       const d = (me.r + f.r) * 1.6 + 10;
       if ((f.x - h.x) ** 2 + (f.y - h.y) ** 2 < d * d) onGulp(f);
     }
@@ -2561,7 +2555,7 @@ function soloGulps(grew) {
   world.foodRemoved = []; world.foodAdded = [];
 }
 
-// ---------- главный цикл ----------
+// ---------- main loop ----------
 let last = performance.now();
 let lastSoloMass = 0;
 function frame(now) {
@@ -2574,9 +2568,9 @@ function frame(now) {
     selfStep(dt, now);
     netUpdate(now, dt);
     if (ui === 'play') playTime += dt;
-    // хозяин свернул игру — его комната стоит; гостю говорим, что ждём
+    // the host minimized the game — their room is frozen; tell the guest we're waiting
     if (!net.isHost && ui === 'play' && net.lastSnap && now - net.lastSnap > 2500) {
-      if (!net.waitSnack) { net.waitSnack = true; snack('Хозяин комнаты не отвечает — ждём…'); }
+      if (!net.waitSnack) { net.waitSnack = true; snack(t('room.hostWait')); }
     } else net.waitSnack = false;
   } else if (ui !== 'paused') {
     if (mode === 'solo' && me && me.alive) {
@@ -2594,7 +2588,7 @@ function frame(now) {
       if (me.maxMass > sessionBest) sessionBest = me.maxMass;
     }
   }
-  // ускорение: щелчок при старте и шорох, пока держишь
+  // boost: a click at the start and a rustle while held
   const boosting = !!(me && ui === 'play' && (mode === 'net' ? net.lastB && me.mass > MIN_BOOST_MASS : me.alive && me.isBoosting));
   if (boosting && !wasBoost) sfx.boost();
   wasBoost = boosting;
@@ -2605,8 +2599,8 @@ function frame(now) {
     draw();
     if (mode) updateHud(dt);
     else if (!$('home').hidden && $('dlg').hidden) drawPreview();
-  } else if (redraw && mode) draw(); // на паузе картинка стоит — после смены размера холста нарисовать заново
-  if (pzSnake && pzSnake.isConnected && !$('dlg').hidden) drawWave(pzSnake, save.skin); else pzSnake = null; // своя змейка в паузе
+  } else if (redraw && mode) draw(); // in pause the picture is still — redraw after the canvas was resized
+  if (pzSnake && pzSnake.isConnected && !$('dlg').hidden) drawWave(pzSnake, save.skin); else pzSnake = null; // your own snake in pause
   redraw = false;
   checkSize(now);
   requestAnimationFrame(frame);
@@ -2615,15 +2609,15 @@ function frame(now) {
 toHome();
 requestAnimationFrame(frame);
 
-// приглашение по ссылке ?room=1234
+// invitation via the ?room=1234 link
 const inviteCode = new URLSearchParams(location.search).get('room');
 if (inviteCode && /^\d{4}$/.test(inviteCode)) {
-  dialog(`Комната ${inviteCode}`, `<p>Тебя зовут играть вместе.</p>${nameFieldHtml()}`,
-    [{ label: 'Позже', kind: 'text', onClick: closeDialog }, { label: 'Войти', kind: 'filled', onClick: () => startNet(hello({ t: 'join', code: inviteCode })) }]);
+  dialog(t('room.title', inviteCode), `<p>${t('room.invite')}</p>${nameFieldHtml()}`,
+    [{ label: t('btn.later'), kind: 'text', onClick: closeDialog }, { label: t('btn.join'), kind: 'filled', onClick: () => startNet(hello({ t: 'join', code: inviteCode })) }]);
   bindName();
 }
 
-// для автотестов
+// for automated tests
 window.__snake = {
   get mode() { return mode; }, get ui() { return ui; }, get me() { return me; }, get world() { return world; },
   get net() { return net; }, auto, safeCourse, get joy() { return joy; }, get run() { return run; }, get save() { return save; }, get cam() { return cam; }, startSolo, sfx, get bg() { return backdrop && backdrop.kind; },

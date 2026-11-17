@@ -1,5 +1,5 @@
-// Минимальный WebSocket-сервер (RFC 6455) без зависимостей: только то, что нужно игре.
-// Клиент шлёт короткие текстовые кадры, сервер — текст и бинарные снимки мира.
+// Minimal dependency-free WebSocket server (RFC 6455): only what the game needs.
+// The client sends short text frames; the server sends text and binary world snapshots.
 import crypto from 'node:crypto';
 import { EventEmitter } from 'node:events';
 
@@ -55,11 +55,11 @@ export class WebSocketConn extends EventEmitter {
       const payload = Buffer.from(b.subarray(off, off + len));
       for (let i = 0; i < len; i++) payload[i] ^= mask[i & 3];
       this.buf = b.subarray(off + len);
-      if (!fin) { this.close(1003); return; } // фрагментированные кадры игре не нужны
+      if (!fin) { this.close(1003); return; } // the game doesn't need fragmented frames
       if (op === 0x1) this.emit('message', payload.toString('utf8'));
       else if (op === 0x8) { this.close(1000); return; }
       else if (op === 0x9) this.sendFrame(0xA, payload);
-      else if (op === 0xA) { /* pong: lastSeen уже обновлён */ }
+      else if (op === 0xA) { /* pong: lastSeen is already updated */ }
       else { this.close(1003); return; }
     }
   }

@@ -1,20 +1,20 @@
 <!doctype html>
-<html lang="ru">
+<html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-<title>Змейка</title>
+<title>Snake</title>
 <meta name="theme-color" content="#0D1424">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="Змейка">
+<meta name="apple-mobile-web-app-title" content="Snake">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icons/icon-192.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <style>
-/* Material 3, тёмная схема от синего; --cta — главная кнопка экрана и каждого диалога («Играть», «Создать комнату», «Понятно»):
-   тёплая на холодном фоне — ребёнок знает, что жёлтую надо жать */
+/* Material 3, dark scheme from blue; --cta is the main button of the screen and of every dialog ("Play", "Create a room", "Got it"):
+   warm on a cold background — a child knows the yellow one is the one to press */
 :root{
   --surface:#0D1424; --surf-low:#121A2D; --surf:#162034; --surf-high:#1E2A44; --surf-highest:#283552;
   --on:#E3E8F5; --on-var:#B8C2DA; --outline:#7F8AA6; --outline-var:#3A4560;
@@ -31,18 +31,20 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--surface);color:v
   -webkit-user-select:none;user-select:none;-webkit-touch-callout:none;overscroll-behavior:none}
 body{position:fixed;inset:0}
 [hidden]{display:none!important}
+/* until i18n.js has set the language (it sets <html lang>), show nothing: no flash of the wrong language */
+html:not([lang]) body{visibility:hidden}
 button{font:inherit;color:inherit;cursor:pointer;border:0;background:none;padding:0}
 svg.i{width:24px;height:24px;fill:currentColor;flex:none}
 #c{position:fixed;inset:0;width:100%;height:var(--app-h,100%);display:block;touch-action:none}
-/* установленная игра на iPhone: --app-h — полная высота экрана (окно короче на статус-бар, снизу была пустая полоса) */
+/* installed game on iPhone: --app-h is the full screen height (the window is shorter by the status bar, leaving an empty strip at the bottom) */
 #hud,.scrim,.screen{height:var(--app-h,auto)}
-/* iOS не рисует закреплённые (fixed) элементы ниже своего короткого окна — обрезает по краю. Поэтому в таком режиме
-   (класс tall ставит скрипт) страница сама высотой с экран, а поле, интерфейс и диалоги лежат в ней (absolute) */
+/* iOS doesn't draw fixed elements below its short window — it clips them at the edge. So in this mode
+   (the script sets the tall class) the page itself is as tall as the screen, and the field, UI and dialogs live inside it (absolute) */
 :root.tall,:root.tall body{height:var(--app-h)}
 :root.tall body{position:relative;inset:auto}
 :root.tall #c,:root.tall #hud,:root.tall .scrim,:root.tall .screen,:root.tall #snack,:root.tall #update{position:absolute}
 
-/* --- кнопки --- */
+/* --- buttons --- */
 .btn{height:40px;padding:0 24px;border-radius:20px;font-size:14px;font-weight:500;letter-spacing:.1px;
   display:inline-flex;align-items:center;justify-content:center;gap:8px;position:relative;overflow:hidden}
 .btn::after{content:"";position:absolute;inset:0;background:currentColor;opacity:0;transition:opacity .15s}
@@ -57,7 +59,7 @@ svg.i{width:24px;height:24px;fill:currentColor;flex:none}
   background:var(--surf-high);color:var(--on-var);box-shadow:var(--elev1);pointer-events:auto}
 .icon-btn:active{background:var(--surf-highest)}
 
-/* --- главный экран: один экран без прокрутки --- */
+/* --- home screen: a single screen, no scrolling --- */
 .screen{position:fixed;inset:0;overflow:auto;touch-action:pan-y;-webkit-overflow-scrolling:touch;
   background:rgba(13,20,36,.86);padding:calc(16px + env(safe-area-inset-top)) 20px calc(16px + env(safe-area-inset-bottom))}
 .home{max-width:420px;min-height:100%;margin:0 auto;display:flex;flex-direction:column;gap:20px;justify-content:space-between}
@@ -69,21 +71,21 @@ svg.i{width:24px;height:24px;fill:currentColor;flex:none}
   font-size:16px;font-weight:600;color:#FFD447}
 .stars svg.i{width:18px;height:18px}
 .pick{display:flex;flex-direction:column;align-items:center;gap:6px}
-/* змейка крупно, по бокам стрелки — вид змейки; раскраски вида — кружки под названием */
-.pv-wrap{position:relative;width:100%;padding:0 40px} /* стрелки по бокам, не поверх головы и хвоста */
+/* a big snake with arrows on the sides — the snake type; the type's skins are swatches under the name */
+.pv-wrap{position:relative;width:100%;padding:0 40px} /* arrows on the sides, not over the head and tail */
 #preview{width:100%;height:min(230px,24vh);display:block}
 .pv-wrap .arr{position:absolute;top:50%;transform:translateY(-50%);width:48px;height:64px;border-radius:24px;
   display:flex;align-items:center;justify-content:center;background:rgba(30,42,68,.7);color:var(--on)}
 .pv-wrap .arr:active{background:var(--surf-highest)}
 .pv-wrap .arr svg.i{width:36px;height:36px}
 #skinPrev{left:-6px} #skinNext{right:-6px}
-/* место под подписи и кружки постоянное (три строки, два ряда кружков) — иначе при смене вида змейка со стрелками скачет */
+/* the space for labels and swatches is fixed (three lines, two rows of swatches) — otherwise the snake and arrows jump when the type changes */
 .skin-info{display:flex;flex-direction:column;align-items:center;max-width:100%}
 .skin-info>*{max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .skin-info b{font-size:20px;font-weight:600;line-height:26px}
 #skinName{font-size:15px;line-height:20px;height:20px;color:var(--on-var)}
-/* раскраски вида — цветные кружки; до 6 в ряд (у бусинок 12 — два ряда) */
-/* --sw — кружок, --sg — промежуток; высота — ровно два ряда (у бусинок 12 раскрасок), у остальных видов второй ряд пустой */
+/* the type's skins are color swatches; up to 6 per row (beads have 12 — two rows) */
+/* --sw — swatch, --sg — gap; the height is exactly two rows (beads have 12 skins), other types leave the second row empty */
 .swatches{--sw:32px;--sg:8px;display:flex;justify-content:center;align-content:flex-start;flex-wrap:wrap;gap:var(--sg);
   max-width:calc(6 * var(--sw) + 5 * var(--sg));height:calc(2 * var(--sw) + var(--sg));margin:2px auto 0}
 .swatches button{width:var(--sw);height:var(--sw);border-radius:50%;display:flex;align-items:center;justify-content:center;color:#fff;
@@ -94,7 +96,7 @@ svg.i{width:24px;height:24px;fill:currentColor;flex:none}
 .skin-info small{display:block;font-size:15px;line-height:20px;height:20px;color:var(--on-var)}
 .skin-info small svg.i{width:16px;height:16px;vertical-align:-3px;margin-right:4px}
 .go{display:flex;flex-direction:column;gap:16px}
-/* сложность — три лёгкие вкладки */
+/* difficulty — three light tabs */
 .tabs{display:flex;justify-content:center;gap:4px}
 .tabs button{height:40px;padding:0 16px;border-radius:20px;font-size:15px;font-weight:500;color:var(--on-var)}
 .tabs button.on{background:var(--sc);color:var(--on-sc);font-weight:600}
@@ -120,7 +122,7 @@ svg.i{width:24px;height:24px;fill:currentColor;flex:none}
 .note svg.i{width:20px;height:20px}
 .note.ok{color:var(--primary)}
 .note.warn{color:var(--error)}
-/* маленький телефон (iPhone SE): всё на одном экране */
+/* small phone (iPhone SE): everything on one screen */
 @media (max-height:600px){
   .home{gap:12px}
   #preview{height:21vh}
@@ -128,7 +130,7 @@ svg.i{width:24px;height:24px;fill:currentColor;flex:none}
   .go{gap:10px}
   #btnPlay{height:68px;border-radius:34px}
 }
-/* телефон боком: выбор змейки слева, кнопки справа */
+/* phone in landscape: snake picker on the left, buttons on the right */
 @media (orientation:landscape) and (max-height:520px){
   .home{max-width:760px;display:grid;grid-template-columns:1fr 1fr;grid-template-rows:auto 1fr;gap:8px 32px;align-items:center}
   .top{grid-column:1/3}
@@ -141,10 +143,10 @@ svg.i{width:24px;height:24px;fill:currentColor;flex:none}
   .go{gap:10px}
 }
 
-/* --- игровой интерфейс: пауза, длина и место, топ-3 --- */
+/* --- in-game UI: pause, length and place, top 3 --- */
 :root{--hud-top:env(safe-area-inset-top)}
-/* установленная игра (класс pwa ставит скрипт: navigator.standalone или display-mode standalone/fullscreen —
-   в манифесте fullscreen, и одного standalone в медиазапросе мало): статус-бар поверх страницы и затеняет край */
+/* installed game (the script sets the pwa class: navigator.standalone or display-mode standalone/fullscreen —
+   the manifest says fullscreen, and standalone alone in a media query isn't enough): the status bar overlays the page and shades the edge */
 :root.pwa{--hud-top:calc(env(safe-area-inset-top) + 16px)}
 #hud{position:fixed;inset:0;pointer-events:none}
 .hud-tl{position:absolute;top:calc(12px + var(--hud-top));left:calc(12px + env(safe-area-inset-left));
@@ -173,8 +175,8 @@ svg.i{width:24px;height:24px;fill:currentColor;flex:none}
   display:flex;align-items:center;justify-content:center;touch-action:none;transition:transform .08s,background .08s}
 #fab svg.i{width:var(--fab-i,34px);height:var(--fab-i,34px)}
 #fab.on{background:var(--primary);color:var(--on-primary);transform:scale(.94)}
-.hud-tl{z-index:1} /* пауза всегда сверху, даже если кнопку ускорения поставили на неё */
-/* настройка кнопки ускорения: пунктир и пульс; перетаскивают пальцем или касанием поля */
+.hud-tl{z-index:1} /* pause always on top, even if the boost button was placed over it */
+/* boost button setup: dashed outline and a pulse; moved by dragging or by tapping the field */
 #fab.edit{border-style:dashed;border-color:var(--primary);background:rgba(142,184,255,.28);animation:fabPulse 1.4s ease-in-out infinite;cursor:grab}
 #fab.edit.drag{animation:none;transform:scale(1.06);cursor:grabbing}
 @keyframes fabPulse{50%{box-shadow:0 0 0 10px rgba(142,184,255,.18)}}
@@ -200,7 +202,7 @@ svg.i{width:24px;height:24px;fill:currentColor;flex:none}
   width:max-content;max-width:calc(100vw - 24px);padding:4px 4px 4px 16px;border-radius:8px;background:#E1E3DE;color:#2E312D;font-size:14px;box-shadow:var(--elev3)}
 #update .btn{color:#1A4A9E;padding:0 12px}
 
-/* --- диалоги --- */
+/* --- dialogs --- */
 .scrim{position:fixed;inset:0;background:rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;padding:24px;
   overflow:auto;touch-action:pan-y}
 .dialog{background:var(--surf-high);border-radius:28px;padding:24px;width:100%;max-width:400px;box-shadow:var(--elev3);margin:auto}
@@ -211,7 +213,7 @@ svg.i{width:24px;height:24px;fill:currentColor;flex:none}
 .dialog .body b{color:var(--on);font-weight:500}
 .dialog .actions{display:flex;justify-content:flex-end;gap:8px;margin-top:24px;flex-wrap:wrap}
 .dialog .actions:empty,#dlgTop:empty{display:none}
-/* пауза и меню комнаты: своя змейка, длина и место, большая «Продолжить», настройки карточкой, «Выйти в меню» */
+/* pause and room menu: your snake, length and place, a big "Continue", settings as a card, "Back to menu" */
 .dialog.pz{max-width:360px;text-align:center}
 .pz h3{text-align:center;font-size:26px;font-weight:500;margin:0}
 #pzSnake{display:block;width:100%;height:96px;margin:-8px 0 0}
@@ -233,7 +235,7 @@ svg.i{width:24px;height:24px;fill:currentColor;flex:none}
 .pz-list .fab-set:active{background:var(--surf-high)}
 .btn.pz-out{width:100%;height:56px;border-radius:28px;margin-top:12px;border:2px solid var(--outline);color:var(--on);font-size:17px;font-weight:600;gap:10px}
 .btn.pz-out svg.i{width:24px;height:24px}
-/* «Звуки» из паузы: вкладки еда / рывок / удар / линька, под ними варианты — выбранный подсвечен, нажатие сразу играет */
+/* "Sounds" from the pause menu: tabs food / boost / crash / molt, the options below — the chosen one highlighted, a tap plays it at once */
 .dialog.pzs{max-width:400px}
 .pzs h3{text-align:center;font-size:24px;font-weight:500;margin:0 0 12px}
 .snd-tabs{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:4px;margin:0 0 14px}
@@ -242,16 +244,16 @@ svg.i{width:24px;height:24px;fill:currentColor;flex:none}
 .snd-opt{height:40px;padding:0 4px;border-radius:20px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;border:1px solid var(--outline-var);color:var(--on-var);font-size:14px}
 .snd-opt.on{background:var(--primary);color:var(--on-primary);border-color:var(--primary);font-weight:500}
 .pzs .actions .btn.filled{width:100%;height:56px;border-radius:28px;font-size:18px}
-/* «Ой!»: в ряд — слева «В меню» по содержимому (решение владельца), справа большая жёлтая «Продолжить» на остальное */
+/* "Oops!": in a row — "Menu" on the left sized to its content (design decision), the big yellow "Continue" on the right takes the rest */
 .dialog.oops .actions{flex-wrap:nowrap;gap:12px;margin-top:20px}
 .dialog.oops .btn{white-space:nowrap;height:60px;border-radius:30px;margin:0}
 .dialog.oops{padding:24px 20px}
 .scrim[data-kind=oops]{padding-left:16px;padding-right:16px}
-.dialog.oops .btn.pz-out{flex:0 0 auto;width:auto;padding:0 12px;gap:6px;font-size:16px} /* по содержимому, остальное — «Продолжить» */
+.dialog.oops .btn.pz-out{flex:0 0 auto;width:auto;padding:0 12px;gap:6px;font-size:16px} /* sized to content, the rest goes to "Continue" */
 .dialog.oops .btn.pz-out svg.i{width:22px;height:22px}
 .dialog.oops .btn.pz-go{flex:1 1 0;min-width:0;width:auto;font-size:18px;gap:8px;padding:0 12px}
 .dialog.oops .btn.pz-go svg.i{width:24px;height:24px}
-/* узкий телефон (iPhone SE): поля меньше, надписи в одну строку */
+/* narrow phone (iPhone SE): smaller margins, labels on one line */
 @media (max-width:360px){
   .dialog.pz{padding:20px 16px}
   .dialog.pzs{padding:20px 14px}
@@ -265,7 +267,7 @@ svg.i{width:24px;height:24px;fill:currentColor;flex:none}
   .btn.pz-go{font-size:19px}
   .btn.pz-out,.pz-list .fab-set{font-size:15px;white-space:nowrap}
 }
-/* телефон боком: змейка, кнопки — слева, настройки — справа */
+/* phone in landscape: snake and buttons on the left, settings on the right */
 @media (orientation:landscape) and (max-height:520px){
   .dialog.pz{max-width:640px;display:grid;grid-template-columns:1fr 1fr;column-gap:24px;align-items:start;padding:16px 24px}
   .dialog.pz .body{display:contents}
@@ -282,7 +284,7 @@ svg.i{width:24px;height:24px;fill:currentColor;flex:none}
   .snd-opts{grid-template-columns:repeat(5,minmax(0,1fr));min-height:96px}
   .pzs .actions{margin-top:12px}
   .pzs .actions .btn.filled{height:46px}
-  /* «Ой!» боком: окно плотнее, иначе не влезает по высоте */
+  /* "Oops!" in landscape: a denser dialog, otherwise it doesn't fit vertically */
   .dialog.oops{max-width:560px;padding:16px 24px}
   .dialog.oops h3{margin-bottom:8px}
   .dialog.oops .body p{margin-bottom:6px}
@@ -291,7 +293,7 @@ svg.i{width:24px;height:24px;fill:currentColor;flex:none}
   .dialog.oops .btn{height:52px}
 }
 .btn.sound{width:44px;padding:0;color:var(--on-var);flex:none}
-/* громкость: ползунок Material 3 — заполненная часть дорожки цвета primary (--p ставит скрипт) */
+/* volume: a Material 3 slider — the filled part of the track in the primary color (the script sets --p) */
 .vol{display:flex;align-items:center;gap:8px;margin:4px 0 -8px}
 .vol input{flex:1;min-width:0;height:44px;margin:0;background:transparent;-webkit-appearance:none;appearance:none;--p:100%}
 .vol input::-webkit-slider-runnable-track{height:6px;border-radius:3px;background:linear-gradient(90deg,var(--primary) var(--p),var(--surf-highest) var(--p))}
@@ -300,7 +302,7 @@ svg.i{width:24px;height:24px;fill:currentColor;flex:none}
 .vol input::-moz-range-progress{height:6px;border-radius:3px;background:var(--primary)}
 .vol input::-moz-range-thumb{width:20px;height:20px;border-radius:50%;background:var(--primary);border:none}
 .btn.sound svg.i{width:24px;height:24px}
-/* вибрация: строка с переключателем Material 3 */
+/* vibration: a row with a Material 3 switch */
 .sw-row{display:flex;align-items:center;gap:12px;min-height:48px;margin:8px 0 -4px 10px;color:var(--on);font-size:14px;cursor:pointer}
 .sw-row svg.i{width:24px;height:24px;color:var(--on-var);flex:none}
 .sw-row span{flex:1}
@@ -342,47 +344,47 @@ svg.i{width:24px;height:24px;fill:currentColor;flex:none}
 
 <div id="hud" hidden>
   <div class="hud-tl">
-    <button class="icon-btn" id="btnMenu" aria-label="Меню" data-icon="pause"></button>
+    <button class="icon-btn" id="btnMenu" aria-label="Menu" data-t-aria="a11y.menu" data-icon="pause"></button>
     <div id="score" class="shadow"></div>
   </div>
   <div class="hud-tc" id="roomBox" hidden><button class="chip" id="roomChip"></button></div>
   <div id="board" class="shadow"></div>
-  <button id="fab" hidden aria-label="Ускорение" data-icon="bolt"></button>
+  <button id="fab" hidden aria-label="Speed boost" data-t-aria="a11y.boost" data-icon="bolt"></button>
   <div id="fabPanel" hidden>
-    <h3>Кнопка ускорения</h3>
-    <p>Перетащи молнию или коснись места, где удобно</p>
-    <div class="vol"><span data-icon="bolt"></span><input type="range" id="fabSize" step="4" aria-label="Размер кнопки"><span data-icon="bolt" class="big"></span></div>
-    <div class="actions"><button class="btn text" id="fabReset">Как было</button><button class="btn filled" id="fabDone">Готово</button></div>
+    <h3 data-t="set.fab">Boost button</h3>
+    <p data-t="fab.text">Drag the lightning bolt or tap wherever is comfortable</p>
+    <div class="vol"><span data-icon="bolt"></span><input type="range" id="fabSize" step="4" aria-label="Button size" data-t-aria="a11y.fabSize"><span data-icon="bolt" class="big"></span></div>
+    <div class="actions"><button class="btn text" id="fabReset" data-t="fab.reset">Reset</button><button class="btn filled" id="fabDone" data-t="btn.done">Done</button></div>
   </div>
   <div id="hint" class="shadow" hidden></div>
 </div>
 
 <main id="home" class="screen">
-  <div id="update" role="status" hidden><span>Вышло обновление игры</span><button class="btn text" id="btnUpdate">Обновить</button></div>
+  <div id="update" role="status" hidden><span data-t="update.banner">A game update is ready</span><button class="btn text" id="btnUpdate" data-t="btn.update">Update</button></div>
   <div class="home">
     <header class="top">
-      <button class="icon-btn" id="btnInfo" aria-label="Как играть" data-icon="help"></button>
-      <h1>Змейка</h1>
-      <span class="stars" id="stars" aria-label="Звёзды"></span>
+      <button class="icon-btn" id="btnInfo" aria-label="How to play" data-t-aria="a11y.help" data-icon="help"></button>
+      <h1 data-t="app.name">Snake</h1>
+      <span class="stars" id="stars" aria-label="Stars" data-t-aria="a11y.stars"></span>
     </header>
 
     <section class="pick">
       <div class="pv-wrap">
         <canvas id="preview"></canvas>
-        <button class="arr" id="skinPrev" aria-label="Предыдущий вид змейки" data-icon="left"></button>
-        <button class="arr" id="skinNext" aria-label="Следующий вид змейки" data-icon="right"></button>
+        <button class="arr" id="skinPrev" aria-label="Previous snake" data-t-aria="a11y.prevType" data-icon="left"></button>
+        <button class="arr" id="skinNext" aria-label="Next snake" data-t-aria="a11y.nextType" data-icon="right"></button>
       </div>
       <div class="skin-info"><b id="typeName"></b><span id="skinName"></span><small id="skinLock"></small></div>
-      <div class="swatches" id="swatches" aria-label="Раскраска"></div>
+      <div class="swatches" id="swatches" aria-label="Skin" data-t-aria="a11y.skins"></div>
     </section>
 
     <section class="go">
       <div class="tabs" id="diff">
-        <button data-d="easy">Лёгкий</button><button data-d="medium">Средний</button><button data-d="hard">Сложный</button>
+        <button data-d="easy" data-t="diff.easy">Easy</button><button data-d="medium" data-t="diff.medium">Medium</button><button data-d="hard" data-t="diff.hard">Hard</button>
       </div>
       <div class="best" id="best"></div>
-      <button class="btn filled big" id="btnPlay"><span data-icon="play"></span>Играть</button>
-      <button class="btn" id="btnTogether"><span data-icon="group"></span>Играть вместе</button>
+      <button class="btn filled big" id="btnPlay"><span data-icon="play"></span><span data-t="btn.play">Play</span></button>
+      <button class="btn" id="btnTogether"><span data-icon="group"></span><span data-t="btn.together">Play together</span></button>
     </section>
 
   </div>
@@ -398,6 +400,7 @@ svg.i{width:24px;height:24px;fill:currentColor;flex:none}
   </div>
 </div>
 
+<script type="module" src="i18n.js"></script>
 <script type="module" src="client.js"></script>
 </body>
 </html>

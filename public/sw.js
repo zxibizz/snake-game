@@ -1,6 +1,6 @@
-// Офлайн: все файлы игры кладутся в кэш при установке и дальше отдаются из него.
-// При изменении любого файла увеличить VERSION — иначе устройства останутся на старой версии.
-const VERSION = '43';
+// Offline: every game file goes into the cache on install and is served from it from then on.
+// When any file changes, bump VERSION — otherwise devices stay on the old version.
+const VERSION = '44';
 const CACHE = `zmeigrad-v${VERSION}`;
 const ASSETS = [
   './',
@@ -11,16 +11,20 @@ const ASSETS = [
   'rtc.js',
   'backdrop.js',
   'sounds.js',
+  'i18n.js',
+  'lang/en.js',
+  'lang/ru.js',
   'sfx/eat.wav',
   'manifest.webmanifest',
+  'manifest.ru.webmanifest',
   'icons/icon-192.png',
   'icons/icon-512.png',
   'icons/apple-touch-icon.png',
 ];
 
-// Новая версия ставится в фоне и ждёт: страница показывает «Вышло обновление», и только по кнопке «Обновить»
-// (сообщение 'skip') новая версия берёт управление. Без кнопки она включится сама, когда игру закроют и откроют заново.
-// Версии до 6-й кнопки не знают и ждут, что новая версия включится сама, — для них включаемся сразу, как раньше.
+// A new version installs in the background and waits: the page shows "A game update is ready", and only the "Update"
+// button (message 'skip') lets the new version take over. Without the button it takes over once the game is closed and reopened.
+// Versions before 6 don't know the button and expect the new version to take over by itself — for them we activate at once, as before.
 const PROMPT_SINCE = 6;
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(ASSETS)).then(() => caches.keys()).then((keys) => {

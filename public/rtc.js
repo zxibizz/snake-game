@@ -1,22 +1,22 @@
-// Прямая связь между игроками (WebRTC). Сайт нужен только для знакомства: через /ws браузеры передают друг другу
-// пару сообщений (предложение, ответ, адреса), дальше играют напрямую, а гость отключается от сайта.
-// Хозяин комнаты остаётся на /ws, чтобы к нему могли зайти новые игроки.
+// Direct connection between players (WebRTC). The site is only needed for the introduction: over /ws the browsers pass
+// each other a few messages (offer, answer, addresses), then play directly, and the guest disconnects from the site.
+// The host stays on /ws so that new players can join.
 //
-// Канал (link) с обеих сторон одинаковый:
-//   send(obj) — JSON надёжно, по порядку; bin(u8) — двоичное надёжно, по порядку; fast(u8) — двоичное без повторов;
-//   buffered() — сколько ждёт отправки по надёжному каналу; close();
-//   onjson(obj), onbin(ArrayBuffer), onclose() — назначает получатель.
+// The channel (link) is the same on both sides:
+//   send(obj) — JSON, reliable and ordered; bin(u8) — binary, reliable and ordered; fast(u8) — binary without retransmits;
+//   buffered() — how much is waiting to be sent on the reliable channel; close();
+//   onjson(obj), onbin(ArrayBuffer), onclose() — set by the receiver.
 
-// Чужой адрес за домашним роутером узнаём у публичного STUN; дома в одной Wi-Fi-сети обходится и без него.
+// The other side's address behind a home router comes from a public STUN server; on the same home Wi-Fi it works without one.
 export const ICE = [{ urls: ['stun:stun.cloudflare.com:3478', 'stun:stun.l.google.com:19302'] }];
-const CONNECT_MS = 15000;    // столько ждём прямого соединения
-const CHUNK = 8000;          // большие сообщения режем: не все браузеры принимают больше 64 КБ разом
+const CONNECT_MS = 15000;    // how long we wait for a direct connection
+const CHUNK = 8000;          // big messages are split: not every browser accepts more than 64 KB at once
 const wsUrl = () => `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`;
 const asBuf = (u8) => (u8.byteOffset === 0 && u8.byteLength === u8.buffer.byteLength ? u8.buffer : u8.slice().buffer);
 
 function makeLink(pc, r, u) {
   const link = { onjson: null, onbin: null, onclose: null, closed: false, pc };
-  const safe = (fn) => { try { fn(); } catch { /* канал закрылся */ } };
+  const safe = (fn) => { try { fn(); } catch { /* the channel has closed */ } };
   link.send = (o) => {
     if (r.readyState !== 'open') return;
     const s = JSON.stringify(o);
@@ -74,13 +74,13 @@ function makeLink(pc, r, u) {
   pc.addEventListener('connectionstatechange', () => {
     const st = pc.connectionState;
     if (st === 'failed' || st === 'closed') gone();
-    else if (st === 'disconnected') { clearTimeout(lost); lost = setTimeout(gone, 5000); } // бывает, что связь сама вернётся
+    else if (st === 'disconnected') { clearTimeout(lost); lost = setTimeout(gone, 5000); } // sometimes the connection comes back by itself
     else if (st === 'connected') clearTimeout(lost);
   });
   return link;
 }
 
-// адреса от другой стороны могут прийти раньше её описания — копим
+// the other side's addresses can arrive before its description — collect them
 function signaler(pc, send) {
   const early = [];
   pc.onicecandidate = (e) => { if (e.candidate) send({ c: e.candidate.toJSON() }); };
@@ -93,7 +93,7 @@ function signaler(pc, send) {
   };
 }
 
-// канал знакомства: JSON по WebSocket к сайту
+// introduction channel: JSON over WebSocket to the site
 function openSignal(onMsg, onClose) {
   const ws = new WebSocket(wsUrl());
   const sig = { ws, send: (o) => { if (ws.readyState === 1) ws.send(JSON.stringify(o)); }, close: () => { sig.closing = true; ws.close(); } };
@@ -103,11 +103,11 @@ function openSignal(onMsg, onClose) {
   return sig;
 }
 
-// Хозяин: держит знакомство открытым и принимает гостей. onPeer(link) — новый гость на прямой связи.
-// Связь с сайтом рвётся (телефон уснул, сменилась сеть) — переподключаемся с тем же кодом; игра идёт и без неё.
+// Host: keeps the introduction open and accepts guests. onPeer(link) — a new guest on a direct connection.
+// When the connection to the site drops (phone went to sleep, network changed), reconnect with the same code; the game goes on without it.
 export function host({ v, token, onCode, onPeer, onError }) {
   const h = { code: '', sig: null, pcs: new Map(), closed: false, tries: 0 };
-  const MAX_PENDING = 8; // одновременно знакомящихся гостей: больше — не берём (кто-то угадал код и шлёт входы)
+  const MAX_PENDING = 8; // guests being introduced at the same time: no more than this (someone guessed the code and keeps sending joins)
   const connect = () => {
     if (h.closed) return;
     const sig = openSignal((m) => {
@@ -142,7 +142,7 @@ export function host({ v, token, onCode, onPeer, onError }) {
       if (++open < 2) return;
       clearTimeout(timer);
       h.pcs.delete(id);
-      if (h.closed) { pc.close(); return; } // хозяин уже ушёл из этой комнаты
+      if (h.closed) { pc.close(); return; } // the host has already left this room
       onPeer(makeLink(pc, r, u));
     };
     r.onopen = ready; u.onopen = ready;
@@ -161,8 +161,8 @@ export function host({ v, token, onCode, onPeer, onError }) {
   return h;
 }
 
-// Гость: знакомится с хозяином комнаты code и получает прямой канал. Ошибка — строкой:
-// 'no_room', 'version', 'old_host', 'net' (сайт недоступен), 'p2p' (напрямую не соединились).
+// Guest: gets introduced to the host of room `code` and receives a direct channel. Errors come as a string:
+// 'no_room', 'version', 'old_host', 'net' (site unreachable), 'p2p' (couldn't connect directly).
 export function join({ code, v }) {
   return new Promise((resolve, reject) => {
     let pc = null, done = false;
@@ -181,7 +181,7 @@ export function join({ code, v }) {
           d.onopen = () => {
             if (!ch.r || !ch.u || ch.r.readyState !== 'open' || ch.u.readyState !== 'open' || done) return;
             done = true; clearTimeout(timer);
-            sig.close(); // дальше — только напрямую
+            sig.close(); // from here on — direct only
             resolve(makeLink(pc, ch.r, ch.u));
           };
         };
@@ -202,7 +202,7 @@ export function join({ code, v }) {
   });
 }
 
-// Петля внутри страницы хозяина: его собственная игра говорит с его же комнатой так же, как гости, только без сети.
+// Loopback inside the host's page: the host's own game talks to its room the same way guests do, just without the network.
 export function loopback() {
   const mk = () => ({ onjson: null, onbin: null, onclose: null, closed: false, buffered: () => 0 });
   const a = mk(), b = mk();
@@ -213,7 +213,7 @@ export function loopback() {
     from.close = () => {
       if (from.closed) return;
       from.closed = true; to.closed = true;
-      queueMicrotask(() => { if (to.onclose) to.onclose(); }); // как у WebRTC: о закрытии узнаёт другая сторона
+      queueMicrotask(() => { if (to.onclose) to.onclose(); }); // like WebRTC: the other side learns about the close
     };
   };
   wire(a, b); wire(b, a);

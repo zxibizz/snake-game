@@ -23,17 +23,17 @@ function client() {
   const next = (t) => {
     const i = inbox.findIndex((m) => m.t === t);
     if (i >= 0) return Promise.resolve(inbox.splice(i, 1)[0]);
-    return new Promise((res, rej) => { waiters.push({ t, res }); setTimeout(() => rej(new Error(`нет ${t}`)), 3000); });
+    return new Promise((res, rej) => { waiters.push({ t, res }); setTimeout(() => rej(new Error(`no ${t}`)), 3000); });
   };
   const opened = new Promise((res) => { ws.onopen = res; });
   const count = (t) => inbox.filter((m) => m.t === t).length;
   return { ws, next, opened, count, send: (o) => ws.send(JSON.stringify(o)) };
 }
 
-test('статика и healthz', async () => {
+test('static files and healthz', async () => {
   const r = await fetch(`http://127.0.0.1:${PORT}/`);
   assert.equal(r.status, 200);
-  assert.match(await r.text(), /Змейка/);
+  assert.match(await r.text(), /Snake/);
   const h = await (await fetch(`http://127.0.0.1:${PORT}/healthz`)).json();
   assert.equal(h.ok, true);
   assert.equal((await fetch(`http://127.0.0.1:${PORT}/%2e%2e/package.json`)).status, 404);
@@ -46,7 +46,7 @@ async function hostRoom(token = 'tok-h', v = '7', code) {
   return [h, (await h.next('code')).code];
 }
 
-test('знакомство: хозяин получает код, гость входит, сообщения идут в обе стороны', async () => {
+test('introduction: the host gets a code, a guest joins, messages flow both ways', async () => {
   const [h, code] = await hostRoom();
   assert.match(code, /^\d{4}$/);
   const g = client();
@@ -71,7 +71,7 @@ test('знакомство: хозяин получает код, гость в�
   for (const x of [h, g, g2]) x.ws.close();
 });
 
-test('разные версии: старому гостю — обновиться, старому хозяину — тоже', async () => {
+test('different versions: an old guest is told to update, and so is an old host', async () => {
   const [h, code] = await hostRoom('tok-v', '10');
   const g = client();
   await g.opened;
@@ -84,16 +84,16 @@ test('разные версии: старому гостю — обновить�
   for (const x of [h, g, g2]) x.ws.close();
 });
 
-test('хозяин после обрыва возвращает свой код, чужой токен его не заберёт', async () => {
+test('after a dropout the host gets its code back, and a foreign token can\'t take it', async () => {
   const [h, code] = await hostRoom('tok-r');
   h.ws.close();
   await new Promise((r) => setTimeout(r, 100));
-  const g = client(); // хозяина нет на связи — войти нельзя
+  const g = client(); // the host is offline — joining is impossible
   await g.opened;
   g.send({ t: 'join', code, v: '7' });
   assert.equal((await g.next('err')).code, 'no_room');
   const [x, other] = await hostRoom('tok-x', '7', code);
-  assert.notEqual(other, code, 'чужой код не отдают');
+  assert.notEqual(other, code, 'someone else\'s code isn\'t handed out');
   const [h2, same] = await hostRoom('tok-r', '7', code);
   assert.equal(same, code);
   const g2 = client();
@@ -104,7 +104,7 @@ test('хозяин после обрыва возвращает свой код,
   for (const c of [g, x, h2, g2]) c.ws.close();
 });
 
-test('поток сообщений режется по времени', async () => {
+test('a message flood is rate-limited', async () => {
   const [h, code] = await hostRoom('tok-f');
   const g = client();
   await g.opened;
@@ -113,6 +113,6 @@ test('поток сообщений режется по времени', async (
   for (let i = 0; i < 600; i++) h.send({ t: 'sig', to: id, data: { i } });
   await new Promise((r) => setTimeout(r, 400));
   const n = g.count('sig');
-  assert.ok(n >= 150 && n < 400, `дошло ${n} из 600`);
+  assert.ok(n >= 150 && n < 400, `${n} of 600 got through`);
   for (const x of [h, g]) x.ws.close();
 });

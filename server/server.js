@@ -1,6 +1,6 @@
-// Сервер игры: отдаёт статику из public/ и знакомит игроков (/ws). Саму совместную игру сервер не считает:
-// мир ведёт браузер хозяина комнаты (public/room.js), а игроки связаны с ним напрямую (WebRTC, public/rtc.js).
-// Здесь — только коды комнат и пересылка пары сообщений при входе (предложение, ответ, адреса).
+// Game server: serves the static files from public/ and introduces players to each other (/ws). The server doesn't run
+// the shared game: the world runs in the host's browser (public/room.js), and players connect to it directly (WebRTC, public/rtc.js).
+// All that lives here is room codes and relaying a few messages when someone joins (offer, answer, addresses).
 import http from 'node:http';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -11,12 +11,12 @@ const PORT = Number(process.env.PORT) || 8080;
 const PUBLIC = path.resolve(fileURLToPath(new URL('../public/', import.meta.url)));
 const MAX_ROOMS = 200;
 const MAX_CONN = 300;
-const HOST_GONE_MS = 60_000;    // хозяин потерял связь с сайтом — код держим минуту, пока он не вернётся
-const MSG_RATE = 40, MSG_BURST = 200; // сообщений в секунду на соединение (адресов при знакомстве бывает много)
+const HOST_GONE_MS = 60_000;    // the host lost the connection to the site — keep the code for a minute until they come back
+const MSG_RATE = 40, MSG_BURST = 200; // messages per second per connection (there can be many addresses during the introduction)
 
 const log = (...a) => console.log(new Date().toISOString(), ...a);
 
-// ---------- статика ----------
+// ---------- static files ----------
 const TYPES = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
   '.webmanifest': 'application/manifest+json', '.json': 'application/json', '.png': 'image/png', '.svg': 'image/svg+xml',
@@ -50,8 +50,8 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-// ---------- комнаты ----------
-// code → { host: соединение хозяина или null, token, v, peers: id → соединение гостя, next, goneAt }
+// ---------- rooms ----------
+// code → { host: the host's connection or null, token, v, peers: id → guest connection, next, goneAt }
 const rooms = new Map();
 let conns = 0;
 
@@ -69,7 +69,7 @@ setInterval(() => {
   }
 }, 5000).unref();
 
-// ---------- соединения ----------
+// ---------- connections ----------
 server.on('upgrade', (req, socket, head) => {
   if (!req.url.startsWith('/ws') || conns >= MAX_CONN) { socket.destroy(); return; }
   const ws = acceptUpgrade(req, socket, head, { maxPayload: 16 * 1024 });
@@ -95,8 +95,8 @@ server.on('upgrade', (req, socket, head) => {
         const token = typeof m.token === 'string' ? m.token.slice(0, 40) : '';
         let code = typeof m.code === 'string' ? m.code : '';
         let r = code && rooms.get(code);
-        if (r && (r.token !== token || !token)) { r = null; code = ''; } // чужой код не забрать
-        if (r) { // хозяин вернулся после обрыва
+        if (r && (r.token !== token || !token)) { r = null; code = ''; } // someone else's code can't be taken over
+        if (r) { // the host came back after a dropout
           if (r.host && r.host !== c) r.host.ws.close(1000);
           r.host = c; r.v = v;
         } else {
