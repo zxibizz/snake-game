@@ -251,52 +251,55 @@ function loadEat() {
     .then((b) => { eatBuf = b; }).catch(() => { eatFail = performance.now(); /* until the file is loaded, "Yum" plays */ }).finally(() => { eatLoading = false; });
 }
 // ---------- background music ----------
-// Tracks are MP3 recordings (CC0, OpenGameArt; sources in the README), one <audio> streams the current one through Web Audio —
-// that's the only way to set its volume on iPhone (audio.volume is read-only there), and it obeys the silent switch like the effects.
-// iPhone lets an <audio> start only from a gesture: the element is started (on silence) in the first gesture and then just changes
-// tracks. A new audio context (after the background or a call — only in a gesture, see replaceAudio) needs a new element:
-// it's rebuilt in the same gesture and continues from the same second. The file is fetched whole and played from a blob: Safari won't
-// play media the service worker serves without ranges. Played files stay in the cache (sw.js) — offline they keep playing;
-// a track that fails to load is skipped for this session.
+// Tracks are MP3 recordings (CC0, OpenGameArt; sources in the README). A track is fetched whole, decoded into an AudioBuffer
+// (at 32 kHz, as in the file — two thirds of the memory at the 48 kHz of the context) and played by an AudioBufferSourceNode — pure Web Audio, like
+// the effects: no <audio> element, so neither iPhone nor Android shows a "now playing" player on the lock screen, the volume works
+// on iPhone and the silent switch is obeyed. Only one track is kept decoded. A new audio context (after the background or a call,
+// see replaceAudio) gets a new source on the same buffer from the same second. Played files stay in the cache (sw.js) — offline they
+// keep playing; a track whose file is broken or missing is skipped for the session, one that failed for lack of network — until online.
 const MUSIC_K = 3; // at the default volumes music sits ~10 dB under the effect peaks, at full music volume about level with them
-const music = { el: null, ctx: null, gain: null, id: null, url: null, loading: 0, bad: new Set(), miss: new Set(), lastPick: null };
-// bad — the file is broken or missing (skipped for the session); miss — no network for it right now (retried once back online)
+const MUSIC_SR = 32000;
+const music = { buf: null, id: null, src: null, gain: null, ctx: null, t0: 0, off: 0, loading: 0, bad: new Set(), miss: new Set(), lastPick: null };
+// bad — the file is broken or missing; miss — no network for it right now
 const musicVol = () => (soundOn() ? save.vol * save.vol * save.musicVol * save.musicVol * MUSIC_K : 0);
 const musicOn = () => musicVol() > 0;
-const SILENCE = silentWav();
+const musicLoop = () => save.music !== 'random';
 function musicGesture() {
   if (!musicOn() || document.hidden || !actx) { musicPause(); return; }
-  if (!music.el || music.ctx !== actx) musicBuild();
-  if (!music.el) return;
   if (!music.id && !music.loading) musicNext();
-  else if (music.el.paused) musicPlay();
-}
-function musicBuild() { // a new element bound to the current context; the old one stops and hands over its second
-  const old = music.el, at = old ? old.currentTime : 0;
-  if (old) { try { old.pause(); } catch { /* */ } }
-  try {
-    const el = document.createElement('audio');
-    el.setAttribute('playsinline', ''); el.setAttribute('x-webkit-airplay', 'deny'); el.preload = 'auto';
-    const node = actx.createMediaElementSource(el), g = actx.createGain();
-    g.gain.value = musicVol(); node.connect(g); g.connect(actx.destination);
-    el.addEventListener('ended', () => { if (el === music.el && !el.loop) musicNext(); });
-    el.addEventListener('error', () => { // the file won't decode: random mode moves on, a chosen track just stays silent
-      if (el !== music.el || !music.url || el.src !== music.url) return;
-      music.bad.add(music.id); music.id = null;
-      if (save.music === 'random') musicNext();
-    });
-    music.el = el; music.ctx = actx; music.gain = g;
-    el.src = music.url || SILENCE; el.loop = !music.url || save.music !== 'random';
-    if (music.url && at) el.addEventListener('loadedmetadata', () => { try { el.currentTime = at; } catch { /* */ } }, { once: true }); // Safari ignores it before the metadata
-    musicPlay();
-  } catch { music.el = null; music.ctx = null; }
+  else musicPlay();
 }
 function musicPlay() {
-  if (!music.el || !musicOn() || document.hidden) return;
-  const p = music.el.play(); if (p && p.catch) p.catch(() => {});
+  if (!music.buf || !actx || !musicOn() || document.hidden || (music.src && music.ctx === actx)) return;
+  musicPause();
+  try {
+    const g = actx.createGain(), s = actx.createBufferSource(), dur = music.buf.duration, off = music.off % dur;
+    g.gain.value = musicVol(); g.connect(actx.destination);
+    s.buffer = music.buf; s.loop = musicLoop(); s.connect(g);
+    s.onended = () => { if (s === music.src) musicEnded(); };
+    s.start(0, off);
+    Object.assign(music, { src: s, gain: g, ctx: actx, t0: actx.currentTime - off });
+  } catch { music.src = null; }
 }
-function musicPause() { if (music.el && !music.el.paused) music.el.pause(); }
-// the next track: the chosen one, or a random one that isn't the last (and hasn't failed)
+// stop and remember the second, to continue from it (a random-mode track that has just run out counts as ended)
+function musicPause() {
+  const s = music.src;
+  if (!s) return;
+  music.src = null;
+  let at = 0;
+  try { at = music.ctx.currentTime - music.t0; } catch { /* */ }
+  try { s.onended = null; s.stop(); } catch { /* */ }
+  try { music.gain.disconnect(); } catch { /* */ }
+  const dur = music.buf.duration;
+  if (!s.loop && at >= dur - 0.05) musicEnded(); else music.off = at % dur;
+}
+// the track ran out (random mode): drop its buffer and take the next one
+function musicEnded() {
+  music.src = null; music.buf = null; music.off = 0;
+  if (save.music === 'random') musicNext();
+}
+function musicSetLoop() { if (music.src) music.src.loop = musicLoop(); }
+// the next track: the chosen one, or a random one that isn't the last (and isn't failing)
 function musicNext() {
   let id = save.music;
   if (id === 'random') {
@@ -308,41 +311,60 @@ function musicNext() {
   }
   musicLoad(id);
 }
+let musicDec = null;
+function decodeWith(c, ab) {
+  return new Promise((ok, no) => { const p = c.decodeAudioData(ab, ok, no); if (p && p.catch) p.catch(no); }); // old Safari — callbacks only
+}
+// a 32 kHz offline context first; if it can't (or doesn't exist) — the playing context. decodeAudioData takes the bytes away, so a copy
+function decodeMusic(ab) {
+  const OAC = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+  try { if (!musicDec && OAC) musicDec = new OAC(2, 1, MUSIC_SR); } catch { musicDec = null; }
+  const viaCtx = () => (actx ? decodeWith(actx, ab) : Promise.reject(new Error('no context')));
+  if (!musicDec) return viaCtx();
+  let first;
+  try { first = decodeWith(musicDec, ab.slice(0)); } catch (e) { first = Promise.reject(e); }
+  return first.catch(viaCtx);
+}
 function musicLoad(id) {
   const n = ++music.loading;
   music.lastPick = music.id;
-  fetch(`music/${id}.mp3`).then((r) => (r.ok ? r.blob() : Promise.reject(r.status))).then((b) => {
-    if (n !== music.loading) return; // another track was picked meanwhile
-    music.loading = 0;
-    if (music.url) URL.revokeObjectURL(music.url);
-    music.url = URL.createObjectURL(b); music.id = id;
-    if (!music.el) return; // no gesture yet — it starts on the first one
-    music.el.src = music.url; music.el.loop = save.music !== 'random';
-    musicPlay();
-    if (musicListener) musicListener();
-  }).catch((err) => {
+  const fail = (set) => {
     if (n !== music.loading) return;
-    music.loading = 0;
-    (typeof err === 'number' ? music.bad : music.miss).add(id); // an HTTP error — the file isn't there; anything else — the network
+    music.loading = 0; set.add(id);
     if (save.music === 'random') musicNext();
-  });
+  };
+  fetch(`music/${id}.mp3`).then((r) => (r.ok ? r.arrayBuffer().catch(() => Promise.reject('net')) : Promise.reject(r.status)), () => Promise.reject('net'))
+    .then((ab) => {
+      if (n !== music.loading) return null;
+      musicPause(); music.buf = null; // the old track goes before the new one is decoded — never two decoded tracks at once
+      return decodeMusic(ab).catch(() => Promise.reject('decode'));
+    })
+    .then((b) => {
+      if (!b || n !== music.loading) return; // another track was picked meanwhile
+      music.loading = 0;
+      Object.assign(music, { buf: b, id, off: 0 });
+      musicPlay();
+      if (musicListener) musicListener();
+    }, (why) => fail(why === 'net' ? music.miss : music.bad));
 }
 let musicListener = null; // the open "Music" dialog marks what's playing
 window.addEventListener('online', () => { // back online: tracks that failed for lack of network can play again
   music.miss.clear();
-  if (music.el && musicOn() && !music.id && !music.loading) musicNext();
+  if (actx && musicOn() && !music.id && !music.loading) musicNext();
 });
-// every frame: volume follows the settings, music stops when sound is off
+// every frame: volume follows the settings; music stops when sound is off and comes back with it, when the game is in view again
+// and on a new audio context (musicPlay moves it over)
 function musicTick() {
-  if (!music.el) return;
   const v = musicVol();
-  if (music.gain && Math.abs(music.gain.gain.value - v) > 1e-4) music.gain.gain.value = v;
-  if (!v) musicPause();
+  if (!music.src) { if (v && music.buf && actx && actx.state === 'running' && !document.hidden) musicPlay(); return; }
+  if (!v) { musicPause(); return; }
+  if (music.ctx !== actx) { musicPlay(); return; }
+  if (Math.abs(music.gain.gain.value - v) > 1e-4) music.gain.gain.value = v;
 }
 // played tracks are cached as they play; the rest are fetched one by one in the background a little after start, so the game has
-// all its music offline (the plane). Once per launch, only online.
+// all its music offline (the plane). Once per launch, only online, cached ones are skipped.
 function musicPrefetch() {
-  if (!navigator.onLine || !('serviceWorker' in navigator) || !navigator.serviceWorker.controller) return;
+  if (!navigator.onLine || !('serviceWorker' in navigator) || !navigator.serviceWorker.controller || !window.caches) return;
   let i = 0;
   const step = () => {
     if (i >= MUSIC.length || !navigator.onLine) return;
@@ -1958,9 +1980,9 @@ function musicDialog() {
     const k = b.dataset.mus, same = k === save.music;
     save.music = k; persist();
     if (!musicOn()) { save.musicVol = Math.max(save.musicVol, MUSIC_DEF); rng.value = Math.round(save.musicVol * 100); showRange(rng); persist(); }
-    if (k !== 'random') { if (k !== music.id || music.loading || !music.el || music.el.paused) musicLoad(k); else music.el.loop = true; }
-    else if (same || !music.id || !music.el || music.el.paused) musicNext(); // "Random" again — the next track
-    else if (music.el) music.el.loop = false; // keeps playing the current one, a random one comes after it
+    if (k !== 'random') { if (k !== music.id || music.loading || !music.buf) musicLoad(k); else { musicSetLoop(); musicPlay(); } }
+    else if (same || !music.id || !music.buf) musicNext(); // "Random" again — the next track
+    else { musicSetLoop(); musicPlay(); } // keeps playing the current one, a random one comes after it
     musicGesture(); show();
   }));
   rng.addEventListener('input', () => { save.musicVol = rng.value / 100; showRange(rng); if (musicOn()) musicGesture(); else musicPause(); show(); });
@@ -2964,6 +2986,6 @@ if (inviteCode && /^\d{4}$/.test(inviteCode)) {
 // for automated tests
 window.__snake = {
   get mode() { return mode; }, get ui() { return ui; }, get me() { return me; }, get world() { return world; },
-  get net() { return net; }, get music() { return music; }, auto, safeCourse, get joy() { return joy; }, get run() { return run; }, get save() { return save; }, get cam() { return cam; }, startSolo, sfx, get bg() { return backdrop && backdrop.kind; }, get hue() { return backdrop && backdrop.hue; }, pickBackdrop,
+  get net() { return net; }, get music() { return music; }, musicPause, musicPlay, auto, safeCourse, get joy() { return joy; }, get run() { return run; }, get save() { return save; }, get cam() { return cam; }, startSolo, sfx, get bg() { return backdrop && backdrop.kind; }, get hue() { return backdrop && backdrop.hue; }, pickBackdrop,
   get fx() { return { gulps: gulps.length, sparks: sparks.length, lumps: lumps.length, kick: kick.t, whoosh: !!whoosh, time }; },
 };
