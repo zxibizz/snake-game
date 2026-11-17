@@ -150,7 +150,7 @@ svg.i{width:24px;height:24px;fill:currentColor;flex:none}
    display-mode fullscreen of old Android installs; the manifest says standalone since 0.28.1 — in fullscreen an Android tablet left an
    empty light strip at the top): the bar shades the edge, so the HUD steps down */
 :root.pwa{--hud-top:calc(env(safe-area-inset-top) + 16px)}
-#hud{position:fixed;inset:0;pointer-events:none}
+#hud{position:fixed;inset:0;pointer-events:none;isolation:isolate} /* own layer: pause and score stay under the dialog scrim, like the top list */
 .hud-tl{position:absolute;top:calc(12px + var(--hud-top));left:calc(12px + env(safe-area-inset-left));
   display:flex;gap:12px;align-items:center}
 .hud-tl .icon-btn{width:44px;height:44px;background:rgba(30,42,68,.7);box-shadow:none}
