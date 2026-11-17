@@ -2,12 +2,15 @@
 // No DOM and no network here — only the world, snakes, food, bots and collisions.
 
 // Protocol and file version: whenever any file in public/ changes, bump it both here and in sw.js (a test checks they match).
-export const VERSION = '57';
+export const VERSION = '58';
 export const TAU = Math.PI * 2;
 export const R = 7000;                  // arena radius (network coordinates are Int16 / 4, limit 8191)
 export const BASE_SPEED = 210;          // px/s at the first stage; each stage (molt) makes the snake faster, see speedOf
 export const BOOST_SPEED = 400;
 export const SPEED_PER_STAGE = 0.06;    // speed bonus per stage
+// food near a head is pulled into the mouth at least this fast — faster than any snake crawls or boosts; a slower pull
+// left a crumb beside the head hanging behind it on the neck, glowing from under the body and never eaten
+export const PULL_SPEED = 700;
 // Boosting is expensive: every second it burns BOOST_SHARE of the whole length, at least BOOST_COST — food along the way
 // can't pay for it, and a long snake spends dozens of length per second. Half of what's spent is left behind as food.
 export const BOOST_COST = 10;
@@ -1433,7 +1436,7 @@ export class World {
               f.dead = true; s.mass += f.v; s.eaten += f.v;
               if (f.life === 0) this.naturalCount--;
             } else {
-              const k = Math.min(1, dt * 7); // pull toward the head
+              const k = Math.min(1, Math.max(dt * 7, PULL_SPEED * dt / Math.sqrt(d2))); // pull toward the head
               f.x += dx * k; f.y += dy * k;
             }
           }
