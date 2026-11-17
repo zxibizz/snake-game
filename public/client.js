@@ -8,7 +8,7 @@ import {
 import { Room, runRoom, encodeSelf, FR, FLR, readFood } from './room.js';
 import { host, join, loopback } from './rtc.js';
 import { BACKDROPS, makeBackdrop, drawBackdrop } from './backdrop.js';
-import { EAT, CRASH, MOLT, semi } from './sounds.js';
+import { EAT, EAT_SLICES, BOOST, CRASH, MOLT, semi } from './sounds.js';
 
 const TICK_MS = 25;        // комната: 40 шагов и снимков в секунду
 const INTERP_MS = 70;      // чужих змей рисуем с задержкой на пару-тройку снимков — так движение плавное и потеря снимка незаметна
@@ -59,7 +59,9 @@ if (!DIFF[save.diff]) save.diff = 'easy';
 if (!(save.vol >= 0 && save.vol <= 1)) save.vol = 1;
 // выбранные звуки еды, столкновения и линьки — номера в наборах sounds.js (выбор в паузе, «Звуки»)
 if (!save.snd || typeof save.snd !== 'object') save.snd = {};
-for (const [k, set] of [['eat', EAT], ['crash', CRASH], ['molt', MOLT]]) { const i = Number(save.snd[k]); save.snd[k] = Number.isInteger(i) && set[i] ? i : 0; }
+// в 0.21.0 еда была синтезом (0 — «Ням», остальное «пиксельное», владельцу не понравилось): «Ням» сохранить, прочее — на первую запись
+if (save.snd.v !== 2) { if ('eat' in save.snd) save.snd.eat = Number(save.snd.eat) === 0 ? EAT.findIndex((e) => e.play) : 0; save.snd.v = 2; }
+for (const [k, set] of [['eat', EAT], ['boost', BOOST], ['crash', CRASH], ['molt', MOLT]]) { const i = Number(save.snd[k]); save.snd[k] = Number.isInteger(i) && set[i] ? i : 0; }
 // кнопка ускорения: размер и место (доли экрана, отдельно для вертикального и горизонтального) — игрок задаёт на паузе
 if (!save.fab || typeof save.fab !== 'object') save.fab = {};
 const persist = () => { try { localStorage.setItem('zmeigrad', JSON.stringify(save)); } catch { /* ничего */ } };
@@ -152,7 +154,7 @@ function ensureAudio() { // только из жестов: pointerup / touchend
   else if (!resumeBusy && now - audioStuck > 1500) replaceAudio();
   wakeAudio();
 }
-['pointerup', 'touchend', 'click', 'keydown'].forEach((ev) => window.addEventListener(ev, ensureAudio, { capture: true, passive: true }));
+['pointerup', 'touchend', 'click', 'keydown'].forEach((ev) => window.addEventListener(ev, () => { ensureAudio(); loadEat(); }, { capture: true, passive: true }));
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) {
     if (htmlAudio) htmlAudio.pause();
@@ -163,18 +165,6 @@ const soundOn = () => save.sound && save.vol > 0;
 const canSound = () => soundOn() && actx && (actx.state === 'running' || resumeBusy);
 const EAT_STEPS = [0, 2, 4, 7, 9, 12, 14, 16]; // полутоны от ре первой октавы
 const eatPitch = (step) => semi(294, EAT_STEPS[step]); // нота крошки: в игре и в пробе на паузе одна
-// голос вида своей змейки — щелчок молнии (звук еды выбирает игрок)
-const VOICES = {
-  beads: { boost: () => tone(260, 700, 0.07, 0.14, 'triangle') },
-  fish: { boost: () => tone(300, 1100, 0.09, 0.14, 'sine') }, // «буль»
-  caterpillar: { boost: () => tone(240, 520, 0.09, 0.13, 'sine') }, // мягко
-  dots: { boost: () => tone(300, 800, 0.07, 0.14, 'triangle') },
-  dragon: { boost: () => tone(200, 520, 0.11, 0.08, 'sawtooth') }, // с рыком
-  tiger: { boost: () => tone(220, 640, 0.08, 0.15, 'triangle') },
-  robot: { boost: () => { tone(330, 330, 0.04, 0.06, 'square'); tone(660, 660, 0.05, 0.06, 'square', 0.05); } }, // бип
-  neon: { boost: () => { tone(280, 900, 0.08, 0.12, 'sine'); tone(280, 900, 0.08, 0.05, 'sine', 0.12); } }, // с эхом
-};
-const voiceOf = (skin) => VOICES[typeId(skin)] || VOICES.beads;
 // pan — где звучит: −1 слева … 1 справа (события на арене — с той стороны экрана, где случились)
 function tone(f0, f1, dur, vol, type = 'sine', delay = 0, pan = 0) {
   if (!canSound()) return; // спящему контексту не копить звуки
@@ -224,6 +214,40 @@ function note(f, { type = 'sine', vol = 0.2, a = 0.004, dur = 0.2, delay = 0, to
   o.start(t); o.stop(t + dur + 0.05);
 }
 const SND = { n: note, h: (o) => hiss(o) }; // кирпичики для наборов sounds.js
+// записи хруста (sounds.js → EAT_SLICES): файл грузится один раз при первом жесте, буфер годится любому контексту
+let eatBuf = null, eatLoading = false, eatFail = -1e9, eatVoice = null, lastSlice = '';
+function loadEat() {
+  if (eatBuf || eatLoading || !actx || !soundOn() || performance.now() - eatFail < 30000) return; // не вышло — не чаще раза в 30 с
+  eatLoading = true;
+  const c = actx;
+  fetch('sfx/eat.wav').then((r) => (r.ok ? r.arrayBuffer() : Promise.reject(r.status)))
+    .then((ab) => new Promise((ok, no) => { const p = c.decodeAudioData(ab, ok, no); if (p && p.catch) p.catch(no); })) // старый Safari — только колбэки
+    .then((b) => { eatBuf = b; }).catch(() => { eatFail = performance.now(); /* пока нет файла — играет «Ням» */ }).finally(() => { eatLoading = false; });
+}
+// укус из набора: случайный отрезок (не тот же, что прошлый), высота с разбросом, подряд чуть выше;
+// прошлый укус быстро гаснет — при частой еде хруст не сливается в кашу
+function playBite(v, step, delay = 0) {
+  if (!canSound()) return;
+  const set = Array.isArray(v.sample) ? v.sample[(Math.random() * v.sample.length) | 0] : v.sample, list = EAT_SLICES[set];
+  let k = (Math.random() * list.length) | 0;
+  if (list.length > 1 && `${set}:${k}` === lastSlice) k = (k + 1) % list.length;
+  lastSlice = `${set}:${k}`;
+  const [off, len] = list[k], t = actx.currentTime + delay;
+  if (eatVoice && !delay) { const { g, src } = eatVoice; try { g.gain.setTargetAtTime(0, t, 0.012); src.stop(t + 0.06); } catch { /* */ } }
+  const src = actx.createBufferSource(), g = actx.createGain();
+  src.buffer = eatBuf;
+  src.playbackRate.value = (v.rate[0] + Math.random() * (v.rate[1] - v.rate[0])) * (1 + step * 0.012);
+  g.gain.value = 0.55 * save.vol * save.vol;
+  src.connect(g); g.connect(bus || actx.destination);
+  src.start(t, off, len);
+  eatVoice = { g, src };
+}
+function playEat(i, step) {
+  const v = EAT[i];
+  if (v.play || !eatBuf) { (v.play ? v : EAT.find((e) => e.play)).play(SND, eatPitch(step)); return; } // записи ещё не загрузились
+  playBite(v, step);
+  if (v.twice) playBite(v, step, v.twice);
+}
 function noiseBuffer() {
   if (!noiseBuf || noiseBuf.sampleRate !== actx.sampleRate) {
     const n = actx.sampleRate; noiseBuf = actx.createBuffer(1, n, n);
@@ -250,10 +274,10 @@ const sfx = {
     if (now - lastEatSound < 70) return;
     eatStep = now - lastEatSound < 500 ? Math.min(eatStep + 1, EAT_STEPS.length - 1) : 0;
     lastEatSound = now;
-    EAT[save.snd.eat].play(SND, eatPitch(eatStep)); // звук выбирает игрок в паузе
+    playEat(save.snd.eat, eatStep); // звук выбирает игрок в паузе
     haptic('eat');
   },
-  boost() { voiceOf(save.skin).boost(); },
+  boost() { BOOST[save.snd.boost].start(SND); }, // щелчок молнии — звук выбирает игрок в паузе
   // проскочил впритирку мимо чужого тела — короткий свист с той стороны
   near(pan) { tone(750, 1350, 0.11, 0.08, 'sine', 0, pan); tone(950, 1600, 0.08, 0.04, 'sine', 0.05, pan); haptic('near'); },
   // чужая змейка погибла на экране — глухой хлопок с её стороны, издалека тише
@@ -274,34 +298,35 @@ const sfx = {
   fly() { [440, 587, 784].forEach((f, i) => tone(f, f * 1.25, 0.09, 0.18, 'sine', i * 0.05)); haptic('fly'); },
 };
 // шум ускорения: пока держишь молнию — шорох, с каждой секундой выше и ярче
-let whoosh = null, noiseBuf = null; // { src, flt, g, ctx, vol }
+let whoosh = null, noiseBuf = null; // { srcs, g, ctx, vol }
+// звук набора, пока молния зажата (BOOST[i].loop): общий вход g — громкость и плавное включение/выключение
+function startLoop(v, vol) {
+  const t = actx.currentTime, g = actx.createGain();
+  g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(vol, t + 0.06);
+  const srcs = v.loop({ ctx: actx, out: g, noise: noiseBuffer() });
+  g.connect(bus || actx.destination);
+  return { srcs, g, ctx: actx, vol };
+}
+let boostPreview = null; // проба рывка в «Звуках»: { w, timer }
+function stopBoostPreview() { if (boostPreview) { clearTimeout(boostPreview.timer); stopLoop(boostPreview.w); boostPreview = null; } }
+function stopLoop(w) {
+  const t = w.ctx.currentTime;
+  w.g.gain.cancelScheduledValues(t); w.g.gain.setValueAtTime(w.g.gain.value, t); w.g.gain.linearRampToValueAtTime(0, t + 0.12);
+  for (const s of w.srcs) { try { s.stop(t + 0.15); } catch { /* */ } }
+}
+// пока держишь молнию — звук выбранного набора (по умолчанию ветер: шорох, который за полторы секунды выше и ярче)
 function setWhoosh(on) {
   if (on && (!soundOn() || !actx || actx.state !== 'running')) on = false;
-  if (!on) {
-    if (whoosh) {
-      const w = whoosh, t = w.ctx.currentTime;
-      w.g.gain.cancelScheduledValues(t); w.g.gain.setValueAtTime(w.g.gain.value, t); w.g.gain.linearRampToValueAtTime(0, t + 0.12);
-      try { w.src.stop(t + 0.15); } catch { /* */ }
-      whoosh = null;
-    }
-    return;
-  }
+  if (!on) { if (whoosh) { stopLoop(whoosh); whoosh = null; } return; }
   const vol = 0.05 * save.vol * save.vol;
   if (whoosh && whoosh.ctx !== actx) whoosh = null; // контекст пересоздали (iOS) — старые узлы молчат
   if (whoosh) {
     if (whoosh.vol !== vol) { whoosh.g.gain.setTargetAtTime(vol, actx.currentTime, 0.05); whoosh.vol = vol; } // громкость поменяли на паузе
     return;
   }
-  try {
-    const t = actx.currentTime;
-    const src = actx.createBufferSource(); src.buffer = noiseBuffer(); src.loop = true;
-    const flt = actx.createBiquadFilter(); flt.type = 'bandpass'; flt.Q.value = 1.4;
-    flt.frequency.setValueAtTime(500, t); flt.frequency.exponentialRampToValueAtTime(2400, t + 1.5);
-    const g = actx.createGain(); g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(vol, t + 0.06);
-    src.connect(flt); flt.connect(g); g.connect(bus || actx.destination);
-    src.start(t);
-    whoosh = { src, flt, g, ctx: actx, vol };
-  } catch { whoosh = null; }
+  const v = BOOST[save.snd.boost];
+  if (!v.loop) return; // «Щелчок» — без звука в рывке
+  try { whoosh = startLoop(v, vol); } catch { whoosh = null; }
 }
 
 // ---------- вибрация ----------
@@ -1655,29 +1680,44 @@ function bindHap() {
 // на сенсорном экране — ещё настройка кнопки ускорения
 const fabBtnHtml = () => (isTouch ? `<button class="fab-set" id="btnFabSet">${icon('bolt')}<span>Кнопка ускорения</span>${icon('right')}</button>` : '');
 function bindFabBtn() { const b = $('btnFabSet'); if (b) b.addEventListener('click', startFabEdit); }
-// звуки еды, столкновения и линьки — по 7 на выбор (sounds.js, просьба владельца); выбрал — сразу слышно
-const SND_GROUPS = [['eat', 'Еда', EAT], ['crash', 'Столкновение', CRASH], ['molt', 'Линька', MOLT]];
+// звуки еды, ускорения, столкновения и линьки на выбор (sounds.js, просьбы владельца); вкладками, выбрал — сразу слышно
+const SND_GROUPS = [['eat', 'Еда', EAT], ['boost', 'Рывок', BOOST], ['crash', 'Удар', CRASH], ['molt', 'Линька', MOLT]];
+let sndTab = 'eat';
 const sndBtnHtml = () => `<button class="fab-set" id="btnSnd">${icon('music')}<span>Звуки</span>${icon('right')}</button>`;
 function bindSndBtn() { $('btnSnd').addEventListener('click', soundsDialog); }
 function previewSound(k, i) {
-  unlockHtmlAudio();
+  unlockHtmlAudio(); loadEat();
   if (!soundOn()) { snack('Звук выключен — включи его в паузе'); return; }
-  if (k === 'eat') [0, 2, 4].forEach((st, j) => setTimeout(() => EAT[i].play(SND, eatPitch(st)), j * 150)); // три крошки подряд
-  else if (k === 'crash') CRASH[i].play(SND);
+  stopBoostPreview();
+  if (k === 'eat') [0, 2, 4].forEach((st, j) => setTimeout(() => playEat(i, st), j * 180)); // три крошки подряд
+  else if (k === 'boost') { // щелчок и полторы секунды рывка
+    BOOST[i].start(SND);
+    if (BOOST[i].loop && canSound()) {
+      try { const w = startLoop(BOOST[i], 0.05 * save.vol * save.vol); boostPreview = { w, timer: setTimeout(stopBoostPreview, 1500) }; } catch { /* старый WebKit */ }
+    }
+  } else if (k === 'crash') CRASH[i].play(SND);
   else MOLT[i].play(SND, 1, MOLT_CHARGE);
 }
 function soundsDialog() {
-  const body = SND_GROUPS.map(([k, label, set]) => `<div class="snd-g"><div class="snd-h">${label}</div><div class="snd-opts">` +
-    set.map((o, i) => `<button class="snd-opt${save.snd[k] === i ? ' on' : ''}" data-k="${k}" data-i="${i}">${esc(o.name)}</button>`).join('') +
-    '</div></div>').join('');
+  const tabs = SND_GROUPS.map(([k, label]) => `<button data-tab="${k}"${k === sndTab ? ' class="on"' : ''}>${label}</button>`).join('');
   // класс pzs: в комнате пока открыто — правит автопилот, как в меню комнаты (roomMenuOpen)
-  dialog('Звуки', body, [{ label: 'Готово', kind: 'filled', onClick: menuDialog }], { cls: 'pzs' });
-  $('dlgBody').querySelectorAll('.snd-opt').forEach((b) => b.addEventListener('click', () => {
-    const k = b.dataset.k, i = Number(b.dataset.i);
-    save.snd[k] = i; persist();
-    b.parentNode.querySelectorAll('.snd-opt').forEach((x) => x.classList.toggle('on', x === b));
-    previewSound(k, i);
-  }));
+  dialog('Звуки', `<div class="tabs snd-tabs">${tabs}</div><div class="snd-opts" id="sndOpts"></div>`,
+    [{ label: 'Готово', kind: 'filled', onClick: menuDialog }], { cls: 'pzs' });
+  const opts = $('sndOpts');
+  const show = () => {
+    const [k, , set] = SND_GROUPS.find((g) => g[0] === sndTab);
+    opts.innerHTML = set.map((o, i) => `<button class="snd-opt${save.snd[k] === i ? ' on' : ''}" data-i="${i}">${esc(o.name)}</button>`).join('');
+    $('dlgBody').querySelectorAll('[data-tab]').forEach((b) => b.classList.toggle('on', b.dataset.tab === sndTab));
+  };
+  $('dlgBody').querySelectorAll('[data-tab]').forEach((b) => b.addEventListener('click', () => { sndTab = b.dataset.tab; stopBoostPreview(); show(); }));
+  opts.addEventListener('click', (e) => {
+    const b = e.target.closest('.snd-opt'); if (!b) return;
+    const i = Number(b.dataset.i);
+    save.snd[sndTab] = i; persist();
+    opts.querySelectorAll('.snd-opt').forEach((x) => x.classList.toggle('on', x === b));
+    previewSound(sndTab, i);
+  });
+  show();
 }
 function openMenu() {
   if (ui !== 'play' || fabEdit) return;
@@ -1744,6 +1784,7 @@ const goOutActions = (go, out) => [{ label: 'В меню', kind: 'pz-out', icon:
 // wait — сколько мс после появления кнопки не нажимаются (inert: ни касанием, ни с клавиатуры)
 function dialog(title, body, actions, { cls = '', top = '', wait = 0 } = {}) {
   endFabEdit(); // игра кончилась или выход, пока настраивал кнопку
+  stopBoostPreview(); // проба рывка из «Звуков» не доигрывает поверх нового окна
   pzSnake = null; // новое окно поверх паузы — её змейка и плашки ушли
   $('dlgBox').className = `dialog ${cls}`;
   $('dlgTop').innerHTML = top;

@@ -233,13 +233,13 @@ svg.i{width:24px;height:24px;fill:currentColor;flex:none}
 .pz-list .fab-set:active{background:var(--surf-high)}
 .btn.pz-out{width:100%;height:56px;border-radius:28px;margin-top:12px;border:2px solid var(--outline);color:var(--on);font-size:17px;font-weight:600;gap:10px}
 .btn.pz-out svg.i{width:24px;height:24px}
-/* «Звуки» из паузы: по 7 вариантов на еду, столкновение и линьку — выбранный подсвечен, нажатие сразу играет */
+/* «Звуки» из паузы: вкладки еда / рывок / удар / линька, под ними варианты — выбранный подсвечен, нажатие сразу играет */
 .dialog.pzs{max-width:400px}
-.pzs h3{text-align:center;font-size:24px;font-weight:500;margin:0 0 4px}
-.snd-g{margin:12px 0 0}
-.snd-h{color:var(--on);font-size:15px;font-weight:500;margin:0 0 6px}
-.snd-opts{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}
-.snd-opt{height:38px;padding:0 2px;border-radius:19px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;border:1px solid var(--outline-var);color:var(--on-var);font-size:14px}
+.pzs h3{text-align:center;font-size:24px;font-weight:500;margin:0 0 12px}
+.snd-tabs{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:4px;margin:0 0 14px}
+.snd-tabs button{padding:0 4px;font-size:15px}
+.snd-opts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;min-height:188px;align-content:start}
+.snd-opt{height:40px;padding:0 4px;border-radius:20px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;border:1px solid var(--outline-var);color:var(--on-var);font-size:14px}
 .snd-opt.on{background:var(--primary);color:var(--on-primary);border-color:var(--primary);font-weight:500}
 .pzs .actions .btn.filled{width:100%;height:56px;border-radius:28px;font-size:18px}
 /* «Ой!»: в ряд — слева «В меню» по содержимому (решение владельца), справа большая жёлтая «Продолжить» на остальное */
@@ -255,7 +255,7 @@ svg.i{width:24px;height:24px;fill:currentColor;flex:none}
 @media (max-width:360px){
   .dialog.pz{padding:20px 16px}
   .dialog.pzs{padding:20px 14px}
-  .snd-opt{font-size:13px}
+  .snd-opt,.snd-tabs button{font-size:13px}
   .scrim[data-kind=oops]{padding-left:12px;padding-right:12px}
   .dialog.oops{padding:20px 14px}
   .dialog.oops .actions{gap:6px}
@@ -275,12 +275,11 @@ svg.i{width:24px;height:24px;fill:currentColor;flex:none}
   .pz-chips{margin:6px 0 12px}
   .pz .btn.pz-go{height:56px}
   .pz .btn.pz-out{height:48px;margin-top:10px}
-  .dialog.pzs{max-width:700px;padding:12px 24px}
-  .pzs h3{font-size:20px;line-height:26px}
+  .dialog.pzs{max-width:640px;padding:12px 24px}
+  .pzs h3{font-size:20px;line-height:26px;margin-bottom:8px}
   .scrim[data-kind=pzs]{padding-top:8px;padding-bottom:8px}
-  .snd-opts{grid-template-columns:repeat(7,minmax(0,1fr))}
-  .pzs .snd-g{margin-top:8px}
-  .pzs .snd-h{margin-bottom:6px}
+  .snd-tabs{margin-bottom:10px}
+  .snd-opts{grid-template-columns:repeat(5,minmax(0,1fr));min-height:96px}
   .pzs .actions{margin-top:12px}
   .pzs .actions .btn.filled{height:46px}
   /* «Ой!» боком: окно плотнее, иначе не влезает по высоте */

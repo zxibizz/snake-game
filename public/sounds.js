@@ -1,23 +1,101 @@
-// Наборы звуков еды, столкновения и линьки — по 7 на выбор в паузе («Звуки»), выбор хранится в save.snd.
-// Просьба владельца: ниже и мягче прежних. Основной тон 150–800 Гц (ниже динамик телефона почти не играет),
+// Наборы звуков на выбор в паузе («Звуки»): еда (10, записи хруста), рывок (9), удар (7), линька (7); выбор — save.snd.
+// Синтез — по просьбе владельца ниже и мягче: основной тон 150–800 Гц (ниже динамик телефона почти не играет),
 // обертоны выше ~1,5 кГц — только тихо; пилу и квадрат глушим фильтром (lp).
 // a — кирпичики из client.js: a.n(частота, {...}) — нота, a.h({...}) — шорох; W — сколько бежит свечение линьки.
 
 export const semi = (f, n) => f * Math.pow(2, n / 12);
 const PENTA = [0, 2, 4, 7, 9, 12];
 
-// еда: f — нота лада (ре первой октавы и выше, подряд поднимается по ступеням)
+// еда — настоящие записи хруста (CC0, OpenGameArt; источники — README): отрезки-укусы в public/sfx/eat.wav.
+// Каждая крошка — случайный укус набора с разбросом высоты rate (подряд чуть выше — в playBite). sample — набор или несколько.
+export const EAT_SLICES = {"cucumber":[[0.0,0.1995],[0.2095,0.1995],[0.419,0.1995],[0.6286,0.1995],[0.8381,0.1995],[1.0476,0.1995]],"toast":[[1.2571,0.0748],[1.342,0.1247],[1.4766,0.0848],[1.5714,0.1447],[1.7261,0.1696],[1.9057,0.1796],[2.0952,0.0848],[2.19,0.1546],[2.3546,0.0848]],"apple":[[2.4494,0.0599],[2.5193,0.2195],[2.7488,0.2195]],"crisp":[[2.9782,0.1995],[3.1878,0.1995],[3.3973,0.1995],[3.6068,0.1995],[3.8163,0.1995],[4.0259,0.1447],[4.1805,0.1995],[4.39,0.1497]],"bite":[[4.5497,0.2395]],"rabbit":[[4.7991,0.0848],[4.8939,0.0948],[4.9986,0.1297],[5.1383,0.1197],[5.268,0.1098],[5.3878,0.0748],[5.4726,0.1297],[5.6122,0.1048]]};
 export const EAT = [
+  { name: 'Огурец', sample: 'cucumber', rate: [0.92, 1.08] },
+  { name: 'Тост', sample: 'toast', rate: [0.9, 1.1] },
+  { name: 'Яблоко', sample: 'apple', rate: [0.9, 1.08] },
+  { name: 'Хрустяшка', sample: 'crisp', rate: [0.92, 1.08] },
+  { name: 'Кусь', sample: 'bite', rate: [0.85, 1.15] },
+  { name: 'Кролик', sample: 'rabbit', rate: [0.9, 1.1] },
+  { name: 'Сухарик', sample: 'toast', rate: [0.76, 0.86] },
+  { name: 'Морковка', sample: ['cucumber', 'apple'], rate: [0.82, 0.92] },
+  { name: 'Хрум-хрум', sample: 'crisp', rate: [0.95, 1.1], twice: 0.085 },
+  // одна тональная — для любителей мелодии: f — нота лада, подряд поднимается
   { name: 'Ням', play: (a, f) => { a.n(f, { to: f * 1.3, dur: 0.09, vol: 0.22, a: 0.006 }); a.n(f * 0.75, { type: 'triangle', dur: 0.06, vol: 0.08 }); } },
-  { name: 'Буль', play: (a, f) => a.n(f * 0.6, { to: f * 1.5, dur: 0.07, vol: 0.2, a: 0.004 }) },
-  { name: 'Хрум', play: (a, f) => {
-    a.h({ type: 'lowpass', f: 1400, q: 0.8, vol: 0.25, dur: 0.03 }); a.h({ type: 'lowpass', f: 1000, q: 0.9, vol: 0.18, dur: 0.035, delay: 0.035 });
-    a.n(f * 0.75, { type: 'triangle', dur: 0.08, vol: 0.08 });
+];
+
+// ускорение: start — щелчок при нажатии молнии; loop — звук, пока молния зажата: узлы в a.ctx в a.out
+// (громкость и затухание при отпускании — в client.js), вернуть источники, которые надо остановить.
+// a.noise — буфер белого шума на 1 с.
+// шум по кругу, уже запущен со случайного места (у каждого слоя и рывка свой)
+function noiseSrc(a) { const s = a.ctx.createBufferSource(); s.buffer = a.noise; s.loop = true; s.start(0, Math.random() * 0.9); return s; }
+function filt(a, type, f, q = 1) { const x = a.ctx.createBiquadFilter(); x.type = type; x.frequency.value = f; x.Q.value = q; return x; }
+function gain(a, v) { const g = a.ctx.createGain(); g.gain.value = v; return g; }
+function osc(a, type, f) { const o = a.ctx.createOscillator(); o.type = type; o.frequency.value = f; return o; }
+// дрожь громкости: lfo частоты hz, глубина depth (0…1) — у узла g
+function tremolo(a, g, hz, depth) { const l = osc(a, 'sine', hz), d = gain(a, depth); l.connect(d); d.connect(g.gain); return l; }
+let bubbles = null;
+function bubbleBuf(a) { // 2 с пузырьков: короткие «бульки» вверх через случайные промежутки
+  if (bubbles && bubbles.sampleRate === a.ctx.sampleRate) return bubbles;
+  const sr = a.ctx.sampleRate, n = sr * 2; bubbles = a.ctx.createBuffer(1, n, sr);
+  const d = bubbles.getChannelData(0);
+  for (let t = 0.01; t < 1.95;) {
+    const f0 = 220 + Math.random() * 260, len = 0.025 + Math.random() * 0.02, s0 = Math.floor(t * sr), m = Math.floor(len * sr), amp = 0.4 + Math.random() * 0.5;
+    let ph = 0;
+    for (let i = 0; i < m && s0 + i < n; i++) { const k = i / m; ph += 2 * Math.PI * f0 * (1 + 1.6 * k) / sr; d[s0 + i] += Math.sin(ph) * amp * Math.sin(Math.PI * k) * (1 - k); }
+    t += 0.05 + Math.random() * 0.07;
+  }
+  return bubbles;
+}
+const swoosh = (a, f0 = 400, f1 = 1400, vol = 0.25) => a.h({ type: 'bandpass', f: f0, f1, q: 1.2, vol, dur: 0.16, a: 0.04 });
+export const BOOST = [
+  { name: 'Ветер', start: (a) => swoosh(a), loop: (a) => {
+    const s = noiseSrc(a), f = filt(a, 'bandpass', 400, 1.4), t = a.ctx.currentTime;
+    f.frequency.setValueAtTime(400, t); f.frequency.exponentialRampToValueAtTime(1600, t + 1.5);
+    s.connect(f); f.connect(a.out); return [s];
   } },
-  { name: 'Чмок', play: (a, f) => { a.h({ f: 700, q: 2, vol: 0.3, dur: 0.025 }); a.n(f * 0.8, { to: f * 0.55, dur: 0.06, vol: 0.16 }); } },
-  { name: 'Тук', play: (a, f) => { a.n(f, { vol: 0.2, a: 0.002, dur: 0.16 }); a.n(f * 3.9, { vol: 0.02, a: 0.001, dur: 0.04 }); } },
-  { name: 'Кап', play: (a, f) => a.n(f * 1.2, { to: f * 0.6, dur: 0.08, vol: 0.2, a: 0.003 }) },
-  { name: 'Пик', play: (a, f) => a.n(f * 0.75, { type: 'square', lp: 1600, dur: 0.06, vol: 0.08 }) },
+  { name: 'Ракета', start: (a) => a.h({ type: 'lowpass', f: 1200, f1: 300, q: 0.7, vol: 0.4, dur: 0.25, a: 0.01 }), loop: (a) => {
+    const s = noiseSrc(a), f = filt(a, 'lowpass', 500, 0.8), g = gain(a, 2.2), t = a.ctx.currentTime;
+    f.frequency.setValueAtTime(350, t); f.frequency.exponentialRampToValueAtTime(900, t + 1.5);
+    const r = noiseSrc(a), rf = filt(a, 'bandpass', 160, 2), rg = gain(a, 1.6); // гул
+    const l = tremolo(a, g, 11, 0.6); // потрескивание
+    s.connect(f); f.connect(g); g.connect(a.out); r.connect(rf); rf.connect(rg); rg.connect(a.out);
+    l.start(); return [s, r, l];
+  } },
+  { name: 'Турбина', start: (a) => a.n(300, { to: 700, dur: 0.18, vol: 0.12, a: 0.03 }), loop: (a) => {
+    const s = noiseSrc(a), f = filt(a, 'bandpass', 900, 0.8), o = osc(a, 'sine', 380), og = gain(a, 0.5), t = a.ctx.currentTime;
+    f.frequency.setValueAtTime(700, t); f.frequency.exponentialRampToValueAtTime(1500, t + 1.5);
+    o.frequency.setValueAtTime(380, t); o.frequency.exponentialRampToValueAtTime(820, t + 1.8);
+    s.connect(f); f.connect(a.out); o.connect(og); og.connect(a.out); o.start(); return [s, o];
+  } },
+  { name: 'Мотор', start: (a) => a.n(80, { type: 'sawtooth', to: 150, lp: 900, dur: 0.2, vol: 0.18, a: 0.01 }), loop: (a) => {
+    const o1 = osc(a, 'sawtooth', 95), o2 = osc(a, 'sawtooth', 96.5), f = filt(a, 'lowpass', 750, 1.5), g = gain(a, 0.9), t = a.ctx.currentTime;
+    for (const o of [o1, o2]) { o.frequency.setValueAtTime(o.frequency.value, t); o.frequency.exponentialRampToValueAtTime(o.frequency.value * 1.6, t + 1.6); o.connect(f); }
+    const l = tremolo(a, g, 28, 0.35);
+    f.connect(g); g.connect(a.out); o1.start(); o2.start(); l.start(); return [o1, o2, l];
+  } },
+  { name: 'Пузыри', start: (a) => a.n(250, { to: 650, dur: 0.06, vol: 0.18 }), loop: (a) => {
+    const s = a.ctx.createBufferSource(); s.buffer = bubbleBuf(a); s.loop = true;
+    const g = gain(a, 3.5); s.connect(g); g.connect(a.out); s.start(); return [s];
+  } },
+  { name: 'Шшш', start: (a) => a.h({ type: 'bandpass', f: 1800, q: 1, vol: 0.2, dur: 0.12, a: 0.02 }), loop: (a) => {
+    const s = noiseSrc(a), f = filt(a, 'bandpass', 1900, 1.1), g = gain(a, 1);
+    const l = tremolo(a, g, 3.5, 0.25);
+    s.connect(f); f.connect(g); g.connect(a.out); l.start(); return [s, l];
+  } },
+  { name: 'Электро', start: (a) => a.n(600, { type: 'sawtooth', lp: 1500, to: 160, dur: 0.12, vol: 0.12 }), loop: (a) => {
+    const o = osc(a, 'square', 110), f = filt(a, 'bandpass', 800, 2), g = gain(a, 0.8), t = a.ctx.currentTime;
+    o.frequency.setValueAtTime(110, t); o.frequency.exponentialRampToValueAtTime(165, t + 1.5);
+    const l = tremolo(a, g, 18, 0.5);
+    o.connect(f); f.connect(g); g.connect(a.out); o.start(); l.start(); return [o, l];
+  } },
+  { name: 'Космос', start: (a) => a.n(260, { to: 780, dur: 0.22, vol: 0.12, a: 0.05, wet: 0.4 }), loop: (a) => {
+    const o1 = osc(a, 'sine', 220), o2 = osc(a, 'sine', 277), g = gain(a, 0.45), t = a.ctx.currentTime;
+    const v = osc(a, 'sine', 5), vg = gain(a, 6); v.connect(vg); vg.connect(o1.detune); vg.connect(o2.detune);
+    for (const o of [o1, o2]) { o.frequency.setValueAtTime(o.frequency.value, t); o.frequency.exponentialRampToValueAtTime(o.frequency.value * 1.5, t + 1.5); o.connect(g); }
+    const s = noiseSrc(a), f = filt(a, 'bandpass', 700, 1.5), ng = gain(a, 0.5); s.connect(f); f.connect(ng); ng.connect(a.out);
+    g.connect(a.out); o1.start(); o2.start(); v.start(); return [o1, o2, v, s];
+  } },
+  { name: 'Щелчок', start: (a) => swoosh(a, 300, 1000, 0.3), loop: null },
 ];
 
 // своя змейка разбилась

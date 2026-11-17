@@ -1,6 +1,6 @@
 // Офлайн: все файлы игры кладутся в кэш при установке и дальше отдаются из него.
 // При изменении любого файла увеличить VERSION — иначе устройства останутся на старой версии.
-const VERSION = '42';
+const VERSION = '43';
 const CACHE = `zmeigrad-v${VERSION}`;
 const ASSETS = [
   './',
@@ -11,6 +11,7 @@ const ASSETS = [
   'rtc.js',
   'backdrop.js',
   'sounds.js',
+  'sfx/eat.wav',
   'manifest.webmanifest',
   'icons/icon-192.png',
   'icons/icon-512.png',
