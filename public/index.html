@@ -67,6 +67,7 @@ svg.i{width:24px;height:24px;fill:currentColor;flex:none}
 .top h1{margin:0;font-size:24px;font-weight:500;line-height:36px;text-align:center}
 .top .icon-btn{width:44px;height:44px;background:var(--surf-high);box-shadow:none;justify-self:start}
 .top .stars{justify-self:end}
+.top-l{display:flex;gap:8px;justify-self:start}
 .stars{display:inline-flex;align-items:center;gap:6px;height:36px;padding:0 14px;border-radius:18px;background:var(--surf-high);
   font-size:16px;font-weight:600;color:#FFD447}
 .stars svg.i{width:18px;height:18px}
@@ -239,9 +240,14 @@ svg.i{width:24px;height:24px;fill:currentColor;flex:none}
 .dialog.pzs{max-width:400px}
 .pzs h3{text-align:center;font-size:24px;font-weight:500;margin:0 0 12px}
 .snd-tabs{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:4px;margin:0 0 14px}
-.snd-tabs button{padding:0 4px;font-size:15px}
+.snd-tabs button{padding:0 2px;font-size:14px;line-height:1.1;overflow:hidden;hyphens:auto}
 .snd-opts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;min-height:188px;align-content:start}
-.snd-opt{height:40px;padding:0 4px;border-radius:20px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;border:1px solid var(--outline-var);color:var(--on-var);font-size:14px}
+/* long names (in any language) wrap to a second line instead of being cut off */
+.snd-opt{height:40px;padding:0 6px;border-radius:20px;overflow:hidden;line-height:1.1;overflow-wrap:anywhere;hyphens:auto;border:1px solid var(--outline-var);color:var(--on-var);font-size:13px}
+/* language picker: native names in two columns, "device language" across both */
+.lang-opts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.lang-opts .snd-opt{font-size:15px}
+.lang-opts .snd-opt.auto{grid-column:1/-1}
 .snd-opt.on{background:var(--primary);color:var(--on-primary);border-color:var(--primary);font-weight:500}
 .pzs .actions .btn.filled{width:100%;height:56px;border-radius:28px;font-size:18px}
 /* "Oops!": in a row — "Menu" on the left sized to its content (design decision), the big yellow "Continue" on the right takes the rest */
@@ -253,8 +259,8 @@ svg.i{width:24px;height:24px;fill:currentColor;flex:none}
 .dialog.oops .btn.pz-out svg.i{width:22px;height:22px}
 .dialog.oops .btn.pz-go{flex:1 1 0;min-width:0;width:auto;font-size:18px;gap:8px;padding:0 12px}
 .dialog.oops .btn.pz-go svg.i{width:24px;height:24px}
-/* narrow phone (iPhone SE): smaller margins, labels on one line */
-@media (max-width:360px){
+/* narrow phone (iPhone SE, up to 375 px): smaller margins, labels on one line */
+@media (max-width:380px){
   .dialog.pz{padding:20px 16px}
   .dialog.pzs{padding:20px 14px}
   .snd-opt,.snd-tabs button{font-size:13px}
@@ -363,7 +369,10 @@ svg.i{width:24px;height:24px;fill:currentColor;flex:none}
   <div id="update" role="status" hidden><span data-t="update.banner">A game update is ready</span><button class="btn text" id="btnUpdate" data-t="btn.update">Update</button></div>
   <div class="home">
     <header class="top">
-      <button class="icon-btn" id="btnInfo" aria-label="How to play" data-t-aria="a11y.help" data-icon="help"></button>
+      <div class="top-l">
+        <button class="icon-btn" id="btnInfo" aria-label="How to play" data-t-aria="a11y.help" data-icon="help"></button>
+        <button class="icon-btn" id="btnLang" aria-label="Language" data-t-aria="lang.title" data-icon="language"></button>
+      </div>
       <h1 data-t="app.name">Snake</h1>
       <span class="stars" id="stars" aria-label="Stars" data-t-aria="a11y.stars"></span>
     </header>

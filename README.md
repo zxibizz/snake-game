@@ -21,14 +21,14 @@ Touch controls: a joystick that starts wherever you touch, and a lightning-bolt 
 
 ## Languages
 
-The interface is localized: English and Russian. The language is picked automatically from the browser locale (`navigator.languages`, the first supported one wins), English is the fallback. `?lang=ru` in the URL overrides it and is remembered on the device; `?lang=auto` goes back to the browser locale.
+The interface is localized into 13 languages: English, German, Spanish, French, Italian, Dutch, Polish, Portuguese (Brazil), Turkish, Russian, Japanese, Korean and Chinese (Simplified). By default the language follows the device: the first supported one in `navigator.languages`, English otherwise (other variants of Portuguese and Chinese get the Brazilian and Simplified ones). The globe next to "?" on the home screen lets the player pick any language or go back to "Device language"; the choice is remembered on the device. `?lang=xx` in the URL picks a language too, `?lang=auto` goes back to the device language.
 
-- `public/i18n.js` — language detection, `t(key, ...args)`, and translation of the static page (`data-t` → text, `data-t-aria` → `aria-label`, plus the title, `<html lang>` and the manifest for installing). It loads before `client.js`, and the page stays hidden until the language is set, so there's no flash of the wrong language.
-- `public/lang/<code>.js` — dictionaries. A value is a string or a function of the arguments (numbers, names, plurals); missing keys fall back to English.
-- Skins, snake types, sounds and difficulty levels have ids in the code (`SKINS[i].id`, `TYPES[i].id`, `EAT[i].id`, …); their names live only in the dictionaries. Bot names are a per-language list too (`bots`): in a room the host's language names the bots.
-- Adding a language: copy `public/lang/en.js` and `public/manifest.webmanifest` to `lang/<code>.js` and `manifest.<code>.webmanifest`, translate them, register the language in `LANGS` in `public/i18n.js` and add both files to `ASSETS` in `public/sw.js`. `test/i18n.test.js` checks that every language has exactly the English keys, names for every skin, type and sound, enough bot names, a cached manifest that differs from the English one only in its texts.
+- `public/i18n.js` — language detection, the picker's list (`LANG_ORDER`), `setLang()`, `t(key, ...args)`, and translation of the static page (`data-t` → text, `data-t-aria` → `aria-label`, plus the title, `<html lang>` and the manifest for installing). It loads before `client.js`, and the page stays hidden until the language is set, so there's no flash of the wrong language.
+- `public/lang/<code>.js` — dictionaries; `en.js` is the reference and the fallback. A value is a string or a function of the arguments (numbers, names); missing keys fall back to English. `lang.name` is the language's own name for the picker.
+- Skins, snake types, sounds and difficulty levels have ids in the code (`SKINS[i].id`, `TYPES[i].id`, `EAT[i].id`, …); their names live only in the dictionaries. Bot names are a list per language (`bots`); a language without its own list uses the English names. In a room the host's language names the bots.
+- Adding a language: copy `public/lang/en.js` and `public/manifest.webmanifest` to `lang/<code>.js` and `manifest.<code>.webmanifest`, translate them, register the language in `LANGS` and `LANG_ORDER` in `public/i18n.js` and add both files to `ASSETS` in `public/sw.js`. `test/i18n.test.js` checks that every language has exactly the English keys, names for every skin, type and sound, a unique name in the picker, and a cached manifest that differs from the English one only in its texts. Check the layout on a 375 px phone: tab and button labels must fit.
 
-There's no Cyrillic outside `public/lang/ru.js` and `public/manifest.ru.webmanifest`: code, comments and docs are in English.
+Code, comments and docs are in English only; a test fails if Cyrillic shows up anywhere outside `public/lang/ru.js` and `public/manifest.ru.webmanifest`.
 
 ## Balance
 
@@ -118,7 +118,7 @@ Progress is stored in the device's `localStorage` (key `zmeigrad` — the game's
 | `public/core.js` | shared world logic: snakes, food, butterflies, bots, feast, collisions, skins and molts. No DOM and no network |
 | `public/client.js` | rendering, controls, menus, stars; the solo game and the network client |
 | `public/i18n.js` | language detection and `t()`; translation of the static page |
-| `public/lang/*.js` | dictionaries: English (reference and fallback) and Russian |
+| `public/lang/*.js` | dictionaries for 13 languages; English is the reference and the fallback |
 | `public/sounds.js` | selectable sound sets: food (crunch recordings), boost, crash, molt |
 | `public/sfx/eat.wav` | crunch bites (CC0) for the food sounds |
 | `public/backdrop.js` | arena backdrops: random at start, non-repeating patches and detail tiles |

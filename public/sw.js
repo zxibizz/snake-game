@@ -1,6 +1,6 @@
 // Offline: every game file goes into the cache on install and is served from it from then on.
 // When any file changes, bump VERSION — otherwise devices stay on the old version.
-const VERSION = '45';
+const VERSION = '46';
 const CACHE = `zmeigrad-v${VERSION}`;
 const ASSETS = [
   './',
@@ -13,10 +13,32 @@ const ASSETS = [
   'sounds.js',
   'i18n.js',
   'lang/en.js',
+  'lang/de.js',
+  'lang/es.js',
+  'lang/fr.js',
+  'lang/it.js',
+  'lang/ja.js',
+  'lang/ko.js',
+  'lang/nl.js',
+  'lang/pl.js',
+  'lang/pt.js',
   'lang/ru.js',
+  'lang/tr.js',
+  'lang/zh.js',
   'sfx/eat.wav',
   'manifest.webmanifest',
+  'manifest.de.webmanifest',
+  'manifest.es.webmanifest',
+  'manifest.fr.webmanifest',
+  'manifest.it.webmanifest',
+  'manifest.ja.webmanifest',
+  'manifest.ko.webmanifest',
+  'manifest.nl.webmanifest',
+  'manifest.pl.webmanifest',
+  'manifest.pt.webmanifest',
   'manifest.ru.webmanifest',
+  'manifest.tr.webmanifest',
+  'manifest.zh.webmanifest',
   'icons/icon-192.png',
   'icons/icon-512.png',
   'icons/apple-touch-icon.png',

@@ -1,26 +1,36 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { LANGS, pickLang, t, has } from '../public/i18n.js';
+import { LANGS, LANG_ORDER, pickLang, t, has } from '../public/i18n.js';
 import { SKINS, TYPES } from '../public/core.js';
 import { EAT, BOOST, CRASH, MOLT } from '../public/sounds.js';
 
 test('i18n: language comes from the first supported locale, English otherwise', () => {
   assert.equal(pickLang(['ru-RU', 'en-US']), 'ru');
-  assert.equal(pickLang(['de-DE', 'ru']), 'ru');
+  assert.equal(pickLang(['kk-KZ', 'ru']), 'ru');
+  assert.equal(pickLang(['de-DE', 'ru']), 'de');
+  assert.equal(pickLang(['pt-PT']), 'pt');
+  assert.equal(pickLang(['zh-TW']), 'zh');
   assert.equal(pickLang(['en-GB', 'ru']), 'en');
   assert.equal(pickLang(['RU_kz']), 'ru');
-  assert.equal(pickLang(['de-DE', 'fr']), 'en');
+  assert.equal(pickLang(['sv-SE', 'fi']), 'en');
   assert.equal(pickLang([]), 'en');
   assert.equal(pickLang([undefined]), 'en');
 });
 
+test('i18n: the language picker lists every language once, each under its own name', () => {
+  assert.deepEqual([...LANG_ORDER].sort(), Object.keys(LANGS).sort());
+  const names = Object.values(LANGS).map((d) => d['lang.name']);
+  assert.equal(new Set(names).size, names.length);
+});
+
 test('i18n: every language has exactly the keys of English, of the same kind', () => {
   const ref = LANGS.en;
+  const optional = new Set(['bots']); // a language may keep the English bot names
   for (const [code, d] of Object.entries(LANGS)) {
     assert.deepEqual(Object.keys(d).filter((k) => !(k in ref)), [], `${code}: unknown keys`);
-    assert.deepEqual(Object.keys(ref).filter((k) => !(k in d)), [], `${code}: missing keys`);
-    for (const k of Object.keys(ref)) assert.equal(typeof d[k], typeof ref[k], `${code}: ${k}`);
+    assert.deepEqual(Object.keys(ref).filter((k) => !(k in d) && !optional.has(k)), [], `${code}: missing keys`);
+    for (const k of Object.keys(d)) assert.equal(typeof d[k], typeof ref[k], `${code}: ${k}`);
   }
 });
 
@@ -30,8 +40,9 @@ test('i18n: skins, snake types and sounds have a name in every language', () => 
   assert.equal(new Set(SKINS.map((s) => s.id)).size, SKINS.length, 'skin ids are unique');
   for (const [code, d] of Object.entries(LANGS)) {
     for (const k of keys) assert.ok(typeof d[k] === 'string' && d[k], `${code}: ${k}`);
-    assert.ok(Array.isArray(d.bots) && d.bots.length >= 60, `${code}: enough bot names for a full arena`);
-    assert.equal(new Set(d.bots).size, d.bots.length, `${code}: bot names are unique`);
+    const bots = d.bots || LANGS.en.bots;
+    assert.ok(Array.isArray(bots) && bots.length >= 60, `${code}: enough bot names for a full arena`);
+    assert.equal(new Set(bots).size, bots.length, `${code}: bot names are unique`);
   }
 });
 
