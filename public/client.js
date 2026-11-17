@@ -8,6 +8,7 @@ import {
 import { Room, runRoom, encodeSelf, FR, FLR, readFood } from './room.js';
 import { host, join, loopback } from './rtc.js';
 import { BACKDROPS, makeBackdrop, drawBackdrop } from './backdrop.js';
+import { EAT, CRASH, MOLT, semi } from './sounds.js';
 
 const TICK_MS = 25;        // комната: 40 шагов и снимков в секунду
 const INTERP_MS = 70;      // чужих змей рисуем с задержкой на пару-тройку снимков — так движение плавное и потеря снимка незаметна
@@ -34,6 +35,7 @@ const ICONS = {
   help: '<path d="M11 18h2v-2h-2v2zm1-16C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm0-14c-2.21 0-4 1.79-4 4h2c0-1.1.9-2 2-2s2 .9 2 2c0 2-3 1.75-3 5h2c0-2.25 3-2.5 3-5 0-2.21-1.79-4-4-4z"/>',
   home: '<path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/>',
   ruler: '<path d="M21 6H3c-1.1 0-2 .9-2 2v8c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zm0 10H3V8h2v4h2V8h2v4h2V8h2v4h2V8h2v4h2V8h2v8z"/>',
+  music: '<path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/>',
   star: '<path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/>',
   cloudDone: '<path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM10 17l-3.5-3.5 1.41-1.41L10 14.17 15.18 9l1.41 1.41L10 17z"/>',
 };
@@ -55,6 +57,9 @@ delete save.daily; // задания дня убраны
 if (!SKINS[save.skin]) save.skin = 0;
 if (!DIFF[save.diff]) save.diff = 'easy';
 if (!(save.vol >= 0 && save.vol <= 1)) save.vol = 1;
+// выбранные звуки еды, столкновения и линьки — номера в наборах sounds.js (выбор в паузе, «Звуки»)
+if (!save.snd || typeof save.snd !== 'object') save.snd = {};
+for (const [k, set] of [['eat', EAT], ['crash', CRASH], ['molt', MOLT]]) { const i = Number(save.snd[k]); save.snd[k] = Number.isInteger(i) && set[i] ? i : 0; }
 // кнопка ускорения: размер и место (доли экрана, отдельно для вертикального и горизонтального) — игрок задаёт на паузе
 if (!save.fab || typeof save.fab !== 'object') save.fab = {};
 const persist = () => { try { localStorage.setItem('zmeigrad', JSON.stringify(save)); } catch { /* ничего */ } };
@@ -156,19 +161,18 @@ document.addEventListener('visibilitychange', () => {
 });
 const soundOn = () => save.sound && save.vol > 0;
 const canSound = () => soundOn() && actx && (actx.state === 'running' || resumeBusy);
-const EAT_STEPS = [0, 2, 4, 7, 9, 12, 14, 16]; // полутоны от ре второй октавы
-// голос вида своей змейки: тот же лад, свой тембр (еда и щелчок молнии)
+const EAT_STEPS = [0, 2, 4, 7, 9, 12, 14, 16]; // полутоны от ре первой октавы
+const eatPitch = (step) => semi(294, EAT_STEPS[step]); // нота крошки: в игре и в пробе на паузе одна
+// голос вида своей змейки — щелчок молнии (звук еды выбирает игрок)
 const VOICES = {
-  beads: { eat: (f) => tone(f, f * 1.6, 0.07, 0.12, 'triangle'), boost: () => tone(260, 700, 0.07, 0.14, 'triangle') },
-  fish: { eat: (f) => tone(f * 0.7, f * 1.9, 0.06, 0.14, 'sine'), boost: () => tone(300, 1100, 0.09, 0.14, 'sine') }, // «буль»
-  caterpillar: { eat: (f) => tone(f, f * 1.25, 0.09, 0.13, 'sine'), boost: () => tone(240, 520, 0.09, 0.13, 'sine') }, // мягко
-  dots: { eat: (f) => { tone(f, f * 1.5, 0.06, 0.1, 'triangle'); tone(f * 2, f * 3, 0.04, 0.04, 'sine', 0.02); }, // звонко
-    boost: () => tone(300, 800, 0.07, 0.14, 'triangle') },
-  dragon: { eat: (f) => tone(f * 0.5, f * 0.9, 0.08, 0.06, 'sawtooth'), boost: () => tone(200, 520, 0.11, 0.08, 'sawtooth') }, // с рыком
-  tiger: { eat: (f) => tone(f, f * 1.4, 0.06, 0.12, 'triangle'), boost: () => tone(220, 640, 0.08, 0.15, 'triangle') },
-  robot: { eat: (f) => tone(f, f, 0.05, 0.05, 'square'), boost: () => { tone(330, 330, 0.04, 0.06, 'square'); tone(660, 660, 0.05, 0.06, 'square', 0.05); } }, // бип
-  neon: { eat: (f) => { tone(f, f * 1.5, 0.07, 0.1, 'sine'); tone(f, f * 1.5, 0.07, 0.04, 'sine', 0.11); }, // с эхом
-    boost: () => { tone(280, 900, 0.08, 0.12, 'sine'); tone(280, 900, 0.08, 0.05, 'sine', 0.12); } },
+  beads: { boost: () => tone(260, 700, 0.07, 0.14, 'triangle') },
+  fish: { boost: () => tone(300, 1100, 0.09, 0.14, 'sine') }, // «буль»
+  caterpillar: { boost: () => tone(240, 520, 0.09, 0.13, 'sine') }, // мягко
+  dots: { boost: () => tone(300, 800, 0.07, 0.14, 'triangle') },
+  dragon: { boost: () => tone(200, 520, 0.11, 0.08, 'sawtooth') }, // с рыком
+  tiger: { boost: () => tone(220, 640, 0.08, 0.15, 'triangle') },
+  robot: { boost: () => { tone(330, 330, 0.04, 0.06, 'square'); tone(660, 660, 0.05, 0.06, 'square', 0.05); } }, // бип
+  neon: { boost: () => { tone(280, 900, 0.08, 0.12, 'sine'); tone(280, 900, 0.08, 0.05, 'sine', 0.12); } }, // с эхом
 };
 const voiceOf = (skin) => VOICES[typeId(skin)] || VOICES.beads;
 // pan — где звучит: −1 слева … 1 справа (события на арене — с той стороны экрана, где случились)
@@ -205,16 +209,21 @@ function sendOut(g, wet) {
   if (r) { const w = actx.createGain(); w.gain.value = wet; g.connect(w); w.connect(r); }
 }
 // нота с атакой a и спадом до dur; to — куда скользит высота; wet — доля в эхо
-function note(f, { type = 'sine', vol = 0.2, a = 0.004, dur = 0.2, delay = 0, to = 0, wet = 0, detune = 0 } = {}) {
+// lp — фильтр сверху (мягче пила и квадрат), vib — [частота, глубина в центах] дрожи
+function note(f, { type = 'sine', vol = 0.2, a = 0.004, dur = 0.2, delay = 0, to = 0, wet = 0, detune = 0, lp = 0, vib = null } = {}) {
   if (!canSound()) return;
   vol *= save.vol * save.vol;
   const t = actx.currentTime + delay, o = actx.createOscillator(), g = actx.createGain();
   o.type = type; o.detune.value = detune; o.frequency.setValueAtTime(f, t);
   if (to) o.frequency.exponentialRampToValueAtTime(to, t + dur);
-  g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(vol, t + a); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-  o.connect(g); sendOut(g, wet);
+  g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(vol, t + Math.min(a, dur * 0.9)); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  let src = o;
+  if (lp) { const fl = actx.createBiquadFilter(); fl.type = 'lowpass'; fl.frequency.value = lp; o.connect(fl); src = fl; }
+  if (vib) { const lfo = actx.createOscillator(), lg = actx.createGain(); lfo.frequency.value = vib[0]; lg.gain.value = vib[1]; lfo.connect(lg); lg.connect(o.detune); lfo.start(t); lfo.stop(t + dur + 0.05); }
+  src.connect(g); sendOut(g, wet);
   o.start(t); o.stop(t + dur + 0.05);
 }
+const SND = { n: note, h: (o) => hiss(o) }; // кирпичики для наборов sounds.js
 function noiseBuffer() {
   if (!noiseBuf || noiseBuf.sampleRate !== actx.sampleRate) {
     const n = actx.sampleRate; noiseBuf = actx.createBuffer(1, n, n);
@@ -230,11 +239,10 @@ function hiss({ vol = 0.2, dur = 0.05, delay = 0, type = 'bandpass', f = 2000, f
   const t = actx.currentTime + delay, src = actx.createBufferSource(), fl = actx.createBiquadFilter(), g = actx.createGain();
   src.buffer = noiseBuffer(); fl.type = type; fl.Q.value = q; fl.frequency.setValueAtTime(f, t);
   if (f1) fl.frequency.exponentialRampToValueAtTime(f1, t + dur);
-  g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(vol, t + a); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(vol, t + Math.min(a, dur * 0.9)); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
   src.connect(fl); fl.connect(g); sendOut(g, 0);
   src.start(t, Math.random() * 0.5); src.stop(t + dur + 0.05);
 }
-const semi = (f, n) => f * Math.pow(2, n / 12);
 const sfx = {
   // еда подряд — каждая крошка на ступень выше (пентатоника), пауза полсекунды — снова снизу
   eat() {
@@ -242,45 +250,28 @@ const sfx = {
     if (now - lastEatSound < 70) return;
     eatStep = now - lastEatSound < 500 ? Math.min(eatStep + 1, EAT_STEPS.length - 1) : 0;
     lastEatSound = now;
-    const f = 587 * Math.pow(2, EAT_STEPS[eatStep] / 12);
-    // «хрум» (выбор владельца): два зёрнышка хруста, а нота — голосом вида своей змейки
-    hiss({ f: 2600, q: 1.2, vol: 0.22, dur: 0.03 }); hiss({ f: 1800, q: 1.5, vol: 0.16, dur: 0.035, delay: 0.035 });
-    voiceOf(save.skin).eat(f);
+    EAT[save.snd.eat].play(SND, eatPitch(eatStep)); // звук выбирает игрок в паузе
     haptic('eat');
   },
   boost() { voiceOf(save.skin).boost(); },
   // проскочил впритирку мимо чужого тела — короткий свист с той стороны
-  near(pan) { tone(1500, 2700, 0.11, 0.07, 'sine', 0, pan); tone(1900, 3200, 0.08, 0.035, 'sine', 0.05, pan); haptic('near'); },
+  near(pan) { tone(750, 1350, 0.11, 0.08, 'sine', 0, pan); tone(950, 1600, 0.08, 0.04, 'sine', 0.05, pan); haptic('near'); },
   // чужая змейка погибла на экране — глухой хлопок с её стороны, издалека тише
   pop(pan, k) { tone(420, 160, 0.16, 0.12 * k, 'triangle', 0, pan); tone(900, 300, 0.07, 0.05 * k, 'sine', 0.02, pan); },
   // чужую бабочку поймали на экране — тихий перезвон с той стороны
-  chime(pan, k) { [1175, 1568].forEach((f, i) => tone(f, f * 1.2, 0.08, 0.06 * k, 'sine', i * 0.05, pan)); },
+  chime(pan, k) { [587, 784].forEach((f, i) => tone(f, f * 1.2, 0.08, 0.06 * k, 'sine', i * 0.05, pan)); },
   // громкости — до компрессора; частоты не ниже ~150 Гц: ниже динамик телефона почти не играет
-  // своя змейка разбилась — «бум и бусины» (выбор владельца): удар, шорох и раскатившиеся бусинки
-  die() {
-    note(330, { type: 'triangle', to: 150, vol: 0.32, dur: 0.28, a: 0.003 });
-    hiss({ type: 'lowpass', f: 3000, f1: 300, q: 0.7, vol: 0.35, dur: 0.35 });
-    [1760, 1568, 2093, 1319, 1976, 1175, 1568, 1047].forEach((f, i) =>
-      note(f, { vol: 0.12 * (1 - i / 10), dur: 0.06, delay: 0.12 + i * 0.055 + Math.random() * 0.02, wet: 0.3 }));
-    haptic('die');
-  },
-  win() { tone(520, 1040, 0.14, 0.25, 'triangle'); tone(780, 1560, 0.18, 0.22, 'triangle', 0.12); haptic('kill'); },
-  combo(n) { for (let i = 0; i < n + 1; i++) tone(600 + i * 150, 1200 + i * 200, 0.12, 0.22, 'triangle', i * 0.08); haptic('combo'); },
-  title() { [523, 659, 784, 1047].forEach((f, i) => tone(f, f * 1.01, 0.18, 0.22, 'triangle', i * 0.09)); haptic('title'); },
-  // своя линька — «волшебство» (выбор владельца): шорох нарастает, пока свечение бежит к голове, потом колокольный
-  // аккорд и искры; каждая следующая ступень — на тон выше
-  molt(st = 1) {
-    const k = semi(1, (Math.max(1, st) - 1) * 2), w = MOLT_CHARGE;
-    hiss({ f: 600, f1: 5000, q: 2, vol: 0.12, dur: w + 0.05, a: w * 0.8 });
-    note(300 * k, { to: 1200 * k, dur: w, vol: 0.1, a: w * 0.7, detune: 8 }); note(300 * k, { to: 1200 * k, dur: w, vol: 0.1, a: w * 0.7, detune: -8 });
-    [523, 659, 784, 988].forEach((f) => { note(f * k, { vol: 0.12, dur: 1.1, delay: w, a: 0.003, wet: 0.5 }); note(f * k * 4, { vol: 0.02, dur: 0.3, delay: w, a: 0.002 }); });
-    for (let i = 0; i < 9; i++) note(semi(2093 * k, EAT_STEPS[(Math.random() * EAT_STEPS.length) | 0]), { vol: 0.05, dur: 0.1, delay: w + 0.1 + i * 0.08 + Math.random() * 0.04, wet: 0.6 });
-    haptic('molt');
-  },
+  // своя змейка разбилась — звук выбирает игрок в паузе (sounds.js)
+  die() { CRASH[save.snd.crash].play(SND); haptic('die'); },
+  win() { tone(330, 660, 0.14, 0.25, 'triangle'); tone(494, 988, 0.18, 0.22, 'triangle', 0.12); haptic('kill'); },
+  combo(n) { for (let i = 0; i < n + 1; i++) tone(330 + i * 80, 660 + i * 110, 0.12, 0.22, 'triangle', i * 0.08); haptic('combo'); },
+  title() { [262, 330, 392, 523].forEach((f, i) => tone(f, f * 1.01, 0.18, 0.22, 'triangle', i * 0.09)); haptic('title'); },
+  // своя линька — звук выбирает игрок в паузе (sounds.js); каждая следующая ступень на тон выше
+  molt(st = 1) { MOLT[save.snd.molt].play(SND, Math.max(1, st), MOLT_CHARGE); haptic('molt'); },
   // чужая линька на экране — то же тихо и с её стороны
-  moltFar(pan, k) { tone(260, 800, 0.3, 0.05 * k, 'triangle', 0, pan); tone(1047, 1060, 0.18, 0.06 * k, 'sine', MOLT_CHARGE, pan); },
-  level() { [392, 523, 659, 784, 1047, 1319].forEach((f, i) => tone(f, f, 0.22, 0.12, 'square', i * 0.08)); haptic('title'); },
-  fly() { [880, 1175, 1568].forEach((f, i) => tone(f, f * 1.25, 0.09, 0.18, 'sine', i * 0.05)); haptic('fly'); },
+  moltFar(pan, k) { tone(200, 600, 0.3, 0.05 * k, 'triangle', 0, pan); tone(523, 530, 0.18, 0.06 * k, 'sine', MOLT_CHARGE, pan); },
+  level() { [196, 262, 330, 392, 523, 659].forEach((f, i) => tone(f, f, 0.22, 0.12, 'square', i * 0.08)); haptic('title'); },
+  fly() { [440, 587, 784].forEach((f, i) => tone(f, f * 1.25, 0.09, 0.18, 'sine', i * 0.05)); haptic('fly'); },
 };
 // шум ускорения: пока держишь молнию — шорох, с каждой секундой выше и ярче
 let whoosh = null, noiseBuf = null; // { src, flt, g, ctx, vol }
@@ -1335,7 +1326,7 @@ function netInput(now) {
 }
 const AUTO_MS = 80;                     // автопилот на паузе в комнате (safeCourse в core.js) решает раз в 80 мс
 const auto = { t: -1e9, ta: null };
-const roomMenuOpen = () => !$('dlg').hidden && $('dlgBox').classList.contains('pz'); // окно паузы — меню комнаты
+const roomMenuOpen = () => !$('dlg').hidden && /\bpzs?\b/.test($('dlgBox').className); // окно паузы (или её «Звуки») — меню комнаты
 // своя змейка: движение по правилам core.js, столкновения — с тем, что видно на экране, еда и бабочки — тоже
 function selfStep(dt, now) {
   if (!me || !net.link || ui === 'conn') return;
@@ -1664,6 +1655,30 @@ function bindHap() {
 // на сенсорном экране — ещё настройка кнопки ускорения
 const fabBtnHtml = () => (isTouch ? `<button class="fab-set" id="btnFabSet">${icon('bolt')}<span>Кнопка ускорения</span>${icon('right')}</button>` : '');
 function bindFabBtn() { const b = $('btnFabSet'); if (b) b.addEventListener('click', startFabEdit); }
+// звуки еды, столкновения и линьки — по 7 на выбор (sounds.js, просьба владельца); выбрал — сразу слышно
+const SND_GROUPS = [['eat', 'Еда', EAT], ['crash', 'Столкновение', CRASH], ['molt', 'Линька', MOLT]];
+const sndBtnHtml = () => `<button class="fab-set" id="btnSnd">${icon('music')}<span>Звуки</span>${icon('right')}</button>`;
+function bindSndBtn() { $('btnSnd').addEventListener('click', soundsDialog); }
+function previewSound(k, i) {
+  unlockHtmlAudio();
+  if (!soundOn()) { snack('Звук выключен — включи его в паузе'); return; }
+  if (k === 'eat') [0, 2, 4].forEach((st, j) => setTimeout(() => EAT[i].play(SND, eatPitch(st)), j * 150)); // три крошки подряд
+  else if (k === 'crash') CRASH[i].play(SND);
+  else MOLT[i].play(SND, 1, MOLT_CHARGE);
+}
+function soundsDialog() {
+  const body = SND_GROUPS.map(([k, label, set]) => `<div class="snd-g"><div class="snd-h">${label}</div><div class="snd-opts">` +
+    set.map((o, i) => `<button class="snd-opt${save.snd[k] === i ? ' on' : ''}" data-k="${k}" data-i="${i}">${esc(o.name)}</button>`).join('') +
+    '</div></div>').join('');
+  // класс pzs: в комнате пока открыто — правит автопилот, как в меню комнаты (roomMenuOpen)
+  dialog('Звуки', body, [{ label: 'Готово', kind: 'filled', onClick: menuDialog }], { cls: 'pzs' });
+  $('dlgBody').querySelectorAll('.snd-opt').forEach((b) => b.addEventListener('click', () => {
+    const k = b.dataset.k, i = Number(b.dataset.i);
+    save.snd[k] = i; persist();
+    b.parentNode.querySelectorAll('.snd-opt').forEach((x) => x.classList.toggle('on', x === b));
+    previewSound(k, i);
+  }));
+}
 function openMenu() {
   if (ui !== 'play' || fabEdit) return;
   if (mode === 'solo') ui = 'paused';
@@ -1676,14 +1691,14 @@ function pauseHtml(note, goLabel) {
   return `<div class="pz-chips"><span class="pz-chip">${icon('ruler')}<b id="pzLen">${curLen()}</b></span>` +
     `<span class="pz-chip gold"${rk ? '' : ' hidden'}>${icon('trophy')}<b id="pzRank">${rk ? rk.rank : ''}</b> место</span></div>` + note +
     `<button class="btn filled pz-go" id="pzGo">${icon('play')}${goLabel}</button>` +
-    `<div class="pz-list">${volHtml()}${hapHtml()}${fabBtnHtml()}</div>` +
+    `<div class="pz-list">${volHtml()}${sndBtnHtml()}${hapHtml()}${fabBtnHtml()}</div>` +
     `<button class="btn pz-out" id="pzOut">${icon('home')}Выйти в меню</button>`;
 }
 function pauseDialog(title, note, goLabel, go, out) {
   dialog(title, pauseHtml(note, goLabel), [], { cls: 'pz', top: '<canvas id="pzSnake"></canvas>' });
   pzSnake = $('pzSnake');
   $('pzGo').addEventListener('click', go); $('pzOut').addEventListener('click', out);
-  bindVol(); bindHap(); bindFabBtn();
+  bindVol(); bindSndBtn(); bindHap(); bindFabBtn();
 }
 function menuDialog() {
   if (mode === 'solo' && ui === 'paused') pauseDialog('Пауза', '', 'Продолжить', resume, toHome);
