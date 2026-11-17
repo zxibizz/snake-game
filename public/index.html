@@ -248,6 +248,17 @@ svg.i{width:24px;height:24px;fill:currentColor;flex:none}
 .lang-opts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
 .lang-opts .snd-opt{font-size:15px}
 .lang-opts .snd-opt.auto{grid-column:1/-1}
+/* backdrop picker: a strip of the chosen backdrop on top, kinds ("random" across the row), then the hue: random or a slider */
+#bgPrev{display:block;width:100%;height:110px;border-radius:16px;margin:0 0 14px}
+.snd-opts.bg-opts{min-height:0}
+.bg-opts .snd-opt.auto{grid-column:1/-1}
+.dialog .bg-h{margin:16px 0 8px;font-size:14px;font-weight:500;color:var(--on-var);text-align:left}
+.snd-opt.bg-rnd{width:100%}
+.vol.bg-hue{margin:4px 0 0}
+.vol.bg-hue input::-webkit-slider-runnable-track{background:var(--surf-highest)}
+.vol.bg-hue input::-moz-range-progress{background:transparent}
+.vol.bg-hue input.off::-webkit-slider-thumb{background:var(--outline)}
+.vol.bg-hue input.off::-moz-range-thumb{background:var(--outline)}
 .snd-opt.on{background:var(--primary);color:var(--on-primary);border-color:var(--primary);font-weight:500}
 .pzs .actions .btn.filled{width:100%;height:56px;border-radius:28px;font-size:18px}
 /* "Oops!": in a row — "Menu" on the left sized to its content (design decision), the big yellow "Continue" on the right takes the rest */
@@ -288,6 +299,10 @@ svg.i{width:24px;height:24px;fill:currentColor;flex:none}
   .scrim[data-kind=pzs]{padding-top:8px;padding-bottom:8px}
   .snd-tabs{margin-bottom:10px}
   .snd-opts{grid-template-columns:repeat(5,minmax(0,1fr));min-height:96px}
+  .snd-opts.bg-opts{grid-template-columns:repeat(7,minmax(0,1fr));min-height:0}
+  .bg-opts .snd-opt.auto{grid-column:auto}
+  #bgPrev{height:56px;margin-bottom:8px}
+  .dialog .bg-h{margin:10px 0 6px}
   .pzs .actions{margin-top:12px}
   .pzs .actions .btn.filled{height:46px}
   /* "Oops!" in landscape: a denser dialog, otherwise it doesn't fit vertically */

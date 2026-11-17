@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { LANGS, LANG_ORDER, pickLang, t, has } from '../public/i18n.js';
 import { SKINS, TYPES } from '../public/core.js';
 import { EAT, BOOST, CRASH, MOLT } from '../public/sounds.js';
+import { BACKDROPS } from '../public/backdrop.js';
 
 test('i18n: language comes from the first supported locale, English otherwise', () => {
   assert.equal(pickLang(['ru-RU', 'en-US']), 'ru');
@@ -35,7 +36,7 @@ test('i18n: every language has exactly the keys of English, of the same kind', (
 });
 
 test('i18n: skins, snake types and sounds have a name in every language', () => {
-  const keys = [...SKINS.map((s) => 'skin.' + s.id), ...TYPES.map((x) => 'type.' + x.id),
+  const keys = [...SKINS.map((s) => 'skin.' + s.id), ...BACKDROPS.map((k) => 'bg.' + k), 'bg.random', ...TYPES.map((x) => 'type.' + x.id),
     ...[['eat', EAT], ['boost', BOOST], ['crash', CRASH], ['molt', MOLT]].flatMap(([g, set]) => set.map((o) => `snd.${g}.${o.id}`))];
   assert.equal(new Set(SKINS.map((s) => s.id)).size, SKINS.length, 'skin ids are unique');
   for (const [code, d] of Object.entries(LANGS)) {

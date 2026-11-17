@@ -1,6 +1,6 @@
 // Offline: every game file goes into the cache on install and is served from it from then on.
 // When any file changes, bump VERSION — otherwise devices stay on the old version.
-const VERSION = '47';
+const VERSION = '48';
 const CACHE = `zmeigrad-v${VERSION}`;
 const ASSETS = [
   './',

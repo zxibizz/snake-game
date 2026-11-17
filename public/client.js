@@ -7,7 +7,7 @@ import {
 } from './core.js';
 import { Room, runRoom, encodeSelf, FR, FLR, readFood } from './room.js';
 import { host, join, loopback } from './rtc.js';
-import { BACKDROPS, makeBackdrop, drawBackdrop } from './backdrop.js';
+import { BACKDROPS, HUE_SPREAD, makeBackdrop, drawBackdrop } from './backdrop.js';
 import { EAT, EAT_SLICES, BOOST, CRASH, MOLT, semi } from './sounds.js';
 import { t, has, lang, pinned, deviceLang, LANGS, LANG_ORDER, setLang } from './i18n.js';
 
@@ -41,6 +41,7 @@ const ICONS = {
   home: '<path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/>',
   ruler: '<path d="M21 6H3c-1.1 0-2 .9-2 2v8c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zm0 10H3V8h2v4h2V8h2v4h2V8h2v4h2V8h2v4h2V8h2v8z"/>',
   language: '<path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zm6.93 6h-2.95c-.32-1.25-.78-2.45-1.38-3.56 1.84.63 3.37 1.91 4.33 3.56zM12 4.04c.83 1.2 1.48 2.53 1.91 3.96h-3.82c.43-1.43 1.08-2.76 1.91-3.96zM4.26 14C4.1 13.36 4 12.69 4 12s.1-1.36.26-2h3.38c-.08.66-.14 1.32-.14 2 0 .68.06 1.34.14 2H4.26zm.82 2h2.95c.32 1.25.78 2.45 1.38 3.56-1.84-.63-3.37-1.9-4.33-3.56zm2.95-8H5.08c.96-1.66 2.49-2.93 4.33-3.56C8.81 5.55 8.35 6.75 8.03 8zM12 19.96c-.83-1.2-1.48-2.53-1.91-3.96h3.82c-.43 1.43-1.08 2.76-1.91 3.96zM14.34 14H9.66c-.09-.66-.16-1.32-.16-2 0-.68.07-1.35.16-2h4.68c.09.65.16 1.32.16 2 0 .68-.07 1.34-.16 2zm.25 5.56c.6-1.11 1.06-2.31 1.38-3.56h2.95c-.96 1.65-2.49 2.93-4.33 3.56zM16.36 14c.08-.66.14-1.32.14-2 0-.68-.06-1.34-.14-2h3.38c.16.64.26 1.31.26 2s-.1 1.36-.26 2h-3.38z"/>',
+  palette: '<path d="M12 3a9 9 0 0 0 0 18c.83 0 1.5-.67 1.5-1.5 0-.39-.15-.74-.39-1.01-.23-.26-.38-.61-.38-.99 0-.83.67-1.5 1.5-1.5H16c2.76 0 5-2.24 5-5 0-4.42-4.03-8-9-8zm-5.5 9a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zm3-4a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zm5 0a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zm3 4a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3z"/>',
   music: '<path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/>',
   star: '<path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/>',
   cloudDone: '<path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM10 17l-3.5-3.5 1.41-1.41L10 14.17 15.18 9l1.41 1.41L10 17z"/>',
@@ -74,6 +75,9 @@ if (save.snd.v !== 2) { if ('eat' in save.snd) save.snd.eat = Number(save.snd.ea
 for (const [k, set] of [['eat', EAT], ['boost', BOOST], ['crash', CRASH], ['molt', MOLT]]) { const i = Number(save.snd[k]); save.snd[k] = Number.isInteger(i) && set[i] ? i : 0; }
 // boost button: size and position (fractions of the screen, separately for portrait and landscape) — the player sets them in the pause menu
 if (!save.fab || typeof save.fab !== 'object') save.fab = {};
+// arena backdrop (pause menu, "Backdrop"): a kind or 'random'; hue turn in degrees or 'random' — slightly different every game
+if (save.bg !== 'random' && !BACKDROPS.includes(save.bg)) save.bg = BACKDROPS[0];
+if (save.hue !== 'random' && !(typeof save.hue === 'number' && Math.abs(save.hue) <= 180)) save.hue = 'random';
 const persist = () => { try { localStorage.setItem('zmeigrad', JSON.stringify(save)); } catch { /* nothing to do */ } };
 const myName = () => save.name || t('player');
 const soloName = () => t('you'); // playing alone needs no name
@@ -477,13 +481,22 @@ const MINE_RGB = 162;
 const ON = '#E3E8F5', PRIMARY = '#8EB8FF', TERTIARY = '#DDBCE0', GOLD_C = '#FFD447', REVENGE = '#FF6B5E';
 // crowns of the top three: gold, silver, bronze — [fill, stroke, size relative to gold]
 const CROWNS = [[GOLD_C, '#8a5a00', 1], ['#DCE3EC', '#5E6B7A', 0.9], ['#E0975A', '#6E3A12', 0.82]];
-// arena backdrop: random on every game start, not the same as last time (?bg=<kind> pins it, for testing)
-const BG_Q = new URLSearchParams(location.search).get('bg'), BG_FORCED = BACKDROPS.includes(BG_Q) ? BG_Q : null;
+// arena backdrop on every game start: the chosen one (save.bg, save.hue), or random — not the same kind, not a close hue as last time
+// (?bg=<kind> and ?hue=<degrees> pin them, for testing)
+const BG_Q = new URLSearchParams(location.search), BG_FORCED = BACKDROPS.includes(BG_Q.get('bg')) ? BG_Q.get('bg') : null;
+const HUE_FORCED = BG_Q.has('hue') && Math.abs(BG_Q.get('hue')) <= 180 ? +BG_Q.get('hue') : null;
 let backdrop = null;
-function pickBackdrop() {
-  const prev = backdrop && backdrop.kind, pool = BACKDROPS.filter((k) => k !== prev);
-  const kind = BG_FORCED || pool[Math.floor(Math.random() * pool.length)];
-  backdrop = makeBackdrop(ctx, kind, Math.floor(Math.random() * 1e9), R);
+function pickBackdrop(seed = Math.floor(Math.random() * 1e9)) {
+  const prev = backdrop;
+  let kind = BG_FORCED || save.bg, hue = HUE_FORCED ?? save.hue;
+  if (kind === 'random') { const pool = BACKDROPS.filter((k) => !prev || k !== prev.kind); kind = pool[Math.floor(Math.random() * pool.length)]; }
+  if (hue === 'random') {
+    const was = prev && prev.kind === kind && prev.rndHue ? prev.hue : null;
+    do hue = Math.round((Math.random() * 2 - 1) * HUE_SPREAD); while (was != null && Math.abs(hue - was) < HUE_SPREAD / 3);
+  }
+  backdrop = makeBackdrop(ctx, kind, seed, R, hue);
+  backdrop.seed = seed;
+  backdrop.rndHue = (HUE_FORCED ?? save.hue) === 'random';
   return backdrop;
 }
 // sprites: snake beads, head, glowing food — one per palette color
@@ -1727,6 +1740,43 @@ function soundsDialog() {
   });
   show();
 }
+// arena backdrop: kind and hue (both can be random); the strip on top shows it, the arena behind changes right away
+const bgBtnHtml = () => `<button class="fab-set" id="btnBg">${icon('palette')}<span>${t('set.bg')}</span>${icon('right')}</button>`;
+function bindBgBtn() { $('btnBg').addEventListener('click', backdropDialog); }
+function backdropDialog() {
+  const opt = (k, cls = '') => `<button class="snd-opt${cls}" data-bg="${k}">${esc(t('bg.' + k))}</button>`;
+  dialog(t('set.bg'), `<div class="snd-opts bg-opts">${opt('random', ' auto')}${BACKDROPS.map((k) => opt(k)).join('')}</div>` +
+    `<h4 class="bg-h">${t('bg.hue')}</h4><button class="snd-opt bg-rnd" id="bgHueRnd">${esc(t('bg.hueRandom'))}</button>` +
+    `<div class="vol bg-hue"><input type="range" id="bgHue" min="-180" max="180" step="5" aria-label="${t('bg.hue')}"></div>`,
+  [{ label: t('btn.done'), kind: 'filled', onClick: menuDialog }], { cls: 'pzs', top: '<canvas id="bgPrev"></canvas>' });
+  const body = $('dlgBody'), rng = $('bgHue'), cv = $('bgPrev');
+  let queued = false;
+  const show = () => {
+    body.querySelectorAll('[data-bg]').forEach((b) => b.classList.toggle('on', b.dataset.bg === save.bg));
+    $('bgHueRnd').classList.toggle('on', save.hue === 'random');
+    rng.value = backdrop.hue; rng.classList.toggle('off', save.hue === 'random');
+    drawBgPreview(cv);
+  };
+  // reseed=false keeps the patches in place while the hue moves; a new kind or "random" — a new roll
+  const apply = (reseed) => { persist(); pickBackdrop(reseed ? undefined : backdrop.seed); show(); };
+  body.querySelectorAll('[data-bg]').forEach((b) => b.addEventListener('click', () => { save.bg = b.dataset.bg; apply(true); }));
+  $('bgHueRnd').addEventListener('click', () => { save.hue = 'random'; apply(true); });
+  rng.addEventListener('input', () => {
+    save.hue = Number(rng.value);
+    if (!queued) { queued = true; requestAnimationFrame(() => { queued = false; apply(false); }); } // rebuilding costs a few ms — once a frame
+  });
+  if (!backdrop) pickBackdrop();
+  show();
+}
+// the chosen backdrop seen around the camera, at the zoom of a short snake
+function drawBgPreview(cv) {
+  if (!cv || !backdrop) return;
+  const dpr = Math.min(2, window.devicePixelRatio || 1), w = cv.clientWidth || 300, h = cv.clientHeight || 110;
+  cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr);
+  const g = cv.getContext('2d'), z = 0.8, c = cam && Number.isFinite(cam.x) ? cam : { x: 0, y: 0 };
+  g.setTransform(dpr * z, 0, 0, dpr * z, dpr * w / 2 - dpr * z * c.x, dpr * h / 2 - dpr * z * c.y);
+  drawBackdrop(g, backdrop, R, c, z, w, h, 1.2);
+}
 function openMenu() {
   if (ui !== 'play' || fabEdit) return;
   if (mode === 'solo') ui = 'paused';
@@ -1739,14 +1789,14 @@ function pauseHtml(note, goLabel) {
   return `<div class="pz-chips"><span class="pz-chip">${icon('ruler')}<b id="pzLen">${curLen()}</b></span>` +
     `<span class="pz-chip gold"${rk ? '' : ' hidden'}>${icon('trophy')}${t('pause.place', `<b id="pzRank">${rk ? rk.rank : ''}</b>`)}</span></div>` + note +
     `<button class="btn filled pz-go" id="pzGo">${icon('play')}${goLabel}</button>` +
-    `<div class="pz-list">${volHtml()}${sndBtnHtml()}${hapHtml()}${fabBtnHtml()}</div>` +
+    `<div class="pz-list">${volHtml()}${sndBtnHtml()}${bgBtnHtml()}${hapHtml()}${fabBtnHtml()}</div>` +
     `<button class="btn pz-out" id="pzOut">${icon('home')}${t('pause.out')}</button>`;
 }
 function pauseDialog(title, note, goLabel, go, out) {
   dialog(title, pauseHtml(note, goLabel), [], { cls: 'pz', top: '<canvas id="pzSnake"></canvas>' });
   pzSnake = $('pzSnake');
   $('pzGo').addEventListener('click', go); $('pzOut').addEventListener('click', out);
-  bindVol(); bindSndBtn(); bindHap(); bindFabBtn();
+  bindVol(); bindSndBtn(); bindBgBtn(); bindHap(); bindFabBtn();
 }
 function menuDialog() {
   if (mode === 'solo' && ui === 'paused') pauseDialog(t('pause.title'), '', t('btn.continue'), resume, toHome);
@@ -2656,6 +2706,6 @@ if (inviteCode && /^\d{4}$/.test(inviteCode)) {
 // for automated tests
 window.__snake = {
   get mode() { return mode; }, get ui() { return ui; }, get me() { return me; }, get world() { return world; },
-  get net() { return net; }, auto, safeCourse, get joy() { return joy; }, get run() { return run; }, get save() { return save; }, get cam() { return cam; }, startSolo, sfx, get bg() { return backdrop && backdrop.kind; },
+  get net() { return net; }, auto, safeCourse, get joy() { return joy; }, get run() { return run; }, get save() { return save; }, get cam() { return cam; }, startSolo, sfx, get bg() { return backdrop && backdrop.kind; }, get hue() { return backdrop && backdrop.hue; }, pickBackdrop,
   get fx() { return { gulps: gulps.length, sparks: sparks.length, lumps: lumps.length, kick: kick.t, whoosh: !!whoosh, time }; },
 };
