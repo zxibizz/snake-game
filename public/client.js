@@ -782,6 +782,211 @@ function beadSprite(skin, col, v, mode = 0, st = 2) {
   return c;
 }
 
+// ---------- growth details (motifs): small pictures on the beads that appear as the snake grows ----------
+// Like the ladybug's spots: each skin has its own picture. From the 3rd stage (st 2, when the type's pattern shows) — on every
+// third bead, at the 4th — on two of three, from the 5th — on every one.
+// Drawn over the bead in its frame (+x — toward the head; the back half shows, the next bead covers the front);
+// in the arena drawn beads stand 0.84R apart, so only x < −0.16R shows (more at the sides) — the pictures sit there.
+const lum = (hex) => { const n = parseInt(hex.slice(1), 16); return (0.299 * (n >> 16) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255)) / 255; };
+const onCol = (col, light, dark) => (lum(col) > 0.62 ? dark : light); // a picture color that shows on this bead
+function clipBead(g, R, draw) { g.save(); g.beginPath(); g.arc(0, 0, R * 0.9, 0, TAU); g.clip(); draw(); g.restore(); }
+function sparkle(g, x, y, s, fill) { // a four-pointed twinkle
+  g.beginPath(); g.moveTo(x, y - s);
+  for (const [px, py] of [[s, 0], [0, s], [-s, 0], [0, -s]]) g.quadraticCurveTo(x, y, x + px, y + py);
+  g.fillStyle = fill; g.fill();
+}
+function star(g, x, y, s, fill, rot = 0) {
+  g.beginPath();
+  for (let i = 0; i < 10; i++) { const a = rot - Math.PI / 2 + i * Math.PI / 5, q = i & 1 ? s * 0.45 : s; g.lineTo(x + Math.cos(a) * q, y + Math.sin(a) * q); }
+  g.closePath(); g.fillStyle = fill; g.fill();
+}
+function heart(g, x, y, s, fill, line) { // the point looks to the tail
+  g.save(); g.translate(x, y); g.rotate(Math.PI / 2);
+  g.beginPath(); g.moveTo(0, s * 0.9);
+  g.bezierCurveTo(-s * 1.25, s * 0.05, -s * 0.6, -s * 0.95, 0, -s * 0.35);
+  g.bezierCurveTo(s * 0.6, -s * 0.95, s * 1.25, s * 0.05, 0, s * 0.9);
+  g.fillStyle = fill; g.fill();
+  if (line) { g.lineWidth = s * 0.16; g.strokeStyle = line; g.stroke(); }
+  g.restore();
+}
+function drop(g, x, y, s, fill, ang = Math.PI) { // a teardrop with the tip toward ang (by default — to the tail)
+  g.save(); g.translate(x, y); g.rotate(ang);
+  g.beginPath(); g.moveTo(s * 1.3, 0); g.arc(0, 0, s * 0.5, 1.25, TAU - 1.25); g.closePath();
+  g.fillStyle = fill; g.fill(); g.restore();
+}
+function leafAt(g, x, y, s, fill, ang, vein) {
+  g.save(); g.translate(x, y); g.rotate(ang);
+  g.beginPath(); g.moveTo(-s, 0); g.quadraticCurveTo(0, -s * 0.62, s, 0); g.quadraticCurveTo(0, s * 0.62, -s, 0);
+  g.fillStyle = fill; g.fill();
+  g.beginPath(); g.moveTo(-s * 0.85, 0); g.lineTo(s * 0.7, 0); g.lineWidth = s * 0.1; g.strokeStyle = vein; g.stroke();
+  g.restore();
+}
+function flower(g, x, y, s, petal, mid) {
+  for (let i = 0; i < 5; i++) { const a = i * TAU / 5; circ(g, x + Math.cos(a) * s * 0.55, y + Math.sin(a) * s * 0.55, s * 0.42, petal); }
+  circ(g, x, y, s * 0.36, mid);
+}
+function snowflake(g, x, y, s, col, line) {
+  g.lineCap = 'round';
+  for (const [w, c] of [[s * 0.34, line], [s * 0.18, col]]) {
+    g.lineWidth = w; g.strokeStyle = c; g.beginPath();
+    for (let i = 0; i < 3; i++) { const a = i * Math.PI / 3; g.moveTo(x - Math.cos(a) * s, y - Math.sin(a) * s); g.lineTo(x + Math.cos(a) * s, y + Math.sin(a) * s); }
+    g.stroke();
+  }
+}
+function bolt(g, x, y, s, fill) {
+  g.beginPath();
+  for (const [px, py] of [[0.35, -1], [-0.4, 0.12], [0.02, 0.12], [-0.35, 1], [0.42, -0.18], [0.02, -0.18]]) g.lineTo(x + px * s, y + py * s);
+  g.closePath(); g.fillStyle = fill; g.fill();
+}
+function gear(g, x, y, s, fill, hole) {
+  g.beginPath();
+  for (let i = 0; i < 16; i++) { const a = i * TAU / 16, q = (i >> 1) & 1 ? s * 0.72 : s; g.lineTo(x + Math.cos(a) * q, y + Math.sin(a) * q); }
+  g.closePath(); g.fillStyle = fill; g.fill();
+  circ(g, x, y, s * 0.3, hole);
+}
+const glowing = (g, col, blur, draw) => { g.save(); g.shadowBlur = blur; g.shadowColor = col; draw(); g.restore(); };
+const sides = (fn) => { fn(-1); fn(1); };
+// one picture per skin: (g, R, bead color, pattern color, w — 0/1, the picture alternates by bead)
+const MOTIFS = {
+  rainbow: (g, R, col, acc, w) => sparkle(g, -R * 0.38, (w ? 1 : -1) * R * 0.16, R * 0.32, 'rgba(255,255,255,0.95)'),
+  pastel: (g, R) => heart(g, -R * 0.36, 0, R * 0.26, '#FF5D8F', 'rgba(255,255,255,0.85)'),
+  icecream: (g, R, col, acc, w) => { // sprinkles
+    const cs = ['#FF5D8F', '#FFC93C', '#3D8BF5', '#7ED957', '#8B5CF6'];
+    g.lineWidth = R * 0.11; g.lineCap = 'round';
+    [[-0.3, -0.35, 0.6], [-0.55, 0.05, -0.9], [-0.28, 0.35, 2.1], [-0.68, -0.38, 1.4]].forEach(([x, y, a], i) => {
+      const yy = (w ? -y : y) * R, c = Math.cos(a) * R * 0.12, s = Math.sin(a) * R * 0.12;
+      g.beginPath(); g.moveTo(x * R - c, yy - s); g.lineTo(x * R + c, yy + s); g.strokeStyle = cs[(i + w * 2) % cs.length]; g.stroke();
+    });
+  },
+  ocean: (g, R, col, acc, w) => { // bubbles
+    const b = (x, y, r) => { g.beginPath(); g.arc(x, y, r, 0, TAU); g.lineWidth = r * 0.3; g.strokeStyle = 'rgba(255,255,255,0.9)'; g.stroke(); circ(g, x + r * 0.3, y - r * 0.3, r * 0.22, '#FFFFFF'); };
+    const sd = w ? -1 : 1;
+    b(-R * 0.36, sd * R * 0.24, R * 0.17); b(-R * 0.66, -sd * R * 0.14, R * 0.11);
+  },
+  tutti: (g, R, col, acc, w) => { // confetti
+    const cs = ['#FFFFFF', '#FF595E', '#FFCA3A', '#1982C4', '#8AC926', '#6A4C93'].filter((c) => c !== col);
+    [[-0.3, -0.3], [-0.52, 0.12], [-0.26, 0.4], [-0.72, -0.32]].forEach(([x, y], i) => circ(g, x * R, (w ? -y : y) * R, R * 0.1, cs[(i + w) % cs.length]));
+  },
+  candy: (g, R, col, acc, w) => clipBead(g, R, () => { // a candy-cane stripe
+    g.save(); g.rotate(w ? 0.7 : -0.7); g.fillStyle = onCol(col, '#FFFFFF', '#FF5D8F'); g.fillRect(-R * 0.52, -R, R * 0.2, R * 2); g.restore();
+  }),
+  sunset: (g, R, col, acc, w) => star(g, -R * 0.38, (w ? 1 : -1) * R * 0.12, R * 0.26, '#FFF3B0', w * 0.3),
+  forest: (g, R, col, acc, w) => leafAt(g, -R * 0.4, 0, R * 0.34, onCol(col, '#C7EFCF', '#2D6A4F'), w ? 2.6 : -2.6, onCol(col, '#52B788', '#95D5B2')),
+  autumn: (g, R, col, acc, w) => leafAt(g, -R * 0.4, 0, R * 0.34, onCol(col, '#FFD166', '#8C1C13'), w ? 2.3 : -2.3, onCol(col, '#E05A1E', '#F48C06')),
+  berries: (g, R, col, acc, w) => { // seeds, like on a strawberry
+    [[-0.3, -0.3], [-0.55, 0], [-0.28, 0.32], [-0.72, -0.36]].forEach(([x, y]) => drop(g, x * R, (w ? -y : y) * R, R * 0.09, '#FFF3B0', Math.PI + 0.3));
+  },
+  aurora: (g, R, col, acc, w) => { // a starry sky
+    sparkle(g, -R * 0.36, (w ? 1 : -1) * R * 0.2, R * 0.22, '#FFFFFF');
+    for (const [x, y] of [[-0.62, 0.25], [-0.3, -0.2], [-0.58, -0.4]]) circ(g, x * R, (w ? -y : y) * R, R * 0.05, 'rgba(255,255,255,0.9)');
+  },
+  peacock: (g, R) => { // a feather's eye
+    const e = (rx, ry, c) => { g.beginPath(); g.ellipse(-R * 0.4, 0, rx * R, ry * R, 0, 0, TAU); g.fillStyle = c; g.fill(); };
+    e(0.34, 0.27, '#EE9B00'); e(0.24, 0.19, '#0A9396'); e(0.13, 0.11, '#03045E');
+  },
+  goldfish: (g, R, col) => { // more scale rows
+    g.lineWidth = R * 0.08; g.lineCap = 'round'; g.strokeStyle = shade(col, 0.55);
+    for (const y of [-0.32, 0.32]) { g.beginPath(); g.arc(-R * 0.42, y * R, R * 0.24, -1.2, 1.2); g.stroke(); }
+    g.beginPath(); g.arc(-R * 0.72, 0, R * 0.24, -1.2, 1.2); g.stroke();
+  },
+  seafish: (g, R, col, acc) => clipBead(g, R, () => { // light stripes along the sides
+    g.lineWidth = R * 0.12; g.lineCap = 'round'; g.strokeStyle = acc;
+    sides((sd) => { g.beginPath(); g.moveTo(R * 0.2, sd * R * 0.5); g.lineTo(-R, sd * R * 0.5); g.stroke(); });
+  }),
+  koi: (g, R, col, acc, w) => clipBead(g, R, () => { // a patch, orange on white and white on orange
+    g.beginPath(); g.ellipse(-R * 0.45, (w ? 1 : -1) * R * 0.28, R * 0.36, R * 0.26, w ? 0.5 : -0.5, 0, TAU);
+    g.fillStyle = lum(col) > 0.62 ? acc : '#FFF4E6'; g.fill();
+  }),
+  tropical: (g, R) => clipBead(g, R, () => { g.fillStyle = 'rgba(27,42,73,0.85)'; g.fillRect(-R * 0.52, -R, R * 0.18, R * 2); }),
+  leaf: (g, R, col, acc) => sides((sd) => { circ(g, -R * 0.4, sd * R * 0.42, R * 0.17, acc); circ(g, -R * 0.4, sd * R * 0.42, R * 0.07, '#FFFFFF'); }),
+  lemon: (g, R, col, acc) => { // little hairs
+    g.lineWidth = R * 0.08; g.lineCap = 'round'; g.strokeStyle = acc;
+    sides((sd) => { for (const [x0, x1] of [[-0.4, -0.62], [-0.15, -0.24]]) { g.beginPath(); g.moveTo(x0 * R, sd * R * 0.62); g.lineTo(x1 * R, sd * R * 1.12); g.stroke(); } });
+  },
+  lavender: (g, R, col, acc) => flower(g, -R * 0.4, 0, R * 0.26, '#FFFFFF', acc),
+  orange: (g, R, col, acc) => clipBead(g, R, () => { g.fillStyle = acc; g.fillRect(-R * 0.5, -R, R * 0.15, R * 2); }),
+  // spots: more of them — between the ones the type already has (−0.4R ±0.55R and −0.52R 0)
+  ladybug: (g, R, col, acc, w) => clipBead(g, R, () => spots(g, R, acc, w)),
+  sunny: (g, R, col, acc, w) => clipBead(g, R, () => spots(g, R, acc, w)),
+  toadstool: (g, R, col, acc, w) => clipBead(g, R, () => spots(g, R, acc, w, 1.25)),
+  dalmatian: (g, R, col, acc, w) => clipBead(g, R, () => { // uneven blots
+    g.fillStyle = acc;
+    for (const [x, y, rx, ry, a] of [[-0.26, 0.26, 0.15, 0.1, 0.6], [-0.75, -0.42, 0.12, 0.08, -0.4]]) {
+      g.beginPath(); g.ellipse(x * R, (w ? -y : y) * R, rx * R, ry * R, a, 0, TAU); g.fill();
+    }
+  }),
+  emerald: (g, R, col, acc) => sides((sd) => { circ(g, -R * 0.3, sd * R * 0.56, R * 0.19, shade(acc, -0.5)); circ(g, -R * 0.3, sd * R * 0.56, R * 0.14, acc); circ(g, -R * 0.34, sd * R * 0.56 - R * 0.05, R * 0.05, '#FFFFFF'); }),
+  firedragon: (g, R, col, acc, w) => { // a flame from the side
+    const sd = w ? 1 : -1;
+    drop(g, -R * 0.25, sd * R * 0.55, R * 0.36, '#FF8C1A', Math.PI - sd * 0.5); drop(g, -R * 0.25, sd * R * 0.55, R * 0.2, acc, Math.PI - sd * 0.5);
+  },
+  icedragon: (g, R, col, acc, w) => snowflake(g, -R * 0.3, (w ? 1 : -1) * R * 0.52, R * 0.3, '#FFFFFF', shade(col, -0.55)),
+  nightdragon: (g, R, col, acc, w) => glowing(g, acc, R * 0.4, () => {
+    sparkle(g, -R * 0.3, (w ? 1 : -1) * R * 0.52, R * 0.3, acc); circ(g, -R * 0.6, (w ? -1 : 1) * R * 0.55, R * 0.08, acc);
+  }),
+  // stripes on the sides, next to the chevron
+  tiger: (g, R, col, acc) => clipBead(g, R, () => sideStripes(g, R, acc)),
+  zebra: (g, R, col, acc) => clipBead(g, R, () => sideStripes(g, R, acc)),
+  bee: (g, R, col, acc, w) => { // little wings on every other one, pollen on the rest
+    if (w) { for (const [x, y] of [[-0.3, 0.42], [-0.32, -0.42]]) circ(g, x * R, y * R, R * 0.09, '#FFF3B0'); return; }
+    sides((sd) => {
+      g.beginPath(); g.ellipse(-R * 0.3, sd * R * 0.98, R * 0.42, R * 0.22, -sd * 0.5, 0, TAU);
+      g.fillStyle = 'rgba(235,245,255,0.8)'; g.fill(); g.lineWidth = R * 0.05; g.strokeStyle = 'rgba(43,45,66,0.55)'; g.stroke();
+    });
+  },
+  leopard: (g, R, col, acc) => sides((sd) => { // rosettes
+    circ(g, -R * 0.74, sd * R * 0.36, R * 0.1, '#B98A4E');
+    g.beginPath(); g.arc(-R * 0.74, sd * R * 0.36, R * 0.14, 0.4, TAU - 0.9); g.lineWidth = R * 0.09; g.lineCap = 'round'; g.strokeStyle = acc; g.stroke();
+  }),
+  steelbot: (g, R, col) => sides((sd) => { // screws
+    circ(g, -R * 0.26, sd * R * 0.36, R * 0.15, shade(col, -0.45)); circ(g, -R * 0.26, sd * R * 0.36, R * 0.11, shade(col, 0.5));
+    g.beginPath(); g.moveTo(-R * 0.33, sd * R * 0.36 - R * 0.07); g.lineTo(-R * 0.19, sd * R * 0.36 + R * 0.07); g.lineWidth = R * 0.06; g.strokeStyle = shade(col, -0.5); g.stroke();
+  }),
+  goldbot: (g, R, col) => gear(g, -R * 0.2, 0, R * 0.3, shade(col, -0.45), shade(col, 0.35)),
+  toybot: (g, R, col) => { // buttons
+    const cs = ['#FF5A5F', '#FFC93C', '#3D8BF5', '#7ED957'].filter((c) => c !== col);
+    sides((sd) => { circ(g, -R * 0.26, sd * R * 0.34, R * 0.13, '#FFFFFF'); circ(g, -R * 0.26, sd * R * 0.34, R * 0.09, cs[sd > 0 ? 0 : 1]); });
+  },
+  spacebot: (g, R, col, acc) => glowing(g, acc, R * 0.5, () => sparkle(g, -R * 0.26, 0, R * 0.3, acc)),
+  pinkneon: (g, R, col) => glowing(g, col, R * 0.5, () => heart(g, -R * 0.3, 0, R * 0.3, col)),
+  tealneon: (g, R, col) => glowing(g, col, R * 0.5, () => sparkle(g, -R * 0.3, 0, R * 0.36, col)),
+  rainbowneon: (g, R, col, acc, w) => glowing(g, col, R * 0.5, () => star(g, -R * 0.3, 0, R * 0.32, col, w * 0.3)),
+  electric: (g, R, col) => glowing(g, '#7DF9FF', R * 0.5, () => bolt(g, -R * 0.3, 0, R * 0.36, '#7DF9FF')),
+};
+function spots(g, R, acc, w, big = 1) {
+  circ(g, -R * 0.25, (w ? -1 : 1) * R * 0.26, R * 0.11 * big, acc);
+  circ(g, -R * 0.22, (w ? 1 : -1) * R * 0.3, R * 0.08 * big, acc);
+  if (w) circ(g, -R * 0.75, R * 0.45 * (big > 1 ? -1 : 1), R * 0.09 * big, acc);
+}
+function sideStripes(g, R, acc) {
+  g.lineWidth = R * 0.15; g.lineCap = 'round'; g.strokeStyle = acc;
+  sides((sd) => { g.beginPath(); g.moveTo(-R * 0.62, sd * R); g.lineTo(-R * 0.9, sd * R * 0.42); g.stroke(); });
+}
+// does bead j (the count of drawn beads from the head) carry its skin's picture at stage st
+const motifOn = (st, j) => st >= 4 || (st === 3 ? j % 3 !== 0 : st === 2 && j % 3 === 1);
+const motifCache = new Map(), MOTIF_E = 72;
+function motifSprite(skin, col, w) {
+  const key = (skin * 512 + col) * 2 + w;
+  let c = motifCache.get(key);
+  if (c !== undefined) return c;
+  const sk = skinOf(skin), draw = MOTIFS[sk.id];
+  c = null;
+  if (draw) {
+    c = document.createElement('canvas'); c.width = c.height = MOTIF_E * 2; c.e = MOTIF_E;
+    const g = c.getContext('2d'); g.translate(MOTIF_E, MOTIF_E);
+    draw(g, BR, PAL[col] || PAL[0], PAL[sk.acc] || PAL[col] || PAL[0], w);
+  }
+  if (motifCache.size >= 300) motifCache.delete(motifCache.keys().next().value);
+  motifCache.set(key, c);
+  return c;
+}
+// the picture over a bead already placed by the transform
+function drawMotif(g, skin, col, j, st) {
+  if (!motifOn(st, j)) return;
+  const m = motifSprite(skin, col, Math.floor(j / 3) & 1);
+  if (m) g.drawImage(m, -m.e, -m.e);
+}
+
 // head: at the origin, facing +x, r — body radius. The eyes are drawn separately — they follow the course
 function roundHead(g, r, col, sc = 1.1) {
   const R = r * sc; circ(g, 0, 0, R, shade(col, -0.55));
@@ -2309,14 +2514,15 @@ function renderHome() {
 
 // preview: skin k's snake crawls in a wave in place (home — the selected one, pause — your own)
 const drawPreview = () => drawWave(pv, viewSkin);
-function drawWave(cv, k) {
+// st — a stage to show the snake at (with its pictures); without it — the plain look of the home screen and pause
+function drawWave(cv, k, st) {
   const cw = cv.clientWidth, ch = cv.clientHeight;
   if (!cw || !ch) return;
   if (cv.width !== Math.round(cw * DPR) || cv.height !== Math.round(ch * DPR)) { cv.width = Math.round(cw * DPR); cv.height = Math.round(ch * DPR); }
   const g = cv.getContext('2d'), sk = SKINS[k], open = unlocked(sk);
   g.setTransform(1, 0, 0, 1, 0, 0);
   g.clearRect(0, 0, cv.width, cv.height);
-  const r = Math.min(ch * 0.14, cw / 26), n = 34, sp = r * 0.62, len = n * sp;
+  const r = Math.min(ch * 0.14, cw / 26), n = 34, sp = r * (st === undefined ? 0.62 : 0.42), len = n * sp; // with a stage — as dense as in the arena
   const x0 = cw / 2 + len / 2, cy = ch / 2;
   const pts = [];
   for (let i = 0; i <= n; i++) {
@@ -2331,8 +2537,9 @@ function drawWave(cv, k) {
     const sc = DPR * rr / BEAD_U / (Math.hypot(dx, dy) || 1);
     dx *= sc; dy *= sc;
     g.setTransform(dx, dy, -dy, dx, DPR * q.x, DPR * q.y);
-    const sp = beadSprite(k, segColor(k, i), beadVar(k, i));
+    const sp = beadSprite(k, segColor(k, i), beadVar(k, i), 0, st === undefined ? 2 : st);
     g.drawImage(sp, -sp.e, -sp.e);
+    if (st !== undefined) drawMotif(g, k, segColor(k, i), i >> 1, st);
   }
   g.setTransform(DPR, 0, 0, DPR, 0, 0);
   const h = pts[0], a = Math.atan2(h.y - pts[1].y, h.x - pts[1].x);
@@ -2638,6 +2845,7 @@ function drawSnake(s, vx0, vy0, vx1, vy1) {
       const bst = passAt(i) > 0.5 ? st : s.moltFrom; // behind the molt wave — already the new outfit
       const sp = beadSprite(s.skin, c, v, 0, bst);
       ctx.drawImage(sp, -sp.e, -sp.e);
+      drawMotif(ctx, s.skin, c, ci >> 1, bst);
       const lit = Math.max(boost ? boostWave(i) : 0, gwi, molting ? bumpAt(i) : 0, bst >= 4 ? shimmerAt(i) : 0);
       if (lit > 0.25) { const sl = beadSprite(s.skin, c, v, 1, bst); ctx.globalAlpha = a0 * lit; ctx.drawImage(sl, -sl.e, -sl.e); ctx.globalAlpha = a0; }
     }
@@ -3007,6 +3215,6 @@ if (inviteCode && /^\d{4}$/.test(inviteCode)) {
 // for automated tests
 window.__snake = {
   get mode() { return mode; }, get ui() { return ui; }, get me() { return me; }, get world() { return world; },
-  get net() { return net; }, get music() { return music; }, musicPause, musicPlay, auto, safeCourse, get joy() { return joy; }, get run() { return run; }, get save() { return save; }, get cam() { return cam; }, startSolo, sfx, get bg() { return backdrop && backdrop.kind; }, get hue() { return backdrop && backdrop.hue; }, pickBackdrop,
+  get net() { return net; }, get music() { return music; }, musicPause, musicPlay, auto, safeCourse, get joy() { return joy; }, get run() { return run; }, get save() { return save; }, get cam() { return cam; }, startSolo, sfx, drawWave, get bg() { return backdrop && backdrop.kind; }, get hue() { return backdrop && backdrop.hue; }, pickBackdrop,
   get fx() { return { gulps: gulps.length, sparks: sparks.length, lumps: lumps.length, kick: kick.t, whoosh: !!whoosh, time }; },
 };
