@@ -615,8 +615,6 @@ window.addEventListener('pageshow', relayout);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) setTimeout(relayout, 300); });
 
 const OUTSIDE = '#2B1715', EDGE = '#FFB4AB';
-// outline of your own snake: white 60% over the field; bead silhouettes overlap, so the color is already blended with the field and solid
-const MINE_RGB = 162;
 const ON = '#E3E8F5', PRIMARY = '#8EB8FF', TERTIARY = '#DDBCE0', GOLD_C = '#FFD447', REVENGE = '#FF6B5E';
 // crowns of the top three: gold, silver, bronze — [fill, stroke, size relative to gold]
 const CROWNS = [[GOLD_C, '#8a5a00', 1], ['#DCE3EC', '#5E6B7A', 0.9], ['#E0975A', '#6E3A12', 0.82]];
@@ -758,7 +756,7 @@ const skinOf = (skin) => SKINS[skin] || SKINS[0];
 const typeId = (skin) => TYPES[skinOf(skin).type].id;
 // pattern variant of bead i (even segments are drawn): alternates from bead to bead
 const beadVar = (skin, i) => { const n = VARIANTS[typeId(skin)]; return n ? (i >> 1) % n : 0; };
-// a bead sprite; the sprite's .e is half its size: draw at (-e, -e). mode: 0 — bead, 1 — flashed, 2 — silhouette for the outline
+// a bead sprite; the sprite's .e is half its size: draw at (-e, -e). mode: 0 — bead, 1 — flashed
 const beadCache = new Map(), BEAD_CACHE_MAX = 600; // with stages there are six times more sprites — keep no more than 600
 // st — stage (molt): it sets the bead's outfit; by default — the full type without an outfit (previews on the home screen and in pause)
 function beadSprite(skin, col, v, mode = 0, st = 2) {
@@ -778,17 +776,10 @@ function beadSprite(skin, col, v, mode = 0, st = 2) {
     const gr = g.createRadialGradient(BR * 0.2, 0, 0, 0, 0, BR * 1.2);
     gr.addColorStop(0, 'rgba(255,255,255,0.9)'); gr.addColorStop(0.6, 'rgba(255,255,255,0.45)'); gr.addColorStop(1, 'rgba(255,255,255,0.2)');
     g.fillStyle = gr; g.fillRect(-E, -E, E * 2, E * 2);
-  } else if (mode === 2) silhouette(g, E);
+  }
   if (beadCache.size >= BEAD_CACHE_MAX) beadCache.delete(beadCache.keys().next().value); // the oldest one — it'll be redrawn if needed
   beadCache.set(key, c);
   return c;
-}
-// a silhouette for your own snake's outline: the whole shape of the bead or head (with crest, legs, ears), filled with the outline color.
-// The neon glow isn't part of the silhouette — only the solid part
-function silhouette(g, E) {
-  const d = g.getImageData(0, 0, E * 2, E * 2), a = d.data;
-  for (let i = 0; i < a.length; i += 4) { const on = a[i + 3] > 160; a[i] = a[i + 1] = a[i + 2] = MINE_RGB; a[i + 3] = on ? 255 : 0; }
-  g.putImageData(d, 0, 0);
 }
 
 // head: at the origin, facing +x, r — body radius. The eyes are drawn separately — they follow the course
@@ -854,33 +845,24 @@ const HEADS = {
 };
 // eyes by type: d — how far from the center, big — size, slit — slit pupil, glow — they glow, none — drawn into the head
 const EYES = { dragon: { d: 0.45, slit: true }, fish: { big: 1.2 }, caterpillar: { big: 1.15 }, neon: { glow: true }, robot: { none: true } };
-// a skin's head: sprite, silhouette for the outline (lazily), the type's eyes and the head color — once per skin
+// a skin's head: sprite, the type's eyes and the head color — once per skin
 const headCache = [];
 function headOf(skin) {
   if (headCache[skin]) return headCache[skin];
   const sk = skinOf(skin), t = TYPES[sk.type].id, c = document.createElement('canvas'); c.width = c.height = HE * 2;
   const g = c.getContext('2d'); g.translate(HE, HE);
   HEADS[t](g, HU, PAL[sk.head], PAL[sk.acc] || PAL[sk.head]);
-  return (headCache[skin] = { c, sil: null, eyes: EYES[t] || {}, col: PAL[sk.head] });
+  return (headCache[skin] = { c, eyes: EYES[t] || {}, col: PAL[sk.head] });
 }
-function headSil(skin) {
-  const h = headOf(skin);
-  if (!h.sil) {
-    const c = document.createElement('canvas'); c.width = c.height = HE * 2;
-    const g = c.getContext('2d'); g.drawImage(h.c, 0, 0); silhouette(g, HE); h.sil = c;
-  }
-  return h.sil;
-}
-// a head with a gaze: (x, y) — center, a — where it faces, look — where it wants to turn, r — body radius, sc — swelling from the wave;
-// edge > 0 — the head's silhouette instead, wider by edge (your own snake's outline)
-function drawHead(g, skin, x, y, a, look, r, sc = 1, edge = 0) {
-  const h = headOf(skin), c = Math.cos(a), s = Math.sin(a), k = (r * sc + edge) / HU;
+// a head with a gaze: (x, y) — center, a — where it faces, look — where it wants to turn, r — body radius, sc — swelling from the wave
+function drawHead(g, skin, x, y, a, look, r, sc = 1) {
+  const h = headOf(skin), c = Math.cos(a), s = Math.sin(a), k = r * sc / HU;
   const m = g.getTransform();
   g.transform(c * k, s * k, -s * k, c * k, x, y);
-  g.drawImage(edge ? headSil(skin) : h.c, -HE, -HE);
+  g.drawImage(h.c, -HE, -HE);
   g.setTransform(m);
   const e = h.eyes;
-  if (edge || e.none) return;
+  if (e.none) return;
   const d = (e.d || 0.55) * r, er = (e.big || 1) * r * 0.36;
   for (const side of [-1, 1]) {
     const ex = x + Math.cos(a + side * 0.6) * d, ey = y + Math.sin(a + side * 0.6) * d;
@@ -2612,8 +2594,8 @@ function drawSnake(s, vx0, vy0, vx1, vy1) {
   // bead radius: the tail tapers; on the crest of the success wave — wider
   const mine = s === me && lumps.length > 0;
   const radAt = (i, gwi) => { const b = baseR(i); return (i > n - tail ? b * (0.55 + 0.45 * (n - i) / tail) : b) * (1 + 0.22 * gwi + 0.3 * (charging ? 0 : bumpAt(i)) + (mine ? 0.16 * lumpAt(i) : 0)); };
-  // edge > 0 — the outline pass: bead silhouettes wider by edge; otherwise the beads themselves
-  const beads = (edge) => {
+  // your own snake has no outline (removed in 0.28.1 — at 1 px it looked jagged); it's told apart by its name in the primary blue
+  const beads = () => {
     for (let i = (n - 1) & ~1; i >= 2; i -= step) {
       const q = segs[i];
       if (q.x < x0 || q.x > x1 || q.y < y0 || q.y > y1) continue;
@@ -2622,24 +2604,21 @@ function drawSnake(s, vx0, vy0, vx1, vy1) {
       const p = segs[i - 1], o = segs[i + 1] || q;
       let dx = p.x - o.x, dy = p.y - o.y, d = Math.hypot(dx, dy);
       if (d < 1e-6) { dx = Math.cos(s.a); dy = Math.sin(s.a); d = 1; } // neighbors coincide (the tail while growing) — use the head's course
-      const sc = k * (rr + edge) / BEAD_U / d;
+      const sc = k * rr / BEAD_U / d;
       dx *= sc; dy *= sc;
       ctx.setTransform(dx, dy, -dy, dx, k * q.x + camT.e, k * q.y + camT.f);
       // a small snake is drawn every other bead — then pattern and colors alternate over the drawn ones, otherwise they'd freeze on one
       const ci = step === 4 ? i >> 1 : i, c = segColor(s.skin, ci), v = beadVar(s.skin, ci);
       const bst = passAt(i) > 0.5 ? st : s.moltFrom; // behind the molt wave — already the new outfit
-      if (edge) { const sp = beadSprite(s.skin, c, v, 2, bst); ctx.drawImage(sp, -sp.e, -sp.e); continue; }
       const sp = beadSprite(s.skin, c, v, 0, bst);
       ctx.drawImage(sp, -sp.e, -sp.e);
       const lit = Math.max(boost ? boostWave(i) : 0, gwi, molting ? bumpAt(i) : 0, bst >= 4 ? shimmerAt(i) : 0);
       if (lit > 0.25) { const sl = beadSprite(s.skin, c, v, 1, bst); ctx.globalAlpha = a0 * lit; ctx.drawImage(sl, -sl.e, -sl.e); ctx.globalAlpha = a0; }
     }
     ctx.setTransform(k, 0, 0, k, camT.e, camT.f);
-    drawHead(ctx, s.skin, h.x, h.y, s.a, s.ta, baseR(0), (1 + 0.22 * (gw ? gw(0) : 0) + (charging ? 0 : 0.3 * bumpAt(0))) * (s === me ? 1 + 0.13 * headBump() : 1), edge);
+    drawHead(ctx, s.skin, h.x, h.y, s.a, s.ta, baseR(0), (1 + 0.22 * (gw ? gw(0) : 0) + (charging ? 0 : 0.3 * bumpAt(0))) * (s === me ? 1 + 0.13 * headBump() : 1));
   };
-  // your own snake gets a light outline: under the beads their silhouettes slightly wider (shaped like the type — with crest, legs, ears)
-  if (s === me) beads(1 / cam.z);
-  beads(0);
+  beads();
   ctx.globalAlpha = 1;
 
   const rv = run && run.revenge && run.revenge.id === s.id;
