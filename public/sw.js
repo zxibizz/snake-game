@@ -1,7 +1,8 @@
 // Offline: every game file goes into the cache on install and is served from it from then on.
 // When any file changes, bump VERSION — otherwise devices stay on the old version.
-const VERSION = '51';
+const VERSION = '52';
 const CACHE = `zmeigrad-v${VERSION}`;
+const MUSIC_CACHE = 'snake-music-1'; // survives version bumps; bump only if a track file changes (activate then drops the old one)
 const ASSETS = [
   './',
   'index.html',
@@ -59,7 +60,7 @@ self.addEventListener('message', (e) => { if (e.data === 'skip') self.skipWaitin
 self.addEventListener('activate', (e) => {
   e.waitUntil(
     caches.keys()
-      .then((keys) => Promise.all(keys.filter((k) => k.startsWith('zmeigrad-') && k !== CACHE).map((k) => caches.delete(k))))
+      .then((keys) => Promise.all(keys.filter((k) => (k.startsWith('zmeigrad-') && k !== CACHE) || (k.startsWith('snake-music-') && k !== MUSIC_CACHE)).map((k) => caches.delete(k))))
       .then(() => self.clients.claim()),
   );
 });
@@ -68,6 +69,16 @@ self.addEventListener('fetch', (e) => {
   const req = e.request;
   const url = new URL(req.url);
   if (req.method !== 'GET' || url.origin !== location.origin || url.pathname.endsWith('/ws') || url.pathname.endsWith('/healthz')) return;
+  if (url.pathname.includes('/music/')) { // music: kept in its own cache across versions — fetched once, then offline too
+    e.respondWith(caches.open(MUSIC_CACHE).then(async (c) => {
+      const hit = await c.match(req, { ignoreSearch: true });
+      if (hit) return hit;
+      const r = await fetch(req.url);
+      if (r.ok) e.waitUntil(c.put(req.url, r.clone()).catch(() => {})); // the worker must not be stopped mid-write
+      return r;
+    }));
+    return;
+  }
   e.respondWith(
     caches.open(CACHE).then(async (c) => {
       const hit = await c.match(req, { ignoreSearch: true });

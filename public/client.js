@@ -8,7 +8,7 @@ import {
 import { Room, runRoom, encodeSelf, FR, FLR, readFood } from './room.js';
 import { host, join, loopback } from './rtc.js';
 import { BACKDROPS, HUE_SPREAD, makeBackdrop, drawBackdrop } from './backdrop.js';
-import { EAT, EAT_SLICES, BOOST, CRASH, MOLT, semi } from './sounds.js';
+import { EAT, EAT_SLICES, BOOST, CRASH, MOLT, MUSIC, semi } from './sounds.js';
 import { t, has, lang, pinned, deviceLang, LANGS, LANG_ORDER, setLang } from './i18n.js';
 
 const BOT_NAMES = t('bots');
@@ -46,6 +46,7 @@ const ICONS = {
   ruler: '<path d="M21 6H3c-1.1 0-2 .9-2 2v8c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zm0 10H3V8h2v4h2V8h2v4h2V8h2v4h2V8h2v4h2V8h2v8z"/>',
   language: '<path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zm6.93 6h-2.95c-.32-1.25-.78-2.45-1.38-3.56 1.84.63 3.37 1.91 4.33 3.56zM12 4.04c.83 1.2 1.48 2.53 1.91 3.96h-3.82c.43-1.43 1.08-2.76 1.91-3.96zM4.26 14C4.1 13.36 4 12.69 4 12s.1-1.36.26-2h3.38c-.08.66-.14 1.32-.14 2 0 .68.06 1.34.14 2H4.26zm.82 2h2.95c.32 1.25.78 2.45 1.38 3.56-1.84-.63-3.37-1.9-4.33-3.56zm2.95-8H5.08c.96-1.66 2.49-2.93 4.33-3.56C8.81 5.55 8.35 6.75 8.03 8zM12 19.96c-.83-1.2-1.48-2.53-1.91-3.96h3.82c-.43 1.43-1.08 2.76-1.91 3.96zM14.34 14H9.66c-.09-.66-.16-1.32-.16-2 0-.68.07-1.35.16-2h4.68c.09.65.16 1.32.16 2 0 .68-.07 1.34-.16 2zm.25 5.56c.6-1.11 1.06-2.31 1.38-3.56h2.95c-.96 1.65-2.49 2.93-4.33 3.56zM16.36 14c.08-.66.14-1.32.14-2 0-.68-.06-1.34-.14-2h3.38c.16.64.26 1.31.26 2s-.1 1.36-.26 2h-3.38z"/>',
   palette: '<path d="M12 3a9 9 0 0 0 0 18c.83 0 1.5-.67 1.5-1.5 0-.39-.15-.74-.39-1.01-.23-.26-.38-.61-.38-.99 0-.83.67-1.5 1.5-1.5H16c2.76 0 5-2.24 5-5 0-4.42-4.03-8-9-8zm-5.5 9a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zm3-4a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zm5 0a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zm3 4a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3z"/>',
+  sfx: '<path d="M7 18h2V6H7v12zm4 4h2V2h-2v20zm-8-8h2v-4H3v4zm12 4h2V6h-2v12zm4-8v4h2v-4h-2z"/>',
   music: '<path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/>',
   star: '<path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/>',
   cloudDone: '<path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM10 17l-3.5-3.5 1.41-1.41L10 14.17 15.18 9l1.41 1.41L10 17z"/>',
@@ -62,6 +63,7 @@ const hexA = (hex, a) => {
 // ---------- save data ----------
 // xp — accumulated stars (the key name is left over from levels)
 // first-launch volume: half the slider (gain is squared, so about -12 dB) — full volume through the compressor is harshly loud
+const MUSIC_DEF = 0.4; // music volume at first launch — about 10 dB under the effect peaks
 const VOL_DEF = 0.5;
 const save = { best: { easy: 0, medium: 0, hard: 0 }, name: '', skin: 0, sound: true, vol: VOL_DEF, haptic: true, xp: 0, diff: 'easy', hinted: false,
   stats: { games: 0, kills: 0, eaten: 0, best: 0 } };
@@ -79,6 +81,9 @@ if (save.snd.v !== 2) { if ('eat' in save.snd) save.snd.eat = Number(save.snd.ea
 for (const [k, set] of [['eat', EAT], ['boost', BOOST], ['crash', CRASH], ['molt', MOLT]]) { const i = Number(save.snd[k]); save.snd[k] = Number.isInteger(i) && set[i] ? i : 0; }
 // boost button: size and position (fractions of the screen, separately for portrait and landscape) — the player sets them in the pause menu
 if (!save.fab || typeof save.fab !== 'object') save.fab = {};
+// background music (pause menu, "Music"): a track id or 'random' (a new one after each ends); its own volume on top of the common one
+if (save.music !== 'random' && !MUSIC.some((m) => m.id === save.music)) save.music = 'random';
+if (!(save.musicVol >= 0 && save.musicVol <= 1)) save.musicVol = MUSIC_DEF;
 // joystick: size, dead zone, smoothing; free — appears where the finger lands (default), otherwise it stays at its spot (as fab)
 if (!save.joy || typeof save.joy !== 'object') save.joy = {};
 // arena backdrop (pause menu, "Backdrop"): a kind or 'random'; hue turn in degrees or 'random' — slightly different every game
@@ -174,12 +179,13 @@ function ensureAudio() { // only from gestures: pointerup / touchend / click / k
   else if (!resumeBusy && now - audioStuck > 1500) replaceAudio();
   wakeAudio();
 }
-['pointerup', 'touchend', 'click', 'keydown'].forEach((ev) => window.addEventListener(ev, () => { ensureAudio(); loadEat(); }, { capture: true, passive: true }));
+['pointerup', 'touchend', 'click', 'keydown'].forEach((ev) => window.addEventListener(ev, () => { ensureAudio(); loadEat(); musicGesture(); }, { capture: true, passive: true }));
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) {
     if (htmlAudio) htmlAudio.pause();
+    musicPause();
     if (actx && IOS) audioStale = true; // after minimizing or switching apps an iPhone context can be "running" yet silent
-  } else wakeAudio(); // before the first touch — at least with the old context: after a call iOS often wakes it even without a gesture
+  } else { wakeAudio(); musicPlay(); } // before the first touch — at least with the old context: after a call iOS often wakes it even without a gesture
 });
 const soundOn = () => save.sound && save.vol > 0;
 const canSound = () => soundOn() && actx && (actx.state === 'running' || resumeBusy);
@@ -244,6 +250,109 @@ function loadEat() {
     .then((ab) => new Promise((ok, no) => { const p = c.decodeAudioData(ab, ok, no); if (p && p.catch) p.catch(no); })) // old Safari — callbacks only
     .then((b) => { eatBuf = b; }).catch(() => { eatFail = performance.now(); /* until the file is loaded, "Yum" plays */ }).finally(() => { eatLoading = false; });
 }
+// ---------- background music ----------
+// Tracks are MP3 recordings (CC0, OpenGameArt; sources in the README), one <audio> streams the current one through Web Audio —
+// that's the only way to set its volume on iPhone (audio.volume is read-only there), and it obeys the silent switch like the effects.
+// iPhone lets an <audio> start only from a gesture: the element is started (on silence) in the first gesture and then just changes
+// tracks. A new audio context (after the background or a call — only in a gesture, see replaceAudio) needs a new element:
+// it's rebuilt in the same gesture and continues from the same second. The file is fetched whole and played from a blob: Safari won't
+// play media the service worker serves without ranges. Played files stay in the cache (sw.js) — offline they keep playing;
+// a track that fails to load is skipped for this session.
+const MUSIC_K = 3; // at the default volumes music sits ~10 dB under the effect peaks, at full music volume about level with them
+const music = { el: null, ctx: null, gain: null, id: null, url: null, loading: 0, bad: new Set(), miss: new Set(), lastPick: null };
+// bad — the file is broken or missing (skipped for the session); miss — no network for it right now (retried once back online)
+const musicVol = () => (soundOn() ? save.vol * save.vol * save.musicVol * save.musicVol * MUSIC_K : 0);
+const musicOn = () => musicVol() > 0;
+const SILENCE = silentWav();
+function musicGesture() {
+  if (!musicOn() || document.hidden || !actx) { musicPause(); return; }
+  if (!music.el || music.ctx !== actx) musicBuild();
+  if (!music.el) return;
+  if (!music.id && !music.loading) musicNext();
+  else if (music.el.paused) musicPlay();
+}
+function musicBuild() { // a new element bound to the current context; the old one stops and hands over its second
+  const old = music.el, at = old ? old.currentTime : 0;
+  if (old) { try { old.pause(); } catch { /* */ } }
+  try {
+    const el = document.createElement('audio');
+    el.setAttribute('playsinline', ''); el.setAttribute('x-webkit-airplay', 'deny'); el.preload = 'auto';
+    const node = actx.createMediaElementSource(el), g = actx.createGain();
+    g.gain.value = musicVol(); node.connect(g); g.connect(actx.destination);
+    el.addEventListener('ended', () => { if (el === music.el && !el.loop) musicNext(); });
+    el.addEventListener('error', () => { // the file won't decode: random mode moves on, a chosen track just stays silent
+      if (el !== music.el || !music.url || el.src !== music.url) return;
+      music.bad.add(music.id); music.id = null;
+      if (save.music === 'random') musicNext();
+    });
+    music.el = el; music.ctx = actx; music.gain = g;
+    el.src = music.url || SILENCE; el.loop = !music.url || save.music !== 'random';
+    if (music.url && at) el.addEventListener('loadedmetadata', () => { try { el.currentTime = at; } catch { /* */ } }, { once: true }); // Safari ignores it before the metadata
+    musicPlay();
+  } catch { music.el = null; music.ctx = null; }
+}
+function musicPlay() {
+  if (!music.el || !musicOn() || document.hidden) return;
+  const p = music.el.play(); if (p && p.catch) p.catch(() => {});
+}
+function musicPause() { if (music.el && !music.el.paused) music.el.pause(); }
+// the next track: the chosen one, or a random one that isn't the last (and hasn't failed)
+function musicNext() {
+  let id = save.music;
+  if (id === 'random') {
+    const can = (m) => !music.bad.has(m.id) && !music.miss.has(m.id);
+    const ok = MUSIC.filter((m) => can(m) && m.id !== music.id && m.id !== music.lastPick);
+    const list = ok.length ? ok : MUSIC.filter(can);
+    if (!list.length) return;
+    id = list[(Math.random() * list.length) | 0].id;
+  }
+  musicLoad(id);
+}
+function musicLoad(id) {
+  const n = ++music.loading;
+  music.lastPick = music.id;
+  fetch(`music/${id}.mp3`).then((r) => (r.ok ? r.blob() : Promise.reject(r.status))).then((b) => {
+    if (n !== music.loading) return; // another track was picked meanwhile
+    music.loading = 0;
+    if (music.url) URL.revokeObjectURL(music.url);
+    music.url = URL.createObjectURL(b); music.id = id;
+    if (!music.el) return; // no gesture yet — it starts on the first one
+    music.el.src = music.url; music.el.loop = save.music !== 'random';
+    musicPlay();
+    if (musicListener) musicListener();
+  }).catch((err) => {
+    if (n !== music.loading) return;
+    music.loading = 0;
+    (typeof err === 'number' ? music.bad : music.miss).add(id); // an HTTP error — the file isn't there; anything else — the network
+    if (save.music === 'random') musicNext();
+  });
+}
+let musicListener = null; // the open "Music" dialog marks what's playing
+window.addEventListener('online', () => { // back online: tracks that failed for lack of network can play again
+  music.miss.clear();
+  if (music.el && musicOn() && !music.id && !music.loading) musicNext();
+});
+// every frame: volume follows the settings, music stops when sound is off
+function musicTick() {
+  if (!music.el) return;
+  const v = musicVol();
+  if (music.gain && Math.abs(music.gain.gain.value - v) > 1e-4) music.gain.gain.value = v;
+  if (!v) musicPause();
+}
+// played tracks are cached as they play; the rest are fetched one by one in the background a little after start, so the game has
+// all its music offline (the plane). Once per launch, only online.
+function musicPrefetch() {
+  if (!navigator.onLine || !('serviceWorker' in navigator) || !navigator.serviceWorker.controller) return;
+  let i = 0;
+  const step = () => {
+    if (i >= MUSIC.length || !navigator.onLine) return;
+    const url = `music/${MUSIC[i++].id}.mp3`;
+    caches.match(url, { ignoreSearch: true }).then((hit) => (hit ? 0 : fetch(url).then((r) => r.arrayBuffer()).then(() => 1500)))
+      .catch(() => 1500).then((wait) => setTimeout(step, wait));
+  };
+  step();
+}
+setTimeout(musicPrefetch, 20000);
 // a bite from the set: a random slice (not the same as last time), pitch with some spread, a bit higher in a row;
 // the previous bite fades out fast — with frequent eating the crunches don't blur into mush
 function playBite(v, step, delay = 0) {
@@ -1765,12 +1874,13 @@ function bindVol() {
     else { save.sound = true; if (save.vol < 0.05) save.vol = VOL_DEF; }
     persist(); show();
     if (soundOn()) check(); else unlockHtmlAudio(); // the global gesture listener has already fired before the toggle
+    musicGesture();
   });
   rng.addEventListener('input', () => {
     save.vol = rng.value / 100; save.sound = save.vol > 0;
     show();
   });
-  rng.addEventListener('change', () => { persist(); unlockHtmlAudio(); if (soundOn()) quiet(sfx.win); }); // released — a test sound
+  rng.addEventListener('change', () => { persist(); unlockHtmlAudio(); musicGesture(); if (soundOn()) quiet(sfx.win); }); // released — a test sound
   show();
 }
 // vibration — only where it exists (phone, tablet); turn it on and you feel what it's like right away
@@ -1787,8 +1897,9 @@ function bindFabBtn() { const b = $('btnFabSet'); if (b) b.addEventListener('cli
 // food, boost, crash and molt sounds to choose from (sounds.js); in tabs, pick one and you hear it right away
 const SND_GROUPS = [['eat', EAT], ['boost', BOOST], ['crash', CRASH], ['molt', MOLT]];
 let sndTab = 'eat';
-const sndBtnHtml = () => `<button class="fab-set" id="btnSnd">${icon('music')}<span>${t('set.sounds')}</span>${icon('right')}</button>`;
-function bindSndBtn() { $('btnSnd').addEventListener('click', soundsDialog); }
+const sndBtnHtml = () => `<button class="fab-set" id="btnSnd">${icon('sfx')}<span>${t('set.sounds')}</span>${icon('right')}</button>`;
+const musBtnHtml = () => `<button class="fab-set" id="btnMus">${icon('music')}<span>${t('set.music')}</span>${icon('right')}</button>`;
+function bindSndBtn() { $('btnSnd').addEventListener('click', soundsDialog); $('btnMus').addEventListener('click', musicDialog); }
 function previewSound(k, i) {
   unlockHtmlAudio(); loadEat();
   if (!soundOn()) { snack(t('snd.off')); return; }
@@ -1821,6 +1932,39 @@ function soundsDialog() {
     opts.querySelectorAll('.snd-opt').forEach((x) => x.classList.toggle('on', x === b));
     previewSound(sndTab, i);
   });
+  show();
+}
+// background music: its volume (0 — off), "Random" (a new track after each; tapped again — the next one right away) or a track,
+// which then repeats; the choice plays at once, a note marks the one playing
+function musicDialog() {
+  const opt = (id, cls = '') => `<button class="snd-opt${cls}" data-mus="${id}">${esc(t('music.' + id))}</button>`;
+  dialog(t('set.music'), `<div class="vol mus-vol">${icon('volOff')}<input type="range" id="musVol" min="0" max="100" step="5" aria-label="${t('music.vol')}">${icon('vol')}</div>` +
+    `<p class="mus-off" id="musOff" hidden>${esc(t('snd.off'))}</p>` +
+    `<div class="snd-opts mus-opts">${opt('random', ' auto')}${MUSIC.map((m) => opt(m.id)).join('')}</div>`,
+  [{ label: t('btn.done'), kind: 'filled', onClick: () => { musicListener = null; menuDialog(); } }], { cls: 'pzs' });
+  const body = $('dlgBody'), rng = $('musVol');
+  rng.value = Math.round(save.musicVol * 100); showRange(rng);
+  const show = () => {
+    if (!body.isConnected || !$('musOff')) { musicListener = null; return; } // the dialog was replaced
+    body.querySelectorAll('[data-mus]').forEach((b) => {
+      const k = b.dataset.mus;
+      b.classList.toggle('on', k === save.music);
+      b.classList.toggle('now', save.music === 'random' && k === music.id && musicOn());
+    });
+    $('musOff').hidden = soundOn();
+  };
+  musicListener = show;
+  body.querySelectorAll('[data-mus]').forEach((b) => b.addEventListener('click', () => {
+    const k = b.dataset.mus, same = k === save.music;
+    save.music = k; persist();
+    if (!musicOn()) { save.musicVol = Math.max(save.musicVol, MUSIC_DEF); rng.value = Math.round(save.musicVol * 100); showRange(rng); persist(); }
+    if (k !== 'random') { if (k !== music.id || music.loading || !music.el || music.el.paused) musicLoad(k); else music.el.loop = true; }
+    else if (same || !music.id || !music.el || music.el.paused) musicNext(); // "Random" again — the next track
+    else if (music.el) music.el.loop = false; // keeps playing the current one, a random one comes after it
+    musicGesture(); show();
+  }));
+  rng.addEventListener('input', () => { save.musicVol = rng.value / 100; showRange(rng); if (musicOn()) musicGesture(); else musicPause(); show(); });
+  rng.addEventListener('change', persist);
   show();
 }
 // arena backdrop: kind and hue (both can be random); the strip on top shows it, the arena behind changes right away
@@ -1874,7 +2018,7 @@ function pauseHtml(note, goLabel) {
   return `<div class="pz-chips"><span class="pz-chip">${icon('ruler')}<b id="pzLen">${curLen()}</b></span>` +
     `<span class="pz-chip gold"${rk ? '' : ' hidden'}>${icon('trophy')}${t('pause.place', `<b id="pzRank">${rk ? rk.rank : ''}</b>`)}</span></div>` + note +
     `<button class="btn filled pz-go" id="pzGo">${icon('play')}${goLabel}</button>` +
-    `<div class="pz-list">${volHtml()}${sndBtnHtml()}${bgBtnHtml()}${hapHtml()}${fabBtnHtml()}</div>` +
+    `<div class="pz-list">${volHtml()}${musBtnHtml()}${sndBtnHtml()}${bgBtnHtml()}${hapHtml()}${fabBtnHtml()}</div>` +
     `<button class="btn pz-out" id="pzOut">${icon('home')}${t('pause.out')}</button>`;
 }
 function pauseDialog(title, note, goLabel, go, out) {
@@ -2792,6 +2936,7 @@ function frame(now) {
   if (boosting && !wasBoost) sfx.boost();
   wasBoost = boosting;
   setWhoosh(boosting);
+  musicTick();
   checkNear();
   if (ui !== 'paused') {
     updateCamera(dt);
@@ -2819,6 +2964,6 @@ if (inviteCode && /^\d{4}$/.test(inviteCode)) {
 // for automated tests
 window.__snake = {
   get mode() { return mode; }, get ui() { return ui; }, get me() { return me; }, get world() { return world; },
-  get net() { return net; }, auto, safeCourse, get joy() { return joy; }, get run() { return run; }, get save() { return save; }, get cam() { return cam; }, startSolo, sfx, get bg() { return backdrop && backdrop.kind; }, get hue() { return backdrop && backdrop.hue; }, pickBackdrop,
+  get net() { return net; }, get music() { return music; }, auto, safeCourse, get joy() { return joy; }, get run() { return run; }, get save() { return save; }, get cam() { return cam; }, startSolo, sfx, get bg() { return backdrop && backdrop.kind; }, get hue() { return backdrop && backdrop.hue; }, pickBackdrop,
   get fx() { return { gulps: gulps.length, sparks: sparks.length, lumps: lumps.length, kick: kick.t, whoosh: !!whoosh, time }; },
 };

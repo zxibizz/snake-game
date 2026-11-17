@@ -167,3 +167,8 @@ export const MOLT = [
     [392, 494, 587].forEach((f, i) => a.n(f * k, { type: 'triangle', vol: 0.14, dur: 0.6, delay: W + 0.04 + i * 0.05, wet: 0.4 }));
   } },
 ];
+
+// background music (pause menu, "Music"): recordings in public/music/<id>.mp3 — CC0 from OpenGameArt, sources in the README.
+// 32 kHz stereo 64 kbps, silence trimmed, loudness evened out (~−18 dB RMS), long ones cut to 2.5 min with a fade.
+export const MUSIC = ['adventure', 'summer', 'cozy', 'space', 'bossa', 'fishing', 'teddy', 'carousel', 'underwater', 'meadow', 'run',
+  'doodle', 'lullaby', 'crystals', 'tiki', 'chatter', 'starrun', 'easy', 'sport', 'story', 'chill', 'chase'].map((id) => ({ id }));

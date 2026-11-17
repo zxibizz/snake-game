@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { LANGS, LANG_ORDER, pickLang, t, has } from '../public/i18n.js';
 import { SKINS, TYPES } from '../public/core.js';
-import { EAT, BOOST, CRASH, MOLT } from '../public/sounds.js';
+import { EAT, BOOST, CRASH, MOLT, MUSIC } from '../public/sounds.js';
 import { BACKDROPS } from '../public/backdrop.js';
 
 test('i18n: language comes from the first supported locale, English otherwise', () => {
@@ -37,7 +37,8 @@ test('i18n: every language has exactly the keys of English, of the same kind', (
 
 test('i18n: skins, snake types and sounds have a name in every language', () => {
   const keys = [...SKINS.map((s) => 'skin.' + s.id), ...BACKDROPS.map((k) => 'bg.' + k), 'bg.random', ...TYPES.map((x) => 'type.' + x.id),
-    ...[['eat', EAT], ['boost', BOOST], ['crash', CRASH], ['molt', MOLT]].flatMap(([g, set]) => set.map((o) => `snd.${g}.${o.id}`))];
+    ...[['eat', EAT], ['boost', BOOST], ['crash', CRASH], ['molt', MOLT]].flatMap(([g, set]) => set.map((o) => `snd.${g}.${o.id}`)),
+    'music.random', ...MUSIC.map((m) => 'music.' + m.id)];
   assert.equal(new Set(SKINS.map((s) => s.id)).size, SKINS.length, 'skin ids are unique');
   for (const [code, d] of Object.entries(LANGS)) {
     for (const k of keys) assert.ok(typeof d[k] === 'string' && d[k], `${code}: ${k}`);
@@ -92,4 +93,11 @@ test('i18n: Cyrillic lives only in the Russian dictionary and manifest — code,
   };
   await walk('');
   assert.deepEqual(bad, []);
+});
+
+test('music: every track in the list has its file, and every file is in the list', async () => {
+  const { readdir } = await import('node:fs/promises');
+  const files = (await readdir(new URL('../public/music/', import.meta.url))).filter((f) => f.endsWith('.mp3')).sort();
+  assert.deepEqual(files, MUSIC.map((m) => m.id + '.mp3').sort());
+  assert.equal(new Set(MUSIC.map((m) => m.id)).size, MUSIC.length);
 });

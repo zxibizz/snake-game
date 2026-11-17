@@ -266,6 +266,15 @@ svg.i{width:24px;height:24px;fill:currentColor;flex:none}
 .vol.bg-hue input.off::-webkit-slider-thumb{background:var(--outline)}
 .vol.bg-hue input.off::-moz-range-thumb{background:var(--outline)}
 .snd-opt.on{background:var(--primary);color:var(--on-primary);border-color:var(--primary);font-weight:500}
+/* music: the volume on top, "Random" across the row, a note by the track playing in random mode */
+.vol.mus-vol{margin:0 0 12px}
+.vol.mus-vol svg.i{color:var(--on-var);flex:none}
+.snd-opts.mus-opts{min-height:0}
+.mus-opts .snd-opt.auto{grid-column:1/-1}
+.mus-opts .snd-opt{height:auto;min-height:40px;padding:4px 6px}
+.snd-opt.now{border-color:var(--primary);color:var(--primary)}
+.snd-opt.now::after{content:'\00a0♪'}
+.dialog .body .mus-off{margin:0 0 10px;font-size:13px}
 .pzs .actions .btn.filled{width:100%;height:56px;border-radius:28px;font-size:18px}
 /* "Oops!": in a row — "Menu" on the left sized to its content (design decision), the big yellow "Continue" on the right takes the rest */
 .dialog.oops .actions{flex-wrap:nowrap;gap:12px;margin-top:20px}
