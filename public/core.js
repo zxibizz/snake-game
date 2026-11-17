@@ -2,7 +2,7 @@
 // No DOM and no network here — only the world, snakes, food, bots and collisions.
 
 // Protocol and file version: whenever any file in public/ changes, bump it both here and in sw.js (a test checks they match).
-export const VERSION = '58';
+export const VERSION = '59';
 export const TAU = Math.PI * 2;
 export const R = 7000;                  // arena radius (network coordinates are Int16 / 4, limit 8191)
 export const BASE_SPEED = 210;          // px/s at the first stage; each stage (molt) makes the snake faster, see speedOf
@@ -1489,4 +1489,59 @@ export class World {
     this.events = [];
     return ev;
   }
+
+  // ---------- save and restore (a solo game survives the app being unloaded from memory) ----------
+  // Everything that makes the arena what it is: snakes with their bodies and characters, food, butterflies, the feast and timers.
+  // A bot's short memory (mem), grids and per-step maps are rebuilt by the next step.
+  toSave() {
+    return {
+      v: SAVE_V, diff: this.diffKey, time: this.time, targetBots: this.targetBots, foodN: this.foodN,
+      ids: [this.nextSnakeId, this.nextFoodId, this.nextFlyId], naturalCount: this.naturalCount,
+      feast: this.feast, feastT: this.feastT, respawnQueue: this.respawnQueue, flyQueue: this.flyQueue,
+      deaths: this.deaths, humanSkins: [...this.humanSkins], crowned: this.crowned ? this.crowned.id : 0,
+      snakes: this.snakes.filter((s) => s.alive).map(snakeToSave),
+      foods: this.foods.filter((f) => !f.dead).map((f) => [f.id, rnd1(f.x), rnd1(f.y), rnd2(f.v), f.c, f.life, rnd2(f.age)]),
+      flies: this.flies.map((f) => ({ ...f, x: rnd1(f.x), y: rnd1(f.y), cnt: [...f.cnt] })),
+    };
+  }
+  // null — the save is from another format or broken
+  static fromSave(o, opts = {}) {
+    if (!o || o.v !== SAVE_V || !DIFF[o.diff]) return null;
+    const w = new World({ ...opts, diff: o.diff, foodN: 0, bots: 0, flies: 0 });
+    w.targetBots = o.targetBots; w.foodN = o.foodN; w.time = o.time;
+    [w.nextSnakeId, w.nextFoodId, w.nextFlyId] = o.ids;
+    w.naturalCount = o.naturalCount; w.feast = o.feast; w.feastT = o.feastT;
+    w.respawnQueue = o.respawnQueue; w.flyQueue = o.flyQueue; w.deaths = o.deaths;
+    w.humanSkins = new Set(o.humanSkins);
+    for (const d of o.snakes) w.addSnake(snakeFromSave(d));
+    w.crowned = w.byId.get(o.crowned) || null;
+    for (const [id, x, y, v, c, life, age] of o.foods) {
+      w.foods.push({ id, x, y, v, r: foodRadiusOf(v), c, ph: Math.random() * TAU, life, age, dead: false, cell: foodCellOf(x, y) });
+    }
+    w.flies = o.flies.map((f) => ({ ...f, cnt: new Map(f.cnt) }));
+    return w;
+  }
+}
+
+export const SAVE_V = 1; // bump when the saved world changes shape: an older save is then dropped instead of breaking the game
+const rnd1 = (x) => Math.round(x * 10) / 10, rnd2 = (x) => Math.round(x * 100) / 100;
+// client-only marks on a snake: molt effects tied to the page clock — they mean nothing after a reload
+const SNAKE_SKIP = new Set(['segs', 'mem', 'moltT', 'moltFrom', 'moltKick', 'sparkT']);
+// a snake as plain data: its own simple fields, the body as a flat list of coordinates
+export function snakeToSave(s) {
+  const o = {};
+  for (const k of Object.keys(s)) {
+    const v = s[k];
+    if (!SNAKE_SKIP.has(k) && (typeof v === 'number' || typeof v === 'string' || typeof v === 'boolean')) o[k] = v;
+  }
+  o.segs = s.segs.flatMap((p) => [Math.round(p.x), Math.round(p.y)]); // half a point off is invisible, the save is a third smaller
+  return o;
+}
+export function snakeFromSave(o) {
+  const s = Object.create(Snake.prototype);
+  Object.assign(s, o);
+  s.mem = new Map();
+  s.segs = [];
+  for (let i = 0; i + 1 < o.segs.length; i += 2) s.segs.push({ x: o.segs[i], y: o.segs[i + 1] });
+  return s;
 }

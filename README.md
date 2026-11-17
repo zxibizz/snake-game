@@ -114,6 +114,8 @@ Minimalist: the home screen is a single page without scrolling: "?" ("How to pla
 
 Progress is stored in the device's `localStorage` (key `zmeigrad` — the game's original name; kept so existing progress isn't lost).
 
+A solo game survives the app being unloaded from memory: the whole arena (snakes with their bodies and characters, food, butterflies, the feast, timers — `World.toSave` / `World.fromSave` in `core.js`) plus the game's stars and places is written to `localStorage` (`zmeigrad-run:<game id>`, list in `zmeigrad-runs`) when the game goes to the background, on pause and every 30 s of play (about 250 KB, a few ms, only if the world moved since the last save). The next launch opens the game paused ("Continue" / "Back to menu"), or "Oops!" again if it was unloaded there; after a restore your snake has 1.5 s of invulnerability to look around. Every game has its own save, so parallel tabs don't overwrite each other (up to 3, the oldest go): a tab remembers its game in `sessionStorage` and gets it back when reloaded, a new launch takes the newest game not open in another tab (asked over a `BroadcastChannel`, 250 ms; a frozen tab doesn't answer, so its game may open twice), and "Back to menu", a new game or a room drop only the tab's own save. A save of another format (`SAVE_V`) or a broken one is dropped and the launch shows the menu; an invitation link (`?room=`) opens the menu and leaves saves for later.
+
 ## Architecture
 
 | Path | What |

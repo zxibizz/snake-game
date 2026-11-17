@@ -3,7 +3,7 @@
 import {
   World, SKINS, TYPES, SKINS_OF, PAL, foodLookOf, GOLD, DIFF, R, TAU, START_MASS, SNAKES_N, FOOD_N, VERSION, segColor, STAGE_R, growR, setStage, MOLT_WAIT,
   radiusOf, spacingOf, countOf, bodyLenOf, foodRadiusOf, followChain, fitLength, clamp, angDiff, keepMass,
-  FLY_MAX, flyK, flyScale, flyRadius, flyEase, MIN_BOOST_MASS, Snake, safeCourse, stickyRank,
+  FLY_MAX, flyK, flyScale, flyRadius, flyEase, MIN_BOOST_MASS, Snake, safeCourse, stickyRank, snakeToSave, snakeFromSave,
 } from './core.js';
 import { Room, runRoom, encodeSelf, FR, FLR, readFood } from './room.js';
 import { host, join, loopback } from './rtc.js';
@@ -1866,6 +1866,7 @@ function onNetDeath(m, dead) {
   }, 700);
 }
 function startNet(firstMsg) {
+  clearRun();
   mode = 'net'; ui = 'conn'; me = null; world = null; net.kills = 0; net.retry = 0; net.eaten = 0;
   run = null; feast = null; clearFx();
   pickBackdrop();
@@ -1904,6 +1905,8 @@ $('roomChip').addEventListener('click', shareRoom);
 
 // ---------- solo game ----------
 function startSolo(diff) {
+  clearRun();
+  runId = newRunId(); setTabRun(runId);
   mode = 'solo'; diffKey = diff;
   world = new World({ diff, botNames: BOT_NAMES });
   me = world.addHuman({ name: soloName(), skin: save.skin, inv: 2 });
@@ -1944,11 +1947,111 @@ function onSoloDeath(killer) {
   const isNew = recordBest();
   ui = 'dead';
   run.revenge = killer && killer.alive ? { id: killer.id, name: killer.name } : null;
-  dialog(t('oops.title'), oopsHtml(who, dead.mass, diffKey) + (isNew ? `<p class="record">${icon('trophy')}${t('oops.record')}</p>` : ''),
+  run.by = killer ? killer.name : null; run.isNew = isNew; // for "Oops!" again if the game is unloaded and restored right here
+  soloOops(who, dead.mass, isNew);
+}
+function soloOops(who, mass, isNew) {
+  dialog(t('oops.title'), oopsHtml(who, mass, diffKey) + (isNew ? `<p class="record">${icon('trophy')}${t('oops.record')}</p>` : ''),
   goOutActions(() => {
-    me = world.addHuman({ name: soloName(), skin: save.skin, mass: keepMass(diffKey, dead.mass), inv: 3 });
+    me = world.addHuman({ name: soloName(), skin: save.skin, mass: keepMass(diffKey, mass), inv: 3 });
     ui = 'play'; closeDialog(); onRespawn();
   }, toHome), { cls: 'oops', wait: 600 });
+}
+
+// ---------- saved game: the system may unload the app from memory, the next launch continues the same game ----------
+// Written when the game goes to the background, on pause and every RUN_EVERY seconds of play (in case it is killed outright).
+// The launch opens it paused — "Continue" or "Back to menu". Leaving to the menu or starting another game drops it.
+// Every game has its own id and save, so games in parallel tabs don't overwrite each other (up to RUN_MAX saves, the oldest go):
+// a tab remembers its game's id (sessionStorage — a tab reloaded after being unloaded gets its own game back), a new launch takes
+// the newest game not open in another tab (asked over a BroadcastChannel), and a tab drops only its own save.
+const RUN_EVERY = 30, RUN_MAX = 3, RUN_LIST = 'zmeigrad-runs', RUN_TAB = 'zmeigrad-run-tab';
+const runKey = (id) => `zmeigrad-run:${id}`;
+let runSaveT = RUN_EVERY, runDirty = false; // dirty — the world has moved since the last save
+let runId = null;                           // this tab's game
+const newRunId = () => (crypto.randomUUID ? crypto.randomUUID() : String(Math.random()).slice(2) + Date.now()).slice(0, 36);
+const lsDel = (k) => { try { localStorage.removeItem(k); } catch { /* nothing to do */ } };
+function setTabRun(id) { try { if (id) sessionStorage.setItem(RUN_TAB, id); else sessionStorage.removeItem(RUN_TAB); } catch { /* nothing to do */ } }
+function tabRun() { try { return sessionStorage.getItem(RUN_TAB); } catch { return null; } }
+// saved games, newest first: [{ id, at }]
+function runList() {
+  try {
+    const l = JSON.parse(localStorage.getItem(RUN_LIST) || '[]');
+    return Array.isArray(l) ? l.filter((e) => e && typeof e.id === 'string' && typeof e.at === 'number').sort((a, b) => b.at - a.at) : [];
+  } catch { return []; }
+}
+function setRunList(l) { try { localStorage.setItem(RUN_LIST, JSON.stringify(l)); } catch { /* nothing to do */ } }
+function dropRun(id) { lsDel(runKey(id)); setRunList(runList().filter((e) => e.id !== id)); }
+function saveRun() {
+  if (mode !== 'solo' || !world || !me || !run || !runDirty || !runId) return;
+  const r = { ...run, flags: [...run.flags], feastSeen: [...run.feastSeen], unlocked: run.unlocked.map((sk) => SKINS.indexOf(sk)),
+    startT: performance.now() - run.startT };
+  const data = { v: 1, at: Date.now(), diff: diffKey, world: world.toSave(), me: me.alive ? me.id : snakeToSave(me),
+    playTime, sessionBest, run: r, bg: backdrop && { kind: backdrop.kind, seed: backdrop.seed, hue: backdrop.hue, rndHue: backdrop.rndHue } };
+  const json = JSON.stringify(data), others = runList().filter((e) => e.id !== runId);
+  for (const e of others.splice(RUN_MAX - 1)) lsDel(runKey(e.id));
+  // storage full: make room by dropping the oldest other games; still no room — no save at all, never an older one of this game
+  for (;;) {
+    try { localStorage.setItem(runKey(runId), json); setRunList([{ id: runId, at: data.at }, ...others]); break; } catch {
+      const old = others.pop();
+      if (!old) { lsDel(runKey(runId)); setRunList(others); break; }
+      lsDel(runKey(old.id));
+    }
+  }
+  runSaveT = RUN_EVERY; runDirty = false;
+}
+// this tab's game is over (menu, a new game, a room): only its own save goes, other tabs' games stay
+function clearRun() { if (runId) dropRun(runId); runId = null; setTabRun(null); }
+const runChan = typeof BroadcastChannel === 'function' ? new BroadcastChannel('zmeigrad-runs') : null;
+if (runChan) runChan.onmessage = (e) => { if (e.data && e.data.t === 'who' && mode === 'solo' && runId) runChan.postMessage({ t: 'mine', id: runId }); };
+// ids of games open in other tabs right now (a frozen tab doesn't answer — its game may then open a second time)
+function liveRuns() {
+  return new Promise((done) => {
+    const ids = new Set();
+    if (!runChan) { done(ids); return; }
+    const on = (e) => { if (e.data && e.data.t === 'mine') ids.add(e.data.id); };
+    runChan.addEventListener('message', on);
+    runChan.postMessage({ t: 'who' });
+    setTimeout(() => { runChan.removeEventListener('message', on); done(ids); }, 250);
+  });
+}
+// which saved game this launch continues: this tab's own, otherwise the newest one nobody has open; null — none
+async function pickRun() {
+  const list = runList();
+  if (!list.length) return null;
+  const live = await liveRuns(), own = tabRun(), free = list.filter((e) => !live.has(e.id));
+  const e = free.find((x) => x.id === own) || free[0];
+  return e ? e.id : null;
+}
+function restoreRun(id) {
+  let d = null;
+  try { d = JSON.parse(localStorage.getItem(runKey(id)) || 'null'); } catch { d = null; }
+  if (!d) { dropRun(id); return false; }
+  const w = d.v === 1 && DIFF[d.diff] ? World.fromSave(d.world, { botNames: BOT_NAMES }) : null;
+  const m = w && (typeof d.me === 'number' ? w.byId.get(d.me) : snakeFromSave(d.me));
+  if (!m) { dropRun(id); return false; }
+  runId = id; setTabRun(id);
+  mode = 'solo'; diffKey = d.diff; world = w; me = m;
+  world.track = true;
+  playTime = d.playTime || 0; sessionBest = d.sessionBest || me.mass; hudT = 0; lastSoloMass = me.mass;
+  run = { ...newRun(diffKey), ...d.run, flags: new Set(d.run.flags), feastSeen: new Set(d.run.feastSeen),
+    unlocked: d.run.unlocked.map((i) => SKINS[i]).filter(Boolean), startT: performance.now() - (d.run.startT || 0) };
+  feast = null; clearFx(); clearGlow(); standIds = [];
+  if (world.feast) setFeast({ x: world.feast.x, y: world.feast.y, life: world.feast.until - world.time });
+  if (d.bg && BACKDROPS.includes(d.bg.kind) && !BG_FORCED && HUE_FORCED == null) {
+    backdrop = makeBackdrop(ctx, d.bg.kind, d.bg.seed, R, d.bg.hue);
+    Object.assign(backdrop, { seed: d.bg.seed, rndHue: d.bg.rndHue });
+  } else pickBackdrop();
+  cam.x = me.x; cam.y = me.y; cam.z = baseZoom();
+  $('roomBox').hidden = true;
+  showHome(false);
+  closeDialog();
+  if (me.alive) {
+    me.inv = Math.max(me.inv, 1.5); // after hours away the arena is unfamiliar: a moment to look around before anything can hit
+    ui = 'paused'; menuDialog();
+  } else {
+    ui = 'dead'; soloOops(run.by ? t('oops.by', esc(run.by)) : t('oops.edge'), me.mass, !!run.isNew);
+  }
+  return true;
 }
 
 // ---------- game flow: molts, places, streaks, feast, revenge ----------
@@ -2050,6 +2153,7 @@ function runTick() {
   }
   persistT -= 0.25;
   if (persistT <= 0) { persistT = 5; persist(); }
+  if (mode === 'solo' && runDirty && (runSaveT -= 0.25) <= 0) saveRun();
 }
 // where the offender is: {x, y} — known, null — far away and not visible, false — it's gone
 function revengeTarget() {
@@ -2244,6 +2348,7 @@ function openMenu() {
   if (ui !== 'play' || fabEdit) return;
   if (mode === 'solo') ui = 'paused';
   menuDialog();
+  saveRun();
 }
 // pause (and the room menu): your snake wiggles at the top (drawWave every frame), length and place; "Continue" is big and yellow,
 // settings sit in a card, "Back to menu" is a full button. A design decision based on mockups (the "with the snake" variant).
@@ -2272,12 +2377,14 @@ function resume() { if (ui === 'paused') { ui = 'play'; closeDialog(); last = pe
 $('btnMenu').addEventListener('click', openMenu);
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) persist();
-  if (document.hidden && mode === 'solo') openMenu();
+  if (document.hidden && mode === 'solo') { if (ui === 'play') openMenu(); else saveRun(); } // the pause saves the game itself
   if (!document.hidden && mode === 'net' && !net.link && !net.leaving && ui !== 'conn') netReconnect();
 });
-window.addEventListener('pagehide', persist);
+window.addEventListener('pagehide', () => { persist(); saveRun(); });
 
-function toHome() {
+function toHome() { clearRun(); goHome(); }
+// the menu without touching the saved game (the launch, when there's nothing to restore)
+function goHome() {
   if (mode === 'solo' && me) recordBest();
   if (run) finishRun();
   mode = null; me = null; ui = 'home'; feast = null; clearFx(); clearGlow();
@@ -3171,6 +3278,7 @@ function frame(now) {
     }
     const m0 = me && me.alive ? me.mass : 0;
     if (world) soloEvents(world.step(mode === 'solo' && time < slowUntil ? dt * 0.25 : dt));
+    if (mode === 'solo') runDirty = true;
     if (mode === 'solo' && world.track) soloGulps(me && me.alive && me.mass > m0);
     if (mode === 'solo' && me && me.alive) {
       if (ui === 'play') playTime += dt;
@@ -3198,12 +3306,21 @@ function frame(now) {
   requestAnimationFrame(frame);
 }
 
-toHome();
-requestAnimationFrame(frame);
-
 // invitation via the ?room=1234 link
 const inviteCode = new URLSearchParams(location.search).get('room');
-if (inviteCode && /^\d{4}$/.test(inviteCode)) {
+const hasInvite = !!(inviteCode && /^\d{4}$/.test(inviteCode));
+// a solo game left when the app was unloaded continues paused (with an invitation link — the menu, the save stays until a game starts)
+goHome();
+requestAnimationFrame(frame);
+if (!hasInvite && runList().length) {
+  document.documentElement.classList.add('restoring'); // the menu stays hidden while other tabs are asked — no flash before the pause
+  pickRun().then((id) => {
+    if (!id || mode !== null) return;
+    try { restoreRun(id); } catch { dropRun(id); runId = null; setTabRun(null); mode = null; me = null; run = null; goHome(); } // half-restored: not a game played
+  }).finally(() => document.documentElement.classList.remove('restoring'));
+}
+
+if (hasInvite) {
   dialog(t('room.title', inviteCode), `<p>${t('room.invite')}</p>${nameFieldHtml()}`,
     [{ label: t('btn.later'), kind: 'text', onClick: closeDialog }, { label: t('btn.join'), kind: 'filled', onClick: () => startNet(hello({ t: 'join', code: inviteCode })) }]);
   bindName();

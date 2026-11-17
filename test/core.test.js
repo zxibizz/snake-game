@@ -667,3 +667,40 @@ test('spawning: while a player wears a crown, no bot appears longer than them; w
   for (let i = 0; i < 400; i++) if (w.botMass(false) >= DIFF.hard.giantMin) big++;
   assert.ok(big > 50, `${big} giants of 400`);
 });
+
+test('save: a restored world has the same snakes, food and butterflies and keeps playing', () => {
+  const w = new World({ diff: 'medium' });
+  const me = w.addHuman({ name: 'Me', skin: 3, inv: 99, mass: 400 }); // can't be killed: the human checks below always run
+  for (let i = 0; i < 200; i++) w.step(1 / 30);
+  const data = JSON.parse(JSON.stringify(w.toSave()));
+  const r = World.fromSave(data);
+  assert.ok(r);
+  assert.equal(r.diffKey, 'medium');
+  assert.equal(r.snakes.length, w.snakes.filter((s) => s.alive).length);
+  assert.equal(r.foods.length, w.foods.filter((f) => !f.dead).length);
+  assert.equal(r.flies.length, w.flies.length);
+  assert.equal(r.time, w.time);
+  const me2 = r.byId.get(me.id);
+  assert.ok(me.alive && me2 && me2.human && me2 instanceof Snake);
+  assert.equal(me2.mass, me.mass);
+  assert.equal(me2.stage, me.stage);
+  assert.equal(me2.inv, me.inv);
+  assert.equal(me2.segs.length, me.segs.length);
+  assert.ok(Math.abs(me2.segs[5].x - me.segs[5].x) <= 0.5);
+  const bot = w.snakes.find((s) => !s.human && s.alive), bot2 = r.byId.get(bot.id);
+  assert.equal(bot2.skin, bot.skin);
+  assert.equal(bot2.pers, bot.pers);
+  assert.equal(bot2.name, bot.name);
+  assert.equal(r.crowned && r.crowned.id, w.crowned && w.crowned.id);
+  assert.ok(r.flies.every((f) => f.cnt instanceof Map));
+  for (let i = 0; i < 300; i++) r.step(1 / 30);
+  assert.ok(r.snakes.length > 30);
+  const used = new Set(r.snakes.map((s) => s.id));
+  assert.equal(used.size, r.snakes.length); // new bots get new ids
+});
+
+test('save: another format is dropped', () => {
+  const w = new World({ diff: 'easy', foodN: 10, bots: 2, flies: 1 });
+  assert.equal(World.fromSave({ ...w.toSave(), v: -1 }), null);
+  assert.equal(World.fromSave(null), null);
+});
