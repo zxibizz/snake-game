@@ -71,8 +71,16 @@ const HOST_TOKEN = (crypto.randomUUID ? crypto.randomUUID() : String(Math.random
 // (переключатель сбоку) Web Audio слушается — так решил владелец.
 let actx = null, bus = null, lastEatSound = 0, eatStep = 0; // bus — общий вход звуков: громкость и компрессор
 let audioStuck = 0, resumeBusy = false; // с какого момента жесты не будят контекст; ждём ли ответа resume()
+// контекст побывал в фоне или выпал из 'running': на iPhone такой может отвечать 'running' и молчать —
+// первым же жестом меняем на новый
+let audioStale = false;
 function newAudio() {
   try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch { actx = null; return; }
+  const ctx = actx; let ran = ctx.state === 'running'; // в жесте бывает 'running' сразу, без события
+  ctx.onstatechange = () => {
+    if (ctx.state === 'running') ran = true;
+    else if (ran && ctx === actx && ctx.state !== 'closed') audioStale = true;
+  };
   try { // компрессор: звуки громче (динамик телефона тихий), а наложенные не хрипят
     const comp = actx.createDynamicsCompressor();
     comp.threshold.value = -18; comp.knee.value = 12; comp.ratio.value = 6; comp.attack.value = 0.003; comp.release.value = 0.15;
@@ -112,27 +120,39 @@ function unlockHtmlAudio() {
   }
   if (htmlAudio.paused) { const p = htmlAudio.play(); if (p && p.catch) p.catch(() => {}); }
 }
-document.addEventListener('visibilitychange', () => { if (document.hidden && htmlAudio) htmlAudio.pause(); });
+let resumeTry = 0;
 function wakeAudio() {
   if (!actx || actx.state === 'running' || resumeBusy) return;
+  // прерванный iOS-контекст может не ответить на resume() вовсе — ждём не дольше секунды, иначе жесты больше не помогут
+  const n = ++resumeTry, done = () => { if (n === resumeTry) resumeBusy = false; };
   resumeBusy = true;
-  Promise.resolve(actx.resume()).catch(() => {}).finally(() => { resumeBusy = false; });
+  setTimeout(done, 1000);
+  try { Promise.resolve(actx.resume()).catch(() => {}).finally(done); } catch { done(); }
+}
+function replaceAudio() { // только из жеста: старый контекст закрыть (iOS держит их не больше ~4), сделать новый
+  const old = actx; actx = null;
+  if (old) {
+    try { if (old.close) Promise.resolve(old.close()).catch(() => {}); else old.suspend(); } catch { try { old.suspend(); } catch { /* */ } }
+  }
+  newAudio(); audioStuck = 0; audioStale = false; resumeTry++; resumeBusy = false;
 }
 function ensureAudio() { // только из жестов: pointerup / touchend / click / keydown
   unlockHtmlAudio();
-  if (!actx) { newAudio(); audioStuck = 0; }
+  if (!actx || (audioStale && !document.hidden)) replaceAudio(); // после фона или прерывания старому контексту не верим
   if (!actx || actx.state === 'running') { audioStuck = 0; return; }
   // iOS 17 иногда не будит прерванный контекст: resume() уже ответил, а жесты не помогают дольше 1,5 с — новый
   const now = performance.now();
   if (!audioStuck) audioStuck = now;
-  else if (!resumeBusy && now - audioStuck > 1500) {
-    Promise.resolve(actx.close()).catch(() => {});
-    newAudio(); audioStuck = 0;
-  }
+  else if (!resumeBusy && now - audioStuck > 1500) replaceAudio();
   wakeAudio();
 }
 ['pointerup', 'touchend', 'click', 'keydown'].forEach((ev) => window.addEventListener(ev, ensureAudio, { capture: true, passive: true }));
-document.addEventListener('visibilitychange', () => { if (!document.hidden) wakeAudio(); }); // после звонка iOS часто будит и без жеста
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) {
+    if (htmlAudio) htmlAudio.pause();
+    if (actx && IOS) audioStale = true; // iPhone после сворачивания или другого приложения бывает «running», но молчит
+  } else wakeAudio(); // до первого касания — хоть старым контекстом: после звонка iOS часто будит и без жеста
+});
 const soundOn = () => save.sound && save.vol > 0;
 const EAT_STEPS = [0, 2, 4, 7, 9, 12, 14, 16]; // полутоны от ре второй октавы
 // голос вида своей змейки: тот же лад, свой тембр (еда и щелчок молнии)
