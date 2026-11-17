@@ -2,7 +2,7 @@
 // No DOM and no network here — only the world, snakes, food, bots and collisions.
 
 // Protocol and file version: whenever any file in public/ changes, bump it both here and in sw.js (a test checks they match).
-export const VERSION = '49';
+export const VERSION = '50';
 export const TAU = Math.PI * 2;
 export const R = 7000;                  // arena radius (network coordinates are Int16 / 4, limit 8191)
 export const BASE_SPEED = 210;          // px/s at the first stage; each stage (molt) makes the snake faster, see speedOf
@@ -56,8 +56,10 @@ export const RANK_HOLD = 0.03;
 // The bot with the golden crown (the longest snake in the arena) is careful: its eyes, reactions, lapses and fights with
 // other bots move CAREFUL of the way from its level toward the hard level's best — so the crown lives longer and you can
 // crawl up to it. Speed, turning and its anger at players stay those of the level. Measured over 6 worlds × 5 min:
-// the crown holds ~40 s on easy and medium instead of ~15 s; at 1 it held for minutes, and the leader grew too long to catch
+// the crown holds about a minute on easy and medium instead of ~15 s; at 1 it held for minutes, and the leader grew too long to catch
 export const CAREFUL = 0.5;
+// a bot appearing mid-game is at most this share of the length of the shortest player wearing a crown (spawnCap)
+export const SPAWN_BELOW = 0.9;
 const mix = (a, b) => a + (b - a) * CAREFUL;
 export const carefulOf = (D) => {
   const H = DIFF.hard;
@@ -784,8 +786,26 @@ export class World {
     if (initial) return lo * Math.pow(hi / lo, Math.pow(Math.random(), 1.7));
     let giants = 0;
     for (const s of this.snakes) if (!s.human && s.alive && s.mass >= D.giantMin) giants++;
-    if (giants < D.giants && Math.random() < 0.5) return rand(D.giantMin, hi * 0.8);
-    return lo * Math.pow(hi / lo, Math.pow(Math.random(), 3));
+    const small = () => lo * Math.pow(hi / lo, Math.pow(Math.random(), 3));
+    const cap = this.spawnCap();
+    if (cap === Infinity) return giants < D.giants && Math.random() < 0.5 ? rand(D.giantMin, hi * 0.8) : small();
+    // a player wears a crown: no giants, the usual small ones, each no longer than the cap
+    if (cap <= lo) return lo;
+    for (let t = 0; t < 8; t++) { const m = small(); if (m <= cap) return m; }
+    return rand(lo, cap);
+  }
+  // how long a bot appearing mid-game may be: SPAWN_BELOW of the shortest player wearing a crown — a crown is lost only
+  // to a snake that grew in the game, not to one that just appeared. A crown is held with a gap (stickyRank), so a player
+  // counts as crowned while not clearly overtaken by the third. No crowned players — no limit
+  spawnCap() {
+    const t = [0, 0, 0]; // the three longest masses
+    for (const s of this.snakes) {
+      if (!s.alive || s.mass <= t[2]) continue;
+      if (s.mass > t[0]) { t[2] = t[1]; t[1] = t[0]; t[0] = s.mass; } else if (s.mass > t[1]) { t[2] = t[1]; t[1] = s.mass; } else t[2] = s.mass;
+    }
+    let cap = Infinity;
+    for (const s of this.snakes) if (s.human && s.alive && !overtakes({ mass: t[2] }, s)) cap = Math.min(cap, s.mass * SPAWN_BELOW);
+    return cap;
   }
   // a spot for a bot: the whole body inside the arena, far from players and not across another head.
   // None found — null (the bot spawns later); when the world is created we take the last attempt.

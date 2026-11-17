@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { World, Snake, safeCourse, rand, countOf, spacingOf, SNAKES_N, DIFF, R, GOLD, SKINS, PAL, STAGES, STAGE_R, MOLT_T, MOLT_WAIT, stageOf, growStage,
   speedOf, turnOf, remainsOf, radiusOf, boostCostOf, BASE_SPEED, BOOST_SPEED, MIN_BOOST_MASS, layBody, angDiff, keepMass, START_MASS,
-  FLY_N, FLY_MAX, FLY_BASE, flyRadius, flyEase, flyGain, SKIN_NEAR, skinDist, TYPES, SKINS_OF, stickyRank, RANK_HOLD, RANK_HOLD_MIN, carefulOf } from '../public/core.js';
+  FLY_N, FLY_MAX, FLY_BASE, flyRadius, flyEase, flyGain, SKIN_NEAR, skinDist, TYPES, SKINS_OF, stickyRank, RANK_HOLD, RANK_HOLD_MIN, carefulOf, SPAWN_BELOW } from '../public/core.js';
 
 // snake B lies across the path of snake A's head
 function crossing(teamA, teamB) {
@@ -641,4 +641,29 @@ test('the crown passes with the leaderboard\'s hold: a near tie keeps it, a clea
   assert.equal(w.crowned, a);
   b.mass = a.mass * (1 + RANK_HOLD) + RANK_HOLD_MIN + 5; w.step(1 / 40);
   assert.equal(w.crowned, b);
+});
+
+test('spawning: while a player wears a crown, no bot appears longer than them; without a crown giants appear as usual', () => {
+  const w = new World({ diff: 'hard' });
+  const me = w.addHuman({ name: 'P', skin: 0, inv: 99 });
+  const bots = w.snakes.filter((s) => !s.human).sort((a, b) => b.mass - a.mass);
+  me.mass = (bots[1].mass + bots[2].mass) / 2; // third place — the bronze crown
+  for (const b of bots.slice(0, 30)) b.alive = false; // room for newcomers, the arena loses its giants
+  bots[0].alive = bots[1].alive = true;
+  const cap = me.mass * SPAWN_BELOW;
+  for (let i = 0; i < 400; i++) {
+    const b = w.botMass(false);
+    assert.ok(b <= cap + 1e-9 && b >= DIFF.hard.mass[0], `${b} outside ${DIFF.hard.mass[0]}..${cap}`);
+  }
+  // shown with the bronze crown through the hold, though a hair shorter than the 4th — still protected
+  const third = w.snakes.filter((s) => s.alive && s !== me).sort((a, b) => b.mass - a.mass)[2];
+  me.mass = third.mass * 0.995;
+  for (let i = 0; i < 200; i++) assert.ok(w.botMass(false) <= me.mass * SPAWN_BELOW + 1e-9);
+  // a tiny crowned player in an almost empty arena: newcomers aren't smaller than the level's minimum
+  me.mass = 5;
+  for (let i = 0; i < 50; i++) assert.ok(w.botMass(false) >= DIFF.hard.mass[0]);
+  me.mass = 20; // no crown any more — big newcomers again
+  let big = 0;
+  for (let i = 0; i < 400; i++) if (w.botMass(false) >= DIFF.hard.giantMin) big++;
+  assert.ok(big > 50, `${big} giants of 400`);
 });
