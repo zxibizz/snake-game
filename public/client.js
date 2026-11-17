@@ -484,19 +484,19 @@ const CROWNS = [[GOLD_C, '#8a5a00', 1], ['#DCE3EC', '#5E6B7A', 0.9], ['#E0975A',
 // arena backdrop on every game start: the chosen one (save.bg, save.hue), or random — not the same kind, not a close hue as last time
 // (?bg=<kind> and ?hue=<degrees> pin them, for testing)
 const BG_Q = new URLSearchParams(location.search), BG_FORCED = BACKDROPS.includes(BG_Q.get('bg')) ? BG_Q.get('bg') : null;
-const HUE_FORCED = BG_Q.has('hue') && Math.abs(BG_Q.get('hue')) <= 180 ? +BG_Q.get('hue') : null;
+const HUE_Q = (BG_Q.get('hue') || '').trim(), HUE_FORCED = HUE_Q && Math.abs(HUE_Q) <= 180 ? +HUE_Q : null;
 let backdrop = null;
-function pickBackdrop(seed = Math.floor(Math.random() * 1e9)) {
-  const prev = backdrop;
-  let kind = BG_FORCED || save.bg, hue = HUE_FORCED ?? save.hue;
+// same — a hue change in the picker: the shown kind and patches stay, only the colors turn
+function pickBackdrop(same = false) {
+  const prev = backdrop, seed = same && prev ? prev.seed : Math.floor(Math.random() * 1e9), rndHue = (HUE_FORCED ?? save.hue) === 'random';
+  let kind = same && prev ? prev.kind : BG_FORCED || save.bg, hue = HUE_FORCED ?? save.hue;
   if (kind === 'random') { const pool = BACKDROPS.filter((k) => !prev || k !== prev.kind); kind = pool[Math.floor(Math.random() * pool.length)]; }
-  if (hue === 'random') {
+  if (rndHue) {
     const was = prev && prev.kind === kind && prev.rndHue ? prev.hue : null;
     do hue = Math.round((Math.random() * 2 - 1) * HUE_SPREAD); while (was != null && Math.abs(hue - was) < HUE_SPREAD / 3);
   }
   backdrop = makeBackdrop(ctx, kind, seed, R, hue);
-  backdrop.seed = seed;
-  backdrop.rndHue = (HUE_FORCED ?? save.hue) === 'random';
+  Object.assign(backdrop, { seed, rndHue });
   return backdrop;
 }
 // sprites: snake beads, head, glowing food — one per palette color
@@ -1757,14 +1757,16 @@ function backdropDialog() {
     rng.value = backdrop.hue; rng.classList.toggle('off', save.hue === 'random');
     drawBgPreview(cv);
   };
-  // reseed=false keeps the patches in place while the hue moves; a new kind or "random" — a new roll
-  const apply = (reseed) => { persist(); pickBackdrop(reseed ? undefined : backdrop.seed); show(); };
-  body.querySelectorAll('[data-bg]').forEach((b) => b.addEventListener('click', () => { save.bg = b.dataset.bg; apply(true); }));
-  $('bgHueRnd').addEventListener('click', () => { save.hue = 'random'; apply(true); });
+  // a new kind or "random" — a new roll; the slider keeps the shown kind and patches in place
+  const apply = (same) => { pickBackdrop(same); show(); };
+  body.querySelectorAll('[data-bg]').forEach((b) => b.addEventListener('click', () => { save.bg = b.dataset.bg; persist(); apply(false); }));
+  $('bgHueRnd').addEventListener('click', () => { save.hue = 'random'; persist(); apply(false); });
   rng.addEventListener('input', () => {
     save.hue = Number(rng.value);
-    if (!queued) { queued = true; requestAnimationFrame(() => { queued = false; apply(false); }); } // rebuilding costs a few ms — once a frame
+    // rebuilding the backdrop takes a while — at most once a frame, and not after the dialog has been replaced
+    if (!queued) { queued = true; requestAnimationFrame(() => { queued = false; if (rng.isConnected) apply(true); }); }
   });
+  rng.addEventListener('change', persist);
   if (!backdrop) pickBackdrop();
   show();
 }

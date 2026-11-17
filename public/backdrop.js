@@ -64,12 +64,12 @@ function macro(R, rnd, base, n, r0, r1, cols, a) {
   return c;
 }
 
-const stars = (rnd, n, glow, halo, dot) => (g, t) => {
+const stars = (rnd, n, glow, halo, dot, core) => (g, t) => {
   for (let i = 0; i < n; i++) {
     const x = rnd() * t, y = rnd() * t;
     if (glow) {
       const r = 0.8 + rnd() * 1.2;
-      wrapped(t, x, y, r * 4, (X, Y) => { blob(g, X, Y, r * 4, halo, 0.25); g.fillStyle = 'rgba(235,240,255,0.8)'; g.beginPath(); g.arc(X, Y, r * 0.7, 0, TAU); g.fill(); });
+      wrapped(t, x, y, r * 4, (X, Y) => { blob(g, X, Y, r * 4, halo, 0.25); g.fillStyle = rgba(core, 0.8); g.beginPath(); g.arc(X, Y, r * 0.7, 0, TAU); g.fill(); });
     } else {
       const r = rnd() < 0.9 ? 0.6 + rnd() * 0.6 : 1.4, a = 0.25 + rnd() * 0.45;
       wrapped(t, x, y, r, (X, Y) => { g.fillStyle = rgba(dot, a); g.beginPath(); g.arc(X, Y, r, 0, TAU); g.fill(); });
@@ -137,8 +137,8 @@ export function makeBackdrop(ctx, kind, seed, R, hue = 0) {
     }, 2, T('#141A17'));
   } else if (kind === 'space') {
     b.macro = macro(R, rnd, T('#0C1020'), 260, 350, 1100, TS(['#2A2160', '#173A5C', '#3A1E4E']), 0.55);
-    b.detail = tile(ctx, 863, 863, stars(rnd, 240, false, T('#9FB4FF'), T('#DCE4FF')));
-    b.far = tile(ctx, 607, 607, stars(rnd, 60, true, T('#9FB4FF'), T('#DCE4FF'))); // distant stars move slower than the field and twinkle
+    b.detail = tile(ctx, 863, 863, stars(rnd, 240, false, T('#9FB4FF'), T('#DCE4FF'), T('#EBF0FF')));
+    b.far = tile(ctx, 607, 607, stars(rnd, 60, true, T('#9FB4FF'), T('#DCE4FF'), T('#EBF0FF'))); // distant stars move slower than the field and twinkle
   } else if (kind === 'sea') {
     b.macro = macro(R, rnd, T('#0C1E24'), 480, 200, 600, TS(['#123038', '#08161A', '#0F2A31']), 0.8);
     b.detail = tile(ctx, 613, 613, pebbles(rnd, 34, T('#2A4A50'), 0.55, 5));
