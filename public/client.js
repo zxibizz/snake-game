@@ -723,8 +723,9 @@ const BEADS = {
   },
 };
 // Stages (molts): 1st — a simple flat bead, 2nd — the type's bead with volume, 3rd — with the type's pattern (BEADS),
-// then an outfit on top (dressBead): 4th — a light trim and a droplet glint, 5th — spikes along the spine as well,
-// 6th — golden trim and spikes. When drawing, the 5th stage also gets shimmer along the body, the 6th — a glow and sparks from the tail.
+// then an outfit on top (dressBead): from the 4th — a light trim and a droplet glint, the 6th — a golden trim. When drawing,
+// the 5th stage also gets shimmer along the body, the 6th — a glow and sparks from the tail. There are no spikes along the spine
+// since 0.30.1 (the owner: the triangles at the back looked so-so) — the skin's own pictures (MOTIFS) grow instead.
 function plainBead(g, t, R, col) {
   if (t === 'robot') {
     const h = R * 0.88;
@@ -746,10 +747,6 @@ function dressBead(g, R, col, st) {
   g.lineWidth = R * (gold ? 0.14 : 0.1); g.lineCap = 'round'; g.strokeStyle = edge; g.stroke();
   circ(g, -R * 0.28, -R * 0.42, R * 0.13, 'rgba(255,255,255,0.65)');
   g.restore();
-  if (st < 4) return;
-  const sc = gold ? GOLD_C : shade(col, 0.75);
-  g.beginPath(); g.moveTo(-R * 0.5, -R * 0.3); g.lineTo(-R * 0.98, 0); g.lineTo(-R * 0.5, R * 0.3); g.closePath();
-  g.fillStyle = sc; g.fill(); g.lineWidth = R * 0.06; g.lineJoin = 'round'; g.strokeStyle = shade(gold ? GOLD_C : col, -0.55); g.stroke();
 }
 const VARIANTS = { dots: 2, robot: 2 };
 const skinOf = (skin) => SKINS[skin] || SKINS[0];
