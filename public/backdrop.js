@@ -6,8 +6,9 @@
 //   2) small details (stars, pebbles, ripples) are tiles, each layer a different (coprime) size,
 //      so the combined pattern repeats very rarely; the tiles are transparent and lie on top of the patches.
 // Tiles are drawn with overlap across the edge (wrapped), so there is no seam where they meet.
-// Nothing in a backdrop may look like food (a small round glowing dot): no bright round specks, no halos. Stars are faint dust
-// and four-ray sparkles, stones are darker than the ground, plants are strokes, lights are much larger than any crumb.
+// Nothing in a backdrop may look like food (a small round glowing dot): no bright round specks, no halos: stones are darker
+// than the ground, plants are strokes, lights are much larger than any crumb. The one exception is space — its stars stay
+// as they were (the owner's choice: they are tiny and don't get mixed up with food); don't make them larger or brighter.
 // Depth: every backdrop is three layers that move against each other as the camera travels (parallax) —
 // the deep ones lag behind the arena, the one above it (wind over the sand) runs ahead.
 
@@ -70,20 +71,16 @@ function macro(R, rnd, base, n, r0, r1, cols, a) {
   return c;
 }
 
-// stars: faint dust (too dim and small for a crumb) and four-ray sparkles of length r0…r1 — never a round glowing dot
-const stars = (rnd, n, dust, r0, r1, col) => (g, t) => {
+// stars as they were before the "no food lookalikes" rule: the owner's choice — they are too small to pass for a crumb
+const stars = (rnd, n, glow, halo, dot, core) => (g, t) => {
   for (let i = 0; i < n; i++) {
     const x = rnd() * t, y = rnd() * t;
-    if (rnd() < dust) {
-      const r = 0.5 + rnd() * 0.3, a = 0.14 + rnd() * 0.2;
-      wrapped(t, x, y, r, (X, Y) => { g.fillStyle = rgba(col, a); g.beginPath(); g.arc(X, Y, r, 0, TAU); g.fill(); });
+    if (glow) {
+      const r = 0.8 + rnd() * 1.2;
+      wrapped(t, x, y, r * 4, (X, Y) => { blob(g, X, Y, r * 4, halo, 0.25); g.fillStyle = rgba(core, 0.8); g.beginPath(); g.arc(X, Y, r * 0.7, 0, TAU); g.fill(); });
     } else {
-      const r = r0 + rnd() * rnd() * (r1 - r0), w = 0.5 + r * 0.07, a = 0.4 + rnd() * 0.45;
-      wrapped(t, x, y, r, (X, Y) => {
-        g.fillStyle = rgba(col, a); g.beginPath();
-        g.moveTo(X - r, Y); g.lineTo(X - w, Y - w); g.lineTo(X, Y - r); g.lineTo(X + w, Y - w);
-        g.lineTo(X + r, Y); g.lineTo(X + w, Y + w); g.lineTo(X, Y + r); g.lineTo(X - w, Y + w); g.closePath(); g.fill();
-      });
+      const r = rnd() < 0.9 ? 0.6 + rnd() * 0.6 : 1.4, a = 0.25 + rnd() * 0.45;
+      wrapped(t, x, y, r, (X, Y) => { g.fillStyle = rgba(dot, a); g.beginPath(); g.arc(X, Y, r, 0, TAU); g.fill(); });
     }
   }
 };
@@ -218,8 +215,8 @@ export function makeBackdrop(ctx, kind, seed, R, hue = 0) {
   } else if (kind === 'space') {
     layers = [
       img(0, T('#0C1020'), 260, 350, 1100, TS(['#2A2160', '#173A5C', '#3A1E4E']), 0.55),
-      pat(0, tile(ctx, 863, 863, stars(rnd, 260, 0.72, 2.5, 6, T('#DCE4FF')))),
-      pat(0.5, tile(ctx, 607, 607, stars(rnd, 46, 0, 5, 11, T('#C4D2FF'))), { tw: true }), // distant stars
+      pat(0, tile(ctx, 863, 863, stars(rnd, 240, false, T('#9FB4FF'), T('#DCE4FF'), T('#EBF0FF')))),
+      pat(0.5, tile(ctx, 607, 607, stars(rnd, 60, true, T('#9FB4FF'), T('#DCE4FF'), T('#EBF0FF'))), { tw: true }), // distant stars move slower than the field and twinkle
     ];
   } else if (kind === 'sea') { // the deep floor, a shelf of dark stones and seaweed above it, glints drifting over the arena
     layers = [
