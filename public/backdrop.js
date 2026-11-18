@@ -6,6 +6,8 @@
 //   2) small details (stars, pebbles, ripples) are tiles, each layer a different (coprime) size,
 //      so the combined pattern repeats very rarely; the tiles are transparent and lie on top of the patches.
 // Tiles are drawn with overlap across the edge (wrapped), so there is no seam where they meet.
+// Depth: every backdrop is three layers that move against each other as the camera travels (parallax) —
+// the deep ones lag behind the arena, the one above it (wind over the sand) runs ahead.
 
 export const BACKDROPS = ['space', 'grid', 'hex', 'sea', 'sand', 'dots']; // the first is the default
 // a random hue strays this far from the backdrop's own colors, degrees either way: slightly different, still the same backdrop
@@ -29,16 +31,18 @@ function tint(hex, dh) {
   return '#' + [R, G, B].map((v) => Math.round(Math.min(1, Math.max(0, v + m)) * 255).toString(16).padStart(2, '0')).join('');
 }
 function canvas(w, h) { const c = document.createElement('canvas'); c.width = Math.round(w); c.height = Math.round(h); return c; }
-// a t×t (or w×h) tile in world pixels, s — sharpness (2 dots per world pixel)
+// a t×t (or w×h) tile in world pixels, s — sharpness (2 dots per world pixel); rot — the tiling is turned by so many degrees:
+// copies of a noticeable thing (a coral, a bush) then don't line up with the screen's edges and the repeat is hard to spot
 // without setTransform on the pattern (old Safari) the tile would come out twice as large — then draw one to one
 const SHARP = typeof CanvasPattern !== 'undefined' && !!CanvasPattern.prototype.setTransform && typeof DOMMatrix === 'function' ? 2 : 1;
-function tile(ctx, w, h, paint, s = SHARP, base = '') {
+const SOFT = SHARP > 1 ? 1.5 : 1; // for large tiles: a little less sharp, much less memory
+function tile(ctx, w, h, paint, s = SHARP, base = '', rot = 0) {
   const c = canvas(w * s, h * s), g = c.getContext('2d');
   g.scale(c.width / w, c.height / h); // the canvas is rounded to whole dots — the scale is exact, otherwise the honeycomb tears at the seam
   if (base) { g.fillStyle = base; g.fillRect(0, 0, w, h); } // an opaque tile is the ground itself
   paint(g, w, h);
   const p = ctx.createPattern(c, 'repeat');
-  if (SHARP > 1) p.setTransform(new DOMMatrix().scale(w / c.width, h / c.height));
+  if (SHARP > 1) p.setTransform(new DOMMatrix().rotate(rot).scale(w / c.width, h / c.height));
   return p;
 }
 // draw a shape in the tile plus its copies across the edge — the seam stays invisible
@@ -114,68 +118,154 @@ const ripples = (rnd, col) => (g, w) => {
     }
   }
 };
+// wind over the sand: soft shadows and pale streaks of dust, all stretched along the wind
+const wind = (rnd, n, dark, pale) => (g, t) => {
+  for (let i = 0; i < n; i++) {
+    const x = rnd() * t, y = rnd() * t, r = 90 + rnd() * 130, col = i % 3 ? dark : pale, a = i % 3 ? 0.26 : 0.1;
+    wrapped(t, x, y, r * 2.2, (X, Y) => { g.save(); g.translate(X, Y); g.rotate(0.35); g.scale(2.2, 0.8); blob(g, 0, 0, r, col, a); g.restore(); });
+  }
+};
+// honeycomb with a vertex up, side a; the tile is nx × 2ny cells, the seam lines up; lit — how many cells glow, in colors cols
+function hexTile(ctx, a, col, lw, nx = 1, ny = 1, rnd = null, lit = 0, cols = []) {
+  const cw = Math.sqrt(3) * a, w = cw * nx, h = 3 * a * ny;
+  const path = (g, cx, cy, r) => {
+    g.beginPath();
+    for (let k = 0; k < 6; k++) { const an = Math.PI / 6 + k * Math.PI / 3; g.lineTo(cx + Math.cos(an) * r, cy + Math.sin(an) * r); }
+    g.closePath();
+  };
+  const at = (i, j) => [(i + (j & 1) / 2) * cw, j * 1.5 * a];
+  return tile(ctx, w, h, (g) => {
+    for (let n = 0; n < lit; n++) {
+      const [cx, cy] = at(Math.floor(rnd() * nx), Math.floor(rnd() * 2 * ny)), c = cols[n % cols.length], al = 0.1 + rnd() * 0.12;
+      for (const dx of [-w, 0, w]) for (const dy of [-h, 0, h]) { path(g, cx + dx, cy + dy, a - lw); g.fillStyle = rgba(c, al); g.fill(); }
+    }
+    g.strokeStyle = col; g.lineWidth = lw;
+    for (let j = -1; j <= 2 * ny; j++) for (let i = -1; i <= nx; i++) { const [cx, cy] = at(i, j); path(g, cx, cy, a); g.stroke(); }
+  }, 2);
+}
+// square grid, cell c, the tile is n × n cells; node — a glowing dot on every crossing; lit — how many cells glow, in colors cols
+function gridTile(ctx, c, col, lw, n = 1, node = '', rnd = null, lit = 0, cols = []) {
+  const t = c * n;
+  return tile(ctx, t, t, (g) => {
+    for (let i = 0; i < lit; i++) {
+      g.fillStyle = rgba(cols[i % cols.length], 0.08 + rnd() * 0.1);
+      g.fillRect(Math.floor(rnd() * n) * c + lw, Math.floor(rnd() * n) * c + lw, c - lw, c - lw);
+    }
+    g.fillStyle = col;
+    for (let i = 0; i < n; i++) { g.fillRect(0, i * c, t, lw); g.fillRect(i * c, 0, lw, t); }
+    if (node) for (let i = 0; i <= n; i++) for (let j = 0; j <= n; j++) {
+      const x = i * c + lw / 2, y = j * c + lw / 2;
+      blob(g, x, y, 9, node, 0.3); g.fillStyle = rgba(node, 0.75); g.beginPath(); g.arc(x, y, 1.9, 0, TAU); g.fill();
+    }
+  }, 2);
+}
+const dotTile = (ctx, t, col, r) => tile(ctx, t, t, (g) => { g.fillStyle = col; g.beginPath(); g.arc(t / 2, t / 2, r, 0, TAU); g.fill(); });
+// out-of-focus lights: soft discs with a brighter rim
+const bokeh = (rnd, n, cols) => (g, t) => {
+  for (let i = 0; i < n; i++) {
+    const x = rnd() * t, y = rnd() * t, r = 14 + rnd() * rnd() * 34, c = cols[i % cols.length], a = 0.07 + rnd() * 0.1;
+    wrapped(t, x, y, r + 2, (X, Y) => {
+      g.beginPath(); g.arc(X, Y, r, 0, TAU); g.fillStyle = rgba(c, a); g.fill();
+      g.strokeStyle = rgba(c, a * 1.3); g.lineWidth = 1.2; g.stroke();
+    });
+  }
+};
+// air bubbles: a thin ring with a glint
+const bubbles = (rnd, n, col) => (g, t) => {
+  for (let i = 0; i < n; i++) {
+    const x = rnd() * t, y = rnd() * t, r = 2 + rnd() * rnd() * 9, a = 0.22 + rnd() * 0.2;
+    wrapped(t, x, y, r + 2, (X, Y) => {
+      g.beginPath(); g.arc(X, Y, r, 0, TAU); g.fillStyle = rgba(col, a * 0.18); g.fill(); g.strokeStyle = rgba(col, a); g.lineWidth = 1; g.stroke();
+      g.beginPath(); g.arc(X - r * 0.35, Y - r * 0.35, r * 0.22, 0, TAU); g.fillStyle = rgba(col, a * 1.6); g.fill();
+    });
+  }
+};
+// little bushes: a handful of round blobs around a point (corals on the sea floor, dry grass on the sand)
+const tufts = (rnd, n, cols, a) => (g, t) => {
+  for (let i = 0; i < n; i++) {
+    const x = rnd() * t, y = rnd() * t, c = cols[i % cols.length], m = 5 + Math.floor(rnd() * 5), bl = [];
+    for (let k = 0; k < m; k++) { const an = rnd() * TAU, d = rnd() * 13; bl.push([Math.cos(an) * d, Math.sin(an) * d, 3 + rnd() * 5]); }
+    wrapped(t, x, y, 24, (X, Y) => { g.fillStyle = rgba(c, a); for (const [dx, dy, r] of bl) { g.beginPath(); g.arc(X + dx, Y + dy, r, 0, TAU); g.fill(); } });
+  }
+};
 const both = (...fs) => (g, t) => { for (const f of fs) f(g, t); };
 
 // kind — one of BACKDROPS; seed — different patches every game; R — arena radius; hue — turn of all colors, degrees
-// Passes over the screen per frame: ground (patches or an opaque tile) + one detail tile + a moving layer
-// (distant stars, glints) — no more than three.
+// A backdrop is a list of layers, drawn bottom to top; the first one is opaque (the ground). No more than three: each is a pass
+// over the whole screen every frame. A layer: img (patch canvas over the arena) or p (tile pattern);
+//   k — depth: the share of the camera's movement the layer follows. 0 lies on the arena, 0.5 is far below it
+//       (moves half as fast on screen), below zero is above the arena (moves faster);
+//   vx, vy, t — drift in world px per second, t is the tile size (a shift by a whole tile is invisible; such a tile is not turned);
+//   tw — the layer twinkles.
 export function makeBackdrop(ctx, kind, seed, R, hue = 0) {
   const rnd = rand(Math.imul(seed | 0, 0x9E3779B1) ^ 0x5BD1E995);
   const T = (hex) => tint(hex, hue), TS = (cols) => cols.map(T);
-  const b = { kind, hue, ground: null, macro: null, detail: null, far: null, caustic: null };
-  if (kind === 'grid') {
-    b.ground = tile(ctx, 80, 80, (g, t) => { g.fillStyle = T('#202620'); g.fillRect(0, 0, t, 1.5); g.fillRect(0, 0, 1.5, t); }, 2, T('#161A16'));
-  } else if (kind === 'hex') {
-    const a = 40, w = Math.sqrt(3) * a, h = 3 * a; // honeycomb with a vertex up: the tile is two rows, the seam lines up
-    b.ground = tile(ctx, w, h, (g) => {
-      g.strokeStyle = T('#222C25'); g.lineWidth = 1.6;
-      for (const [cx, cy] of [[0, 0], [w, 0], [w / 2, 1.5 * a], [0, 3 * a], [w, 3 * a], [-w / 2, 1.5 * a], [1.5 * w, 1.5 * a]]) {
-        g.beginPath();
-        for (let k = 0; k < 6; k++) { const an = Math.PI / 6 + k * Math.PI / 3; g.lineTo(cx + Math.cos(an) * a, cy + Math.sin(an) * a); }
-        g.closePath(); g.stroke();
-      }
-    }, 2, T('#141A17'));
+  const img = (k, ...a) => ({ img: macro(R, rnd, ...a), k }), pat = (k, p, more) => ({ p, k, ...more });
+  let layers;
+  if (kind === 'grid') { // glowing patches far below, a wide lattice with lit cells, the arena's own lattice with lights on the crossings
+    layers = [
+      img(0.6, T('#0A100F'), 200, 450, 1200, TS(['#0F5A46', '#12466E', '#4A5A14', '#4A1E66']), 0.55),
+      pat(0.3, gridTile(ctx, 136, T('#1F3A36'), 3, 6, '', rnd, 5, TS(['#3CE0A8', '#46B4FF', '#D8E64A']))),
+      pat(0, gridTile(ctx, 80, T('#31504A'), 1.5, 1, T('#7CF0C8'))),
+    ];
+  } else if (kind === 'hex') { // a hive: honey glow below, a comb of large cells with some filled, the arena's own comb
+    layers = [
+      img(0.6, T('#120E08'), 200, 450, 1200, TS(['#6E4A0C', '#5A2A0E', '#4A5212', '#6E3A1A']), 0.55),
+      pat(0.3, hexTile(ctx, 66, T('#3A2C14'), 3, 5, 3, rnd, 5, TS(['#FFC23C', '#FF8A3C', '#FFE07A']))),
+      pat(0, hexTile(ctx, 40, T('#5A4620'), 1.6)),
+    ];
   } else if (kind === 'space') {
-    b.macro = macro(R, rnd, T('#0C1020'), 260, 350, 1100, TS(['#2A2160', '#173A5C', '#3A1E4E']), 0.55);
-    b.detail = tile(ctx, 863, 863, stars(rnd, 240, false, T('#9FB4FF'), T('#DCE4FF'), T('#EBF0FF')));
-    b.far = tile(ctx, 607, 607, stars(rnd, 60, true, T('#9FB4FF'), T('#DCE4FF'), T('#EBF0FF'))); // distant stars move slower than the field and twinkle
-  } else if (kind === 'sea') {
-    b.macro = macro(R, rnd, T('#0C1E24'), 480, 200, 600, TS(['#123038', '#08161A', '#0F2A31']), 0.8);
-    b.detail = tile(ctx, 613, 613, pebbles(rnd, 34, T('#2A4A50'), 0.55, 5));
-    b.caustic = { p: tile(ctx, 457, 457, caustics(rnd, 16, T('#8CDCE6'), T('#AAEBF0'))), t: 457 };
-  } else if (kind === 'sand') {
-    b.macro = macro(R, rnd, T('#211B14'), 480, 220, 620, TS(['#2B241A', '#18130E', '#262016']), 0.8);
-    b.detail = tile(ctx, RIPPLE * 25, RIPPLE * 25, both(ripples(rnd, T('#463A2A')), pebbles(rnd, 30, T('#4A3E2C'), 0.7, 4)));
-  } else { // dots
-    b.macro = macro(R, rnd, T('#15181C'), 60, 1300, 2400, TS(['#3B4A7A', '#5A3B6E', '#2E5A55', '#6E4A2E', '#2E4A6E']), 0.5);
-    b.detail = tile(ctx, 60, 60, (g, t) => { g.fillStyle = T('#272D34'); g.beginPath(); g.arc(t / 2, t / 2, 2.2, 0, TAU); g.fill(); });
+    layers = [
+      img(0, T('#0C1020'), 260, 350, 1100, TS(['#2A2160', '#173A5C', '#3A1E4E']), 0.55),
+      pat(0, tile(ctx, 863, 863, stars(rnd, 240, false, T('#9FB4FF'), T('#DCE4FF'), T('#EBF0FF')))),
+      pat(0.5, tile(ctx, 607, 607, stars(rnd, 60, true, T('#9FB4FF'), T('#DCE4FF'), T('#EBF0FF'))), { tw: true }), // distant stars
+    ];
+  } else if (kind === 'sea') { // the deep floor, a shelf of stones and corals above it, glints and bubbles drifting over the arena
+    layers = [
+      img(0.55, T('#06181E'), 300, 220, 650, TS(['#0E5560', '#04101A', '#124A6E', '#0C4A42']), 0.85),
+      pat(0.28, tile(ctx, 911, 911, both(pebbles(rnd, 48, T('#1C4048'), 0.6, 10), pebbles(rnd, 56, T('#3A666C'), 0.65, 4),
+        tufts(rnd, 13, TS(['#8A4A5E', '#8A6240', '#6E4E8A', '#3A7A68']), 0.42)), SOFT, '', 27)),
+      pat(0, tile(ctx, 457, 457, both(caustics(rnd, 16, T('#8CDCE6'), T('#AAEBF0')), bubbles(rnd, 26, T('#D2F6FA')))), { vx: 16, vy: -22, t: 457 }),
+    ];
+  } else if (kind === 'sand') { // dunes and ripples lie on the arena, the wind carries shadows and dust above it
+    const wt = 947;
+    layers = [
+      img(0, T('#2A2014'), 480, 220, 620, TS(['#4A3820', '#17110A', '#3E2E18', '#5A4426']), 0.85),
+      pat(0, tile(ctx, RIPPLE * 35, RIPPLE * 35, both(ripples(rnd, T('#6A5636')), pebbles(rnd, 58, T('#7A6644'), 0.7, 4),
+        tufts(rnd, 11, TS(['#6A7438', '#806436', '#566A40']), 0.5)), SOFT, '', 23)),
+      pat(-0.35, tile(ctx, wt, wt, wind(rnd, 18, T('#0E0A06'), T('#E6CC9A')), SHARP > 1 ? 0.5 : 1), { vx: 34, vy: 12, t: wt }),
+    ];
+  } else { // dots: colored patches far below, out-of-focus lights between, the arena's own dots
+    const cols = TS(['#6E8CFF', '#D07AFF', '#5CE0C8', '#FFB05C', '#5CB4FF', '#FF7AA0']);
+    layers = [
+      img(0.6, T('#12141A'), 70, 1100, 2200, TS(['#3B4A8A', '#6A3B80', '#2E6A62', '#80522E', '#2E528A']), 0.55),
+      pat(0.3, tile(ctx, 733, 733, bokeh(rnd, 26, cols), SHARP, '', 31)),
+      pat(0, dotTile(ctx, 60, T('#3A434E'), 2.4)),
+    ];
   }
-  return b;
+  return { kind, hue, layers };
 }
 
 // draws the arena backdrop; the ctx matrix is already the camera's (world), cam — center, z — zoom, W/H — screen in CSS pixels
 export function drawBackdrop(ctx, b, R, cam, z, W, H, time) {
-  const hw = W / 2 / z + 40, hh = H / 2 / z + 40, x0 = cam.x - hw, y0 = cam.y - hh, w = hw * 2, h = hh * 2;
+  const hw = W / 2 / z + 40, hh = H / 2 / z + 40, w = hw * 2, h = hh * 2;
   ctx.save();
   // clip to the arena circle only when the edge is in view (usually the whole screen is inside — clipping would waste time)
   if (Math.hypot(cam.x, cam.y) + Math.hypot(hw, hh) > R) { ctx.beginPath(); ctx.arc(0, 0, R, 0, TAU); ctx.clip(); }
-  if (b.macro) { // take only the visible part of the patch canvas
-    const k = MACRO / (2 * R), sx = Math.max(0, Math.floor((x0 + R) * k)), sy = Math.max(0, Math.floor((y0 + R) * k));
-    const ex = Math.min(MACRO, Math.ceil((x0 + w + R) * k)), ey = Math.min(MACRO, Math.ceil((y0 + h + R) * k));
-    if (ex > sx && ey > sy) ctx.drawImage(b.macro, sx, sy, ex - sx, ey - sy, sx / k - R, sy / k - R, (ex - sx) / k, (ey - sy) / k);
-  }
-  else { ctx.fillStyle = b.ground; ctx.fillRect(x0, y0, w, h); }
-  if (b.detail) { ctx.fillStyle = b.detail; ctx.fillRect(x0, y0, w, h); }
-  if (b.far) { // parallax: the layer is shifted by half the camera's movement
-    const k = 0.5;
-    ctx.translate(cam.x * k, cam.y * k);
-    ctx.globalAlpha = 0.75 + 0.25 * Math.sin(time * 1.3);
-    ctx.fillStyle = b.far; ctx.fillRect(cam.x * (1 - k) - hw, cam.y * (1 - k) - hh, w, h);
-  }
-  if (b.caustic) { // glints drift along the floor; a shift by a whole tile is invisible
-    const { p, t } = b.caustic, dx = (time * 16) % t, dy = (time * 10) % t;
-    ctx.translate(dx, dy);
-    ctx.fillStyle = p; ctx.fillRect(x0 - dx, y0 - dy, w, h);
+  for (const L of b.layers) {
+    // the layer's own origin in the world, and the screen's corner in the layer
+    const ox = cam.x * L.k + (L.vx ? (time * L.vx) % L.t : 0), oy = cam.y * L.k + (L.vy ? (time * L.vy) % L.t : 0);
+    const x0 = cam.x - hw - ox, y0 = cam.y - hh - oy;
+    ctx.globalAlpha = L.tw ? 0.75 + 0.25 * Math.sin(time * 1.3) : 1;
+    if (L.img) { // take only the visible part of the patch canvas
+      const k = MACRO / (2 * R), sx = Math.max(0, Math.floor((x0 + R) * k)), sy = Math.max(0, Math.floor((y0 + R) * k));
+      const ex = Math.min(MACRO, Math.ceil((x0 + w + R) * k)), ey = Math.min(MACRO, Math.ceil((y0 + h + R) * k));
+      if (ex > sx && ey > sy) ctx.drawImage(L.img, sx, sy, ex - sx, ey - sy, sx / k - R + ox, sy / k - R + oy, (ex - sx) / k, (ey - sy) / k);
+    } else {
+      ctx.translate(ox, oy);
+      ctx.fillStyle = L.p; ctx.fillRect(x0, y0, w, h);
+      ctx.translate(-ox, -oy);
+    }
   }
   ctx.restore();
 }

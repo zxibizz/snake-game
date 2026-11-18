@@ -2,7 +2,7 @@
 // No DOM and no network here — only the world, snakes, food, bots and collisions.
 
 // Protocol and file version: whenever any file in public/ changes, bump it both here and in sw.js (a test checks they match).
-export const VERSION = '59';
+export const VERSION = '60';
 export const TAU = Math.PI * 2;
 export const R = 7000;                  // arena radius (network coordinates are Int16 / 4, limit 8191)
 export const BASE_SPEED = 210;          // px/s at the first stage; each stage (molt) makes the snake faster, see speedOf
