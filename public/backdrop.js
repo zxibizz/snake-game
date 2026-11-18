@@ -6,6 +6,8 @@
 //   2) small details (stars, pebbles, ripples) are tiles, each layer a different (coprime) size,
 //      so the combined pattern repeats very rarely; the tiles are transparent and lie on top of the patches.
 // Tiles are drawn with overlap across the edge (wrapped), so there is no seam where they meet.
+// Nothing in a backdrop may look like food (a small round glowing dot): no bright round specks, no halos. Stars are faint dust
+// and four-ray sparkles, stones are darker than the ground, plants are strokes, lights are much larger than any crumb.
 // Depth: every backdrop is three layers that move against each other as the camera travels (parallax) —
 // the deep ones lag behind the arena, the one above it (wind over the sand) runs ahead.
 
@@ -68,15 +70,20 @@ function macro(R, rnd, base, n, r0, r1, cols, a) {
   return c;
 }
 
-const stars = (rnd, n, glow, halo, dot, core) => (g, t) => {
+// stars: faint dust (too dim and small for a crumb) and four-ray sparkles of length r0…r1 — never a round glowing dot
+const stars = (rnd, n, dust, r0, r1, col) => (g, t) => {
   for (let i = 0; i < n; i++) {
     const x = rnd() * t, y = rnd() * t;
-    if (glow) {
-      const r = 0.8 + rnd() * 1.2;
-      wrapped(t, x, y, r * 4, (X, Y) => { blob(g, X, Y, r * 4, halo, 0.25); g.fillStyle = rgba(core, 0.8); g.beginPath(); g.arc(X, Y, r * 0.7, 0, TAU); g.fill(); });
+    if (rnd() < dust) {
+      const r = 0.5 + rnd() * 0.3, a = 0.14 + rnd() * 0.2;
+      wrapped(t, x, y, r, (X, Y) => { g.fillStyle = rgba(col, a); g.beginPath(); g.arc(X, Y, r, 0, TAU); g.fill(); });
     } else {
-      const r = rnd() < 0.9 ? 0.6 + rnd() * 0.6 : 1.4, a = 0.25 + rnd() * 0.45;
-      wrapped(t, x, y, r, (X, Y) => { g.fillStyle = rgba(dot, a); g.beginPath(); g.arc(X, Y, r, 0, TAU); g.fill(); });
+      const r = r0 + rnd() * rnd() * (r1 - r0), w = 0.5 + r * 0.07, a = 0.4 + rnd() * 0.45;
+      wrapped(t, x, y, r, (X, Y) => {
+        g.fillStyle = rgba(col, a); g.beginPath();
+        g.moveTo(X - r, Y); g.lineTo(X - w, Y - w); g.lineTo(X, Y - r); g.lineTo(X + w, Y - w);
+        g.lineTo(X + r, Y); g.lineTo(X + w, Y + w); g.lineTo(X, Y + r); g.lineTo(X - w, Y + w); g.closePath(); g.fill();
+      });
     }
   }
 };
@@ -143,8 +150,8 @@ function hexTile(ctx, a, col, lw, nx = 1, ny = 1, rnd = null, lit = 0, cols = []
     for (let j = -1; j <= 2 * ny; j++) for (let i = -1; i <= nx; i++) { const [cx, cy] = at(i, j); path(g, cx, cy, a); g.stroke(); }
   }, 2);
 }
-// square grid, cell c, the tile is n × n cells; node — a glowing dot on every crossing; lit — how many cells glow, in colors cols
-function gridTile(ctx, c, col, lw, n = 1, node = '', rnd = null, lit = 0, cols = []) {
+// square grid, cell c, the tile is n × n cells; lit — how many cells glow, in colors cols
+function gridTile(ctx, c, col, lw, n = 1, rnd = null, lit = 0, cols = []) {
   const t = c * n;
   return tile(ctx, t, t, (g) => {
     for (let i = 0; i < lit; i++) {
@@ -153,39 +160,33 @@ function gridTile(ctx, c, col, lw, n = 1, node = '', rnd = null, lit = 0, cols =
     }
     g.fillStyle = col;
     for (let i = 0; i < n; i++) { g.fillRect(0, i * c, t, lw); g.fillRect(i * c, 0, lw, t); }
-    if (node) for (let i = 0; i <= n; i++) for (let j = 0; j <= n; j++) {
-      const x = i * c + lw / 2, y = j * c + lw / 2;
-      blob(g, x, y, 9, node, 0.3); g.fillStyle = rgba(node, 0.75); g.beginPath(); g.arc(x, y, 1.9, 0, TAU); g.fill();
-    }
   }, 2);
 }
-const dotTile = (ctx, t, col, r) => tile(ctx, t, t, (g) => { g.fillStyle = col; g.beginPath(); g.arc(t / 2, t / 2, r, 0, TAU); g.fill(); });
-// out-of-focus lights: soft discs with a brighter rim
+// the "dots" of the dots backdrop are small plus marks: a round dot would pass for a crumb
+const dotTile = (ctx, t, col, r) => tile(ctx, t, t, (g) => { g.fillStyle = col; g.fillRect(t / 2 - r, t / 2 - 0.6, r * 2, 1.2); g.fillRect(t / 2 - 0.6, t / 2 - r, 1.2, r * 2); });
+// out-of-focus lights: soft discs with a brighter rim, several times larger than the largest crumb
 const bokeh = (rnd, n, cols) => (g, t) => {
   for (let i = 0; i < n; i++) {
-    const x = rnd() * t, y = rnd() * t, r = 14 + rnd() * rnd() * 34, c = cols[i % cols.length], a = 0.07 + rnd() * 0.1;
+    const x = rnd() * t, y = rnd() * t, r = 50 + rnd() * 70, c = cols[i % cols.length], a = 0.045 + rnd() * 0.055;
     wrapped(t, x, y, r + 2, (X, Y) => {
       g.beginPath(); g.arc(X, Y, r, 0, TAU); g.fillStyle = rgba(c, a); g.fill();
       g.strokeStyle = rgba(c, a * 1.3); g.lineWidth = 1.2; g.stroke();
     });
   }
 };
-// air bubbles: a thin ring with a glint
-const bubbles = (rnd, n, col) => (g, t) => {
+// plants: a few bent strokes from one root (seaweed, dry grass) — lines, not round spots
+const weeds = (rnd, n, cols, a) => (g, t) => {
+  g.lineCap = 'round';
   for (let i = 0; i < n; i++) {
-    const x = rnd() * t, y = rnd() * t, r = 2 + rnd() * rnd() * 9, a = 0.22 + rnd() * 0.2;
-    wrapped(t, x, y, r + 2, (X, Y) => {
-      g.beginPath(); g.arc(X, Y, r, 0, TAU); g.fillStyle = rgba(col, a * 0.18); g.fill(); g.strokeStyle = rgba(col, a); g.lineWidth = 1; g.stroke();
-      g.beginPath(); g.arc(X - r * 0.35, Y - r * 0.35, r * 0.22, 0, TAU); g.fillStyle = rgba(col, a * 1.6); g.fill();
+    const x = rnd() * t, y = rnd() * t, c = cols[i % cols.length], m = 3 + Math.floor(rnd() * 3), a0 = rnd() * TAU, bl = [];
+    for (let k = 0; k < m; k++) { const an = a0 + (k - m / 2) * 0.5 + rnd() * 0.3, l = 16 + rnd() * 20, bend = (rnd() - 0.5) * 16; bl.push([an, l, bend]); }
+    wrapped(t, x, y, 40, (X, Y) => {
+      g.strokeStyle = rgba(c, a); g.lineWidth = 2.6;
+      for (const [an, l, bend] of bl) {
+        const ex = X + Math.cos(an) * l, ey = Y + Math.sin(an) * l;
+        g.beginPath(); g.moveTo(X, Y); g.quadraticCurveTo((X + ex) / 2 - Math.sin(an) * bend, (Y + ey) / 2 + Math.cos(an) * bend, ex, ey); g.stroke();
+      }
     });
-  }
-};
-// little bushes: a handful of round blobs around a point (corals on the sea floor, dry grass on the sand)
-const tufts = (rnd, n, cols, a) => (g, t) => {
-  for (let i = 0; i < n; i++) {
-    const x = rnd() * t, y = rnd() * t, c = cols[i % cols.length], m = 5 + Math.floor(rnd() * 5), bl = [];
-    for (let k = 0; k < m; k++) { const an = rnd() * TAU, d = rnd() * 13; bl.push([Math.cos(an) * d, Math.sin(an) * d, 3 + rnd() * 5]); }
-    wrapped(t, x, y, 24, (X, Y) => { g.fillStyle = rgba(c, a); for (const [dx, dy, r] of bl) { g.beginPath(); g.arc(X + dx, Y + dy, r, 0, TAU); g.fill(); } });
   }
 };
 const both = (...fs) => (g, t) => { for (const f of fs) f(g, t); };
@@ -202,11 +203,11 @@ export function makeBackdrop(ctx, kind, seed, R, hue = 0) {
   const T = (hex) => tint(hex, hue), TS = (cols) => cols.map(T);
   const img = (k, ...a) => ({ img: macro(R, rnd, ...a), k }), pat = (k, p, more) => ({ p, k, ...more });
   let layers;
-  if (kind === 'grid') { // glowing patches far below, a wide lattice with lit cells, the arena's own lattice with lights on the crossings
+  if (kind === 'grid') { // glowing patches far below, a wide lattice with lit cells, the arena's own lattice
     layers = [
       img(0.6, T('#0A100F'), 200, 450, 1200, TS(['#0F5A46', '#12466E', '#4A5A14', '#4A1E66']), 0.55),
-      pat(0.3, gridTile(ctx, 136, T('#1F3A36'), 3, 6, '', rnd, 5, TS(['#3CE0A8', '#46B4FF', '#D8E64A']))),
-      pat(0, gridTile(ctx, 80, T('#31504A'), 1.5, 1, T('#7CF0C8'))),
+      pat(0.3, gridTile(ctx, 136, T('#1F3A36'), 3, 6, rnd, 5, TS(['#3CE0A8', '#46B4FF', '#D8E64A']))),
+      pat(0, gridTile(ctx, 80, T('#3A5E56'), 1.5)),
     ];
   } else if (kind === 'hex') { // a hive: honey glow below, a comb of large cells with some filled, the arena's own comb
     layers = [
@@ -217,30 +218,30 @@ export function makeBackdrop(ctx, kind, seed, R, hue = 0) {
   } else if (kind === 'space') {
     layers = [
       img(0, T('#0C1020'), 260, 350, 1100, TS(['#2A2160', '#173A5C', '#3A1E4E']), 0.55),
-      pat(0, tile(ctx, 863, 863, stars(rnd, 240, false, T('#9FB4FF'), T('#DCE4FF'), T('#EBF0FF')))),
-      pat(0.5, tile(ctx, 607, 607, stars(rnd, 60, true, T('#9FB4FF'), T('#DCE4FF'), T('#EBF0FF'))), { tw: true }), // distant stars
+      pat(0, tile(ctx, 863, 863, stars(rnd, 260, 0.72, 2.5, 6, T('#DCE4FF')))),
+      pat(0.5, tile(ctx, 607, 607, stars(rnd, 46, 0, 5, 11, T('#C4D2FF'))), { tw: true }), // distant stars
     ];
-  } else if (kind === 'sea') { // the deep floor, a shelf of stones and corals above it, glints and bubbles drifting over the arena
+  } else if (kind === 'sea') { // the deep floor, a shelf of dark stones and seaweed above it, glints drifting over the arena
     layers = [
       img(0.55, T('#06181E'), 300, 220, 650, TS(['#0E5560', '#04101A', '#124A6E', '#0C4A42']), 0.85),
-      pat(0.28, tile(ctx, 911, 911, both(pebbles(rnd, 48, T('#1C4048'), 0.6, 10), pebbles(rnd, 56, T('#3A666C'), 0.65, 4),
-        tufts(rnd, 13, TS(['#8A4A5E', '#8A6240', '#6E4E8A', '#3A7A68']), 0.42)), SOFT, '', 27)),
-      pat(0, tile(ctx, 457, 457, both(caustics(rnd, 16, T('#8CDCE6'), T('#AAEBF0')), bubbles(rnd, 26, T('#D2F6FA')))), { vx: 16, vy: -22, t: 457 }),
+      pat(0.28, tile(ctx, 911, 911, both(pebbles(rnd, 48, T('#04121A'), 0.5, 10), pebbles(rnd, 40, T('#051820'), 0.45, 5),
+        weeds(rnd, 16, TS(['#1E6A5A', '#2A6E7A', '#3A7A4A']), 0.55)), SOFT, '', 27)),
+      pat(0, tile(ctx, 457, 457, caustics(rnd, 16, T('#8CDCE6'), T('#AAEBF0'))), { vx: 16, vy: 10, t: 457 }),
     ];
   } else if (kind === 'sand') { // dunes and ripples lie on the arena, the wind carries shadows and dust above it
     const wt = 947;
     layers = [
       img(0, T('#2A2014'), 480, 220, 620, TS(['#4A3820', '#17110A', '#3E2E18', '#5A4426']), 0.85),
-      pat(0, tile(ctx, RIPPLE * 35, RIPPLE * 35, both(ripples(rnd, T('#6A5636')), pebbles(rnd, 58, T('#7A6644'), 0.7, 4),
-        tufts(rnd, 11, TS(['#6A7438', '#806436', '#566A40']), 0.5)), SOFT, '', 23)),
+      pat(0, tile(ctx, RIPPLE * 35, RIPPLE * 35, both(ripples(rnd, T('#6A5636')), pebbles(rnd, 58, T('#120C06'), 0.45, 4),
+        weeds(rnd, 12, TS(['#6A7438', '#806436', '#566A40']), 0.5)), SOFT, '', 23)),
       pat(-0.35, tile(ctx, wt, wt, wind(rnd, 18, T('#0E0A06'), T('#E6CC9A')), SHARP > 1 ? 0.5 : 1), { vx: 34, vy: 12, t: wt }),
     ];
   } else { // dots: colored patches far below, out-of-focus lights between, the arena's own dots
     const cols = TS(['#6E8CFF', '#D07AFF', '#5CE0C8', '#FFB05C', '#5CB4FF', '#FF7AA0']);
     layers = [
       img(0.6, T('#12141A'), 70, 1100, 2200, TS(['#3B4A8A', '#6A3B80', '#2E6A62', '#80522E', '#2E528A']), 0.55),
-      pat(0.3, tile(ctx, 733, 733, bokeh(rnd, 26, cols), SHARP, '', 31)),
-      pat(0, dotTile(ctx, 60, T('#3A434E'), 2.4)),
+      pat(0.3, tile(ctx, 1217, 1217, bokeh(rnd, 14, cols), 1, '', 31)),
+      pat(0, dotTile(ctx, 60, T('#3A434E'), 3.4)),
     ];
   }
   return { kind, hue, layers };
